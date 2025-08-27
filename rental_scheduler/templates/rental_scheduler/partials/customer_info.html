@@ -1,0 +1,75 @@
+{% load form_tags %}
+{% load static %}
+
+{% with input_classes="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-2 border-gray-300 rounded-md py-2.5" %}
+{% with label_classes="block text-sm font-medium text-gray-700" %}
+{% with error_classes="mt-2 text-sm text-red-600" %}
+
+<div class="form-card mb-6">
+    <h3 class="text-lg font-medium text-gray-900 mb-4">Customer Information</h3>
+
+    <div class="search-section">
+        <label for="customer_search" class="block text-sm font-medium mb-2">🔍 Search Existing Customer</label>
+        <div class="relative field-group">
+            <input type="text" id="customer_search" class="search-input shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm rounded-md py-2.5" placeholder="Type customer name or phone number to search..." autocomplete="new-password">
+            <div id="customer_search_results" class="absolute z-10 w-full bg-white shadow-lg rounded-md mt-1 hidden"></div>
+        </div>
+    </div>
+
+    {{ form.customer_id }}
+    <div class="form-grid">
+        <div class="field-group">
+            <label for="{{ form.customer_name.id_for_label }}" class="{{ label_classes }}">Name *</label>
+            <input type="text" name="{{ form.customer_name.name }}" id="{{ form.customer_name.id_for_label }}" class="{{ input_classes }}" value="{{ form.customer_name.value|default:'' }}" autocomplete="new-password" {% if form.customer_name.field.required %}required{% endif %}>
+            {% if form.customer_name.errors %}<p class="{{ error_classes }}">{{ form.customer_name.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+            <label for="{{ form.customer_phone.id_for_label }}" class="{{ label_classes }}">Phone</label>
+            <input type="text" name="{{ form.customer_phone.name }}" id="{{ form.customer_phone.id_for_label }}" class="{{ input_classes }}" value="{{ form.customer_phone.value|default:'' }}" autocomplete="new-password">
+            {% if form.customer_phone.errors %}<p class="{{ error_classes }}">{{ form.customer_phone.errors|join:", " }}</p>{% endif %}
+        </div>
+    </div>
+
+    <button type="button" id="additional-details-toggle" class="additional-details-toggle mt-4">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+        </svg>
+        Show Additional Details
+    </button>
+</div>
+
+<div id="additional-details" class="form-card toggle-section">
+    <div class="form-grid">
+        <div class="field-group">
+            <label for="{{ form.customer_street_address.id_for_label }}" class="{{ label_classes }}">Street Address</label>
+            <input type="text" name="{{ form.customer_street_address.name }}" id="{{ form.customer_street_address.id_for_label }}" class="{{ input_classes }}" value="{{ form.customer_street_address.value|default:'' }}" autocomplete="new-password">
+            {% if form.customer_street_address.errors %}<p class="{{ error_classes }}">{{ form.customer_street_address.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+            <label for="{{ form.customer_city.id_for_label }}" class="{{ label_classes }}">City</label>
+            <input type="text" name="{{ form.customer_city.name }}" id="{{ form.customer_city.id_for_label }}" class="{{ input_classes }}" value="{{ form.customer_city.value|default:'' }}" autocomplete="new-password">
+            {% if form.customer_city.errors %}<p class="{{ error_classes }}">{{ form.customer_city.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+            <label for="{{ form.customer_state.id_for_label }}" class="{{ label_classes }}">State</label>
+            <input type="text" name="{{ form.customer_state.name }}" id="{{ form.customer_state.id_for_label }}" class="{{ input_classes }}" value="{{ form.customer_state.value|default:'' }}" autocomplete="new-password">
+            {% if form.customer_state.errors %}<p class="{{ error_classes }}">{{ form.customer_state.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+            <label for="{{ form.customer_zip_code.id_for_label }}" class="{{ label_classes }}">ZIP Code</label>
+            <input type="text" name="{{ form.customer_zip_code.name }}" id="{{ form.customer_zip_code.id_for_label }}" class="{{ input_classes }}" value="{{ form.customer_zip_code.value|default:'' }}" autocomplete="new-password">
+            {% if form.customer_zip_code.errors %}<p class="{{ error_classes }}">{{ form.customer_zip_code.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+            <label for="{{ form.customer_po_number.id_for_label }}" class="{{ label_classes }}">PO Number</label>
+            <input type="text" name="{{ form.customer_po_number.name }}" id="{{ form.customer_po_number.id_for_label }}" class="{{ input_classes }}" value="{{ form.customer_po_number.value|default:'' }}" autocomplete="new-password">
+            {% if form.customer_po_number.errors %}<p class="{{ error_classes }}">{{ form.customer_po_number.errors|join:", " }}</p>{% endif %}
+        </div>
+    </div>
+</div>
+
+<script type="application/json" id="customer-info-context">{"customerIdInputId":"{{ form.customer_id.id_for_label }}","formFieldIds":{"name":"{{ form.customer_name.id_for_label }}","phone":"{{ form.customer_phone.id_for_label }}","street_address":"{{ form.customer_street_address.id_for_label }}","city":"{{ form.customer_city.id_for_label }}","state":"{{ form.customer_state.id_for_label }}","zip_code":"{{ form.customer_zip_code.id_for_label }}","po_number":"{{ form.customer_po_number.id_for_label }}"},"additionalDetailsValues":{"street_address":"{{ form.customer_street_address.value|default:''|escapejs }}","city":"{{ form.customer_city.value|default:''|escapejs }}","state":"{{ form.customer_state.value|default:''|escapejs }}","zip_code":"{{ form.customer_zip_code.value|default:''|escapejs }}","po_number":"{{ form.customer_po_number.value|default:''|escapejs }}"}}</script>
+
+{% endwith %}
+{% endwith %}
+{% endwith %}

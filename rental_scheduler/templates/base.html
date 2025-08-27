@@ -1,0 +1,184 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - GTS Rental Scheduler</title>
+
+    <!-- CSRF Token for HTMX -->
+    <meta name="csrf-token" content="{{ csrf_token }}">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'rental_scheduler/img/favicon-32x32.png' %}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'rental_scheduler/img/favicon-16x16.png' %}">
+    <link rel="icon" type="image/x-icon" href="{% static 'rental_scheduler/img/favicon.png' %}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'rental_scheduler/img/apple-touch-icon.png' %}">
+    <link rel="manifest" href="{% static 'rental_scheduler/img/site.webmanifest' %}">
+
+    <!-- Production Logger -->
+    <script src="{% static 'rental_scheduler/js/logger.js' %}"></script>
+
+    <!-- Centralized Configuration -->
+    <script src="{% static 'rental_scheduler/js/config.js' %}"></script>
+
+    <!-- HTMX -->
+    <script src="{% static 'rental_scheduler/js/htmx.min.js' %}"></script>
+
+    <!-- Tailwind CSS -->
+    <link href="{% static 'rental_scheduler/css/styles.css' %}" rel="stylesheet">
+
+    <!-- FullCalendar CSS -->
+    <link href="{% static 'rental_scheduler/css/fullcalendar.min.css' %}" rel="stylesheet">
+
+    <!-- Flatpickr CSS -->
+    <link rel="stylesheet" href="{% static 'rental_scheduler/css/flatpickr.min.css' %}">
+
+    <!-- Modern Form Styles -->
+    <link href="{% static 'rental_scheduler/css/form-modern.css' %}" rel="stylesheet">
+
+    <!-- Alpine.js x-cloak CSS -->
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
+
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body class="min-h-screen bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-zinc-800 shadow-lg">
+        <!-- Main Navigation -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                <!-- Left side - Logo -->
+                <div class="flex-shrink-0">
+                    <img src="{% static 'rental_scheduler/img/gts-logo.webp' %}" alt="GTS Logo" class="h-12 w-auto">
+                </div>
+
+                <!-- Center - Title -->
+                <div class="flex-grow flex justify-center">
+                    <div class="flex items-center">
+                        <span class="text-red-600 font-bold text-2xl">GTS</span>
+                        <span class="text-white font-bold text-xl ml-2">Rental Scheduler</span>
+                    </div>
+                </div>
+
+                <!-- Right side - Navigation -->
+                <div class="hidden md:flex items-center space-x-4">
+                    <a href="{% url 'rental_scheduler:home' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
+                        Calendar
+                    </a>
+                    <a href="{% url 'rental_scheduler:contract_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
+                        Contract List
+                    </a>
+                    <a href="{% url 'rental_scheduler:availability' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
+                        Availability
+                    </a>
+                    <!-- Settings Dropdown -->
+                    <div class="relative" x-data="{ open: false }">
+                        <button @click="open = !open" @click.away="open = false" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150 inline-flex items-center gap-1">
+                            <span>Settings</span>
+                            <svg class="w-4 h-4 transition-transform duration-200" :class="{ 'transform rotate-180': open }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div x-show="open" x-cloak class="absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100" role="menu">
+                            <div class="py-1">
+                                <a href="{% url 'rental_scheduler:settings_update' %}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-red-500" role="menuitem">System Settings</a>
+                                <a href="{% url 'rental_scheduler:category_list' %}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-red-500" role="menuitem">Trailer Categories</a>
+                                <a href="{% url 'rental_scheduler:trailer_list' %}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-red-500" role="menuitem">Trailers</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mobile menu button -->
+                <div class="md:hidden">
+                    <button type="button" @click="mobileMenuOpen = !mobileMenuOpen" class="text-gray-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-800 focus:ring-white" aria-controls="mobile-menu" aria-expanded="false">
+                        <span class="sr-only">Open main menu</span>
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile menu -->
+        <div class="md:hidden" x-show="mobileMenuOpen" x-cloak>
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                <a href="{% url 'rental_scheduler:home' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
+                    Calendar
+                </a>
+                <a href="{% url 'rental_scheduler:contract_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
+                    Contract List
+                </a>
+                <a href="{% url 'rental_scheduler:availability' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
+                    Availability
+                </a>
+                <!-- Mobile Settings Menu -->
+                <div x-data="{ settingsOpen: false }">
+                    <button @click="settingsOpen = !settingsOpen" class="w-full text-left text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
+                        <div class="flex justify-between items-center">
+                            <span>Settings</span>
+                            <svg class="h-4 w-4 transform" :class="{ 'rotate-180': settingsOpen }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                    </button>
+                    <div x-show="settingsOpen" x-cloak class="pl-4">
+                        <a href="{% url 'rental_scheduler:settings_update' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-sm font-medium">
+                            System Settings
+                        </a>
+                        <a href="{% url 'rental_scheduler:category_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-sm font-medium">
+                            Trailer Categories
+                        </a>
+                        <a href="{% url 'rental_scheduler:trailer_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-sm font-medium">
+                            Trailers
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="{% block main_container_class %}max-w-7xl{% endblock %} mx-auto py-6 sm:px-6 lg:px-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Alpine.js -->
+    <script src="{% static 'rental_scheduler/js/alpine.min.js' %}"></script>
+
+    <!-- FullCalendar JS -->
+    <script src="{% static 'rental_scheduler/js/fullcalendar.min.js' %}"></script>
+
+    <!-- Flatpickr JS -->
+    <script src="{% static 'rental_scheduler/js/flatpickr.min.js' %}"></script>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('layout', () => ({
+                mobileMenuOpen: false
+            }))
+        })
+
+        // Configure HTMX to include CSRF token in all requests
+        document.addEventListener('DOMContentLoaded', function () {
+            // Set up CSRF token for HTMX
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            document.body.addEventListener('htmx:configRequest', function (evt) {
+                evt.detail.headers['X-CSRFToken'] = csrfToken;
+            });
+        });
+    </script>
+
+    <!-- Custom JS -->
+    {% block extra_js %}{% endblock %}
+</body>
+
+</html>

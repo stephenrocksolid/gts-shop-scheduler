@@ -1,0 +1,22 @@
+{% extends "error/error_base.html" %}
+
+{% block error_title %}Page Not Found (404){% endblock %}
+
+{% block error_description %}
+The page you're looking for doesn't exist or has been moved.
+{% endblock %}
+
+{% block error_details %}
+<div class="space-y-2">
+    <p class="font-semibold">Error Details:</p>
+    <div class="text-sm">
+        <p><strong>Error Code:</strong> 404</p>
+        <p><strong>Timestamp:</strong> {{ timestamp }}</p>
+        <p><strong>Requested URL:</strong> {{ request_path }}</p>
+        <p><strong>Referrer:</strong> {{ referrer|default:"Direct access" }}</p>
+        {% if user.is_authenticated %}
+        <p><strong>User:</strong> {{ user.username }}</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

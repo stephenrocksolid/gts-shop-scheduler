@@ -1,0 +1,34 @@
+{% extends "error/error_base.html" %}
+
+{% block error_title %}Access Denied (403){% endblock %}
+
+{% block error_description %}
+You don't have permission to access this page.
+{% endblock %}
+
+{% block error_details %}
+<div class="space-y-2">
+    <p class="font-semibold">Error Details:</p>
+    <div class="text-sm">
+        <p><strong>Error Code:</strong> 403</p>
+        <p><strong>Timestamp:</strong> {{ timestamp }}</p>
+        <p><strong>Requested URL:</strong> {{ request_path }}</p>
+        <p><strong>Referrer:</strong> {{ referrer|default:"Direct access" }}</p>
+        {% if user.is_authenticated %}
+        <p><strong>User:</strong> {{ user.username }}</p>
+        {% endif %}
+        {% if debug and error_message %}
+        <div class="mt-4 p-2 bg-red-50 rounded">
+            <p class="font-semibold text-red-700">Error Message:</p>
+            <pre class="text-xs text-red-600 mt-2 whitespace-pre-wrap">{{ error_message }}</pre>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block error_icon %}
+<svg class="mx-auto h-12 w-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H8m4-6v4m4-10l-8 8L2 6l8-8 8 8z" />
+</svg>
+{% endblock %}

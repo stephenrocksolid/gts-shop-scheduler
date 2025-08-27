@@ -1,0 +1,4 @@
+---
+globs: *.html
+alwaysApply: false
+---

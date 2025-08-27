@@ -1,0 +1,47 @@
+{% extends "error/error_base.html" %}
+
+{% block error_title %}Server Error (500){% endblock %}
+
+{% block error_description %}
+An unexpected error occurred. Please report this issue to our support team.
+{% endblock %}
+
+{% block error_details %}
+<div class="space-y-2">
+    <p class="font-semibold">Error Details:</p>
+    <div class="text-sm">
+        <p><strong>Error Code:</strong> 500</p>
+        <p><strong>Timestamp:</strong> {{ timestamp }}</p>
+        <p><strong>Requested URL:</strong> {{ request_path }}</p>
+        <p><strong>Error ID:</strong> {{ error_id }}</p>
+        {% if user.is_authenticated %}
+        <p><strong>User:</strong> {{ user.username }}</p>
+        {% endif %}
+        {% if debug %}
+        <div class="mt-4 p-2 bg-red-50 rounded">
+            <p class="font-semibold text-red-700">Error Message:</p>
+            <pre class="text-xs text-red-600 mt-2 whitespace-pre-wrap">{{ error_message }}</pre>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Email report info -->
+<div class="mt-4 bg-green-50 border border-green-200 rounded-lg p-3">
+    <div class="flex items-center">
+        <svg class="h-4 w-4 text-green-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <div class="text-xs text-green-700">
+            <p class="font-semibold">Help Us Fix This Issue</p>
+            <p>Click the email button below to send a detailed error report including the last 500 lines of system logs to sales@rocksoliddata.solutions. Please allow up to 48 hours for a response.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block error_icon %}
+<svg class="mx-auto h-12 w-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+</svg>
+{% endblock %}

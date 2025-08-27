@@ -1,0 +1,32 @@
+{
+  "name": "gts-scheduler",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npx @tailwindcss/cli --cwd . -i ./src/css/main.css -o ./rental_scheduler/static/rental_scheduler/css/styles.css",
+    "watch": "npx @tailwindcss/cli --cwd . -i ./src/css/main.css -o ./rental_scheduler/static/rental_scheduler/css/styles.css --watch",
+    "start": "npm run watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joshuarocksolid/gts-rental-scheduler.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/joshuarocksolid/gts-rental-scheduler/issues"
+  },
+  "homepage": "https://github.com/joshuarocksolid/gts-rental-scheduler#readme",
+  "devDependencies": {
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^4.1.11"
+  },
+  "dependencies": {
+    "@tailwindcss/cli": "^4.1.11"
+  }
+}

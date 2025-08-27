@@ -1,0 +1,4 @@
+---
+globs: *.js
+alwaysApply: false
+---

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-100 py-6 flex flex-col justify-center sm:py-12">
+    <div class="relative py-3 sm:max-w-xl sm:mx-auto">
+        <div class="relative px-4 py-10 bg-white shadow-lg sm:rounded-3xl sm:p-20">
+            <div class="max-w-md mx-auto">
+                <div class="divide-y divide-gray-200">
+                    <div class="py-8 text-base leading-6 space-y-4 text-gray-700 sm:text-lg sm:leading-7">
+                        <!-- Error Icon -->
+                        <div class="text-center mb-8">
+                            {% block error_icon %}
+                            <svg class="mx-auto h-12 w-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            {% endblock %}
+                        </div>
+
+                        <!-- Error Title -->
+                        <div class="text-center">
+                            <h1 class="text-3xl font-bold text-gray-900 mb-2">
+                                {% block error_title %}Error{% endblock %}
+                            </h1>
+                            <p class="text-gray-600">
+                                {% block error_description %}An error has occurred.{% endblock %}
+                            </p>
+                        </div>
+
+                        <!-- Error Details -->
+                        <div class="mt-8 bg-gray-50 rounded-lg p-4" id="error-details">
+                            {% block error_details %}
+                            <div class="space-y-2">
+                                <p class="font-semibold">Error Details:</p>
+                                <div class="text-sm">
+                                    <p><strong>Error ID:</strong> {{ error_id }}</p>
+                                    <p><strong>Timestamp:</strong> {{ timestamp }}</p>
+                                    <p><strong>Requested URL:</strong> {{ request_path }}</p>
+                                </div>
+                            </div>
+                            {% endblock %}
+                        </div>
+
+                        <!-- Email notification info for server errors -->
+                        {% if error_code >= 500 %}
+                        <div class="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div class="flex items-center">
+                                <svg class="h-5 w-5 text-blue-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                </svg>
+                                <div class="text-sm text-blue-700">
+                                    <p class="font-semibold">Report This Error</p>
+                                    <p>Click the email button below to send an error report with system logs to our support team.</p>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Action buttons -->
+                        <div class="mt-6 flex flex-col sm:flex-row gap-3">
+                            <a href="/" class="flex-1 bg-blue-600 text-white text-center py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
+                                Return to Home
+                            </a>
+                            <button onclick="copyErrorDetails()" class="flex-1 bg-gray-600 text-white py-2 px-4 rounded-md hover:bg-gray-700 transition-colors">
+                                Copy Error Details
+                            </button>
+                        </div>
+
+                        <!-- Email button for server errors -->
+                        {% if error_code >= 500 %}
+                        <div class="mt-6 text-center">
+                            <a href="javascript:void(0)" id="email-error-link" class="inline-flex items-center px-6 py-3 text-white font-semibold rounded-lg shadow-lg transition-all duration-200 ease-in-out" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none;" onmouseover="this.style.background='linear-gradient(135deg, #059669 0%, #047857 100%)'; this.style.transform='scale(1.05)'" onmouseout="this.style.background='linear-gradient(135deg, #10b981 0%, #059669 100%)'; this.style.transform='scale(1)'" onclick="sendErrorReport()">
+                                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                </svg>
+                                Send Error Report with Logs
+                            </a>
+                        </div>
+                        <div id="email-feedback" class="mt-3 text-sm text-gray-600 text-center" style="display: none;">
+                            <p>📧 Opening your email client... If nothing happens, please check that you have a default email client configured.</p>
+                            <p class="mt-1">Alternatively, you can manually copy the error details above and send them to <strong>sales@rocksoliddata.solutions</strong></p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript for copy functionality and email link -->
+<script>
+    function copyErrorDetails() {
+        const errorDetails = document.getElementById('error-details').innerText;
+        navigator.clipboard.writeText(errorDetails).then(function () {
+            alert('Error details copied to clipboard!');
+        }, function (err) {
+            alert('Could not copy text: ', err);
+        });
+    }
+
+    function showEmailFeedback() {
+        const feedback = document.getElementById('email-feedback');
+        if (feedback) {
+            feedback.style.display = 'block';
+            // Hide the feedback after 10 seconds
+            setTimeout(() => {
+                feedback.style.display = 'none';
+            }, 10000);
+        }
+    }
+
+    function sendErrorReport() {
+        showEmailFeedback();
+        const csrftoken = document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1] || '';
+        fetch('/api/send-error-report/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ error_code: '{{ error_code }}', error_id: '{{ error_id }}' })
+        }).then(() => { }).catch(() => { });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+
+    });
+</script>
+{% endblock %}

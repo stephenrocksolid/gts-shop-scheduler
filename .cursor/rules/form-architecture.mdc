@@ -1,0 +1,4 @@
+---
+globs: *.html,*.js,*.py
+alwaysApply: false
+---
