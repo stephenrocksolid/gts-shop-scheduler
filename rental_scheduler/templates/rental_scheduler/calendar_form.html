@@ -1,0 +1,159 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .color-preview {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        border: 2px solid #ddd;
+        display: inline-block;
+        margin-left: 10px;
+        vertical-align: middle;
+    }
+    .color-input {
+        display: flex;
+        align-items: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
+            <p class="text-gray-600 mt-2">Configure calendar settings for organizing jobs and events.</p>
+        </div>
+
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <form method="post" class="space-y-6">
+                {% csrf_token %}
+                
+                <!-- Name Field -->
+                <div>
+                    <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Calendar Name *
+                    </label>
+                    <input type="text" 
+                           name="{{ form.name.name }}" 
+                           id="{{ form.name.id_for_label }}"
+                           value="{{ form.name.value|default:'' }}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="e.g., Shop, Mobile Unit A"
+                           required>
+                    {% if form.name.errors %}
+                        <div class="mt-1 text-sm text-red-600">
+                            {% for error in form.name.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    {% if form.name.help_text %}
+                        <p class="mt-1 text-sm text-gray-500">{{ form.name.help_text }}</p>
+                    {% endif %}
+                </div>
+
+                <!-- Color Field -->
+                <div>
+                    <label for="{{ form.color.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Calendar Color *
+                    </label>
+                    <div class="color-input">
+                        <input type="color" 
+                               name="{{ form.color.name }}" 
+                               id="{{ form.color.id_for_label }}"
+                               value="{{ form.color.value|default:'#3B82F6' }}"
+                               class="w-16 h-10 border border-gray-300 rounded-md cursor-pointer"
+                               required>
+                        <span class="color-preview" id="color-preview" style="background-color: {{ form.color.value|default:'#3B82F6' }};"></span>
+                        <input type="text" 
+                               value="{{ form.color.value|default:'#3B82F6' }}"
+                               class="ml-3 flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="#3B82F6"
+                               id="color-text"
+                               pattern="^#[0-9A-Fa-f]{6}$"
+                               title="Enter a valid hex color code (e.g., #3B82F6)">
+                    </div>
+                    {% if form.color.errors %}
+                        <div class="mt-1 text-sm text-red-600">
+                            {% for error in form.color.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    {% if form.color.help_text %}
+                        <p class="mt-1 text-sm text-gray-500">{{ form.color.help_text }}</p>
+                    {% endif %}
+                </div>
+
+                <!-- Active Status Field -->
+                <div>
+                    <div class="flex items-center">
+                        <input type="checkbox" 
+                               name="{{ form.is_active.name }}" 
+                               id="{{ form.is_active.id_for_label }}"
+                               {% if form.is_active.value %}checked{% endif %}
+                               class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                        <label for="{{ form.is_active.id_for_label }}" class="ml-2 block text-sm text-gray-900">
+                            Active Calendar
+                        </label>
+                    </div>
+                    {% if form.is_active.errors %}
+                        <div class="mt-1 text-sm text-red-600">
+                            {% for error in form.is_active.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    {% if form.is_active.help_text %}
+                        <p class="mt-1 text-sm text-gray-500">{{ form.is_active.help_text }}</p>
+                    {% endif %}
+                </div>
+
+                <!-- Form Actions -->
+                <div class="flex justify-end space-x-4 pt-6 border-t border-gray-200">
+                    <a href="{% url 'rental_scheduler:calendar_list' %}" 
+                       class="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-200">
+                        Cancel
+                    </a>
+                    <button type="submit" 
+                            class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-200">
+                        {% if object %}Update{% else %}Create{% endif %} Calendar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const colorInput = document.getElementById('{{ form.color.id_for_label }}');
+    const colorText = document.getElementById('color-text');
+    const colorPreview = document.getElementById('color-preview');
+    
+    // Update text input and preview when color picker changes
+    colorInput.addEventListener('input', function() {
+        colorText.value = this.value;
+        colorPreview.style.backgroundColor = this.value;
+    });
+    
+    // Update color picker and preview when text input changes
+    colorText.addEventListener('input', function() {
+        const value = this.value;
+        if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+            colorInput.value = value;
+            colorPreview.style.backgroundColor = value;
+        }
+    });
+    
+    // Initialize preview
+    colorPreview.style.backgroundColor = colorInput.value;
+});
+</script>
+{% endblock %}
+

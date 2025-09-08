@@ -3,121 +3,555 @@
 
 {% block extra_css %}
 <link href="{% static 'rental_scheduler/css/calendar.css' %}" rel="stylesheet">
+<link href="{% static 'rental_scheduler/css/job_calendar.css' %}" rel="stylesheet">
+<style>
+/* Status indicator styles for calendar events */
+.status-pending {
+    @apply bg-yellow-400;
+}
+
+.status-confirmed {
+    @apply bg-blue-500;
+}
+
+.status-in_progress {
+    @apply bg-orange-500;
+}
+
+.status-completed {
+    @apply bg-green-500;
+}
+
+/* Responsive adjustments for compact toolbar */
+@media (max-width: 768px) {
+    .flex-wrap {
+        @apply flex-col items-start gap-2;
+    }
+}
+</style>
 {% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <div class="calendar-container">
-        <!-- Calendar Header -->
-        <div class="calendar-header mb-6">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold text-gray-900">Rental Calendar</h2>
-                <a href="{% url 'rental_scheduler:contract_create' %}?next={% url 'rental_scheduler:home' %}" class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    <svg class="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-                    </svg>
-                    New Contract
-                </a>
+<!-- Compact Calendar Toolbar -->
+<div class="px-6 py-2 mb-3 flex flex-col gap-3">
+    <!-- Row 1: Left = Filter groups, Right = Actions -->
+    <div class="flex items-center justify-between gap-3">
+        <!-- Filters group -->
+        <div class="flex flex-wrap items-center gap-3">
+            <!-- Calendars -->
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-medium text-gray-500">Calendars:</span>
+                
+                {% for calendar in calendars %}
+                <button
+                    class="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border shadow-sm transition-colors duration-200"
+                    data-active="{% if calendar in selected_calendars %}true{% else %}true{% endif %}"
+                    data-calendar-id="{{ calendar.id }}"
+                    hx-get="{% url 'rental_scheduler:calendar' %}"
+                    hx-vals='js:{"cal":"{{ calendar.id }}","status":getActiveStatuses(),"toggle":"cal"}'
+                    hx-target="#calendar-container"
+                    hx-swap="innerHTML"
+                    onclick="toggleCalendarFilter(this)">
+                    <span class="w-2.5 h-2.5 rounded-full" style="background-color: {{ calendar.color|default:'#ef4444' }};"></span>
+                    {{ calendar.name }}
+                </button>
+                {% endfor %}
+            </div>
+
+            <!-- Divider -->
+            <div class="h-6 w-px bg-gray-200"></div>
+
+            <!-- Status -->
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-medium text-gray-500">Status:</span>
+                
+                {% for status_value, status_display in status_choices %}
+                <button
+                    class="px-3 py-1.5 text-sm rounded-lg border shadow-sm capitalize transition-colors duration-200"
+                    data-active="{% if status_value in selected_statuses %}true{% else %}true{% endif %}"
+                    data-status="{{ status_value }}"
+                    hx-get="{% url 'rental_scheduler:calendar' %}"
+                    hx-vals='js:{"status":"{{ status_value }}","cal":getActiveCalendars(),"toggle":"status"}'
+                    hx-target="#calendar-container"
+                    hx-swap="innerHTML"
+                    onclick="toggleStatusFilter(this)">
+                    {{ status_display }}
+                </button>
+                {% endfor %}
             </div>
         </div>
 
-        <!-- Calendar Filters -->
-        <div class="calendar-filters grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            <!-- Category Filter -->
-            <div class="flex justify-center">
-                <div class="w-full">
-                    <label for="category-filter" class="block text-sm font-medium text-gray-700">
-                        Category
-                    </label>
-                    <div class="mt-1">
-                        <select id="category-filter" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-2 border-gray-300 rounded-md py-2.5">
-                            <option value="">All Categories</option>
-                            {% for category in categories %}
-                            <option value="{{ category.id }}">{{ category.category }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-            </div>
+        <!-- Actions -->
+        <div class="flex items-center gap-2">
+            <a href="{% url 'rental_scheduler:job_create' %}?next={% url 'rental_scheduler:calendar' %}"
+               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white shadow hover:bg-blue-700 transition-colors duration-200">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule='evenodd' d='M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z' clip-rule='evenodd'/>
+                </svg>
+                <span>New Job</span>
+            </a>
+            <a href="{% url 'rental_scheduler:job_list' %}"
+               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors duration-200">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule='evenodd' d='M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z' clip-rule='evenodd'/>
+                </svg>
+                <span>Job List</span>
+            </a>
+        </div>
+    </div>
 
-            <!-- Trailer Filter -->
-            <div class="flex justify-center">
-                <div class="w-full">
-                    <label for="trailer-filter" class="block text-sm font-medium text-gray-700">
-                        Trailer
-                    </label>
-                    <div class="mt-1">
-                        <select id="trailer-filter" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-2 border-gray-300 rounded-md py-2.5 min-w-0" disabled>
-                            <option value="">Select a category first</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Status Filter -->
-            <div class="flex justify-center">
-                <div class="w-full">
-                    <label for="status-filter" class="block text-sm font-medium text-gray-700">
-                        Status
-                    </label>
-                    <div class="mt-1">
-                        <select id="status-filter" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-2 border-gray-300 rounded-md py-2.5">
-                            <option value="">All Statuses</option>
-                            <option value="pending">Pending</option>
-                            <option value="picked_up">Picked Up</option>
-                            <option value="returned">Returned</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
+    <!-- Row 2: Navigation (arrows/today on left; view toggle on right) -->
+    <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+            <button class="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 shadow-sm transition-colors duration-200"
+                    onclick="previousMonth()">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+            </button>
+            <button class="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 shadow-sm transition-colors duration-200"
+                    onclick="nextMonth()">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                </svg>
+            </button>
+            <button class="px-3 py-1.5 rounded-lg border bg-gray-100 hover:bg-gray-200 shadow-sm transition-colors duration-200"
+                    onclick="goToToday()">
+                Today
+            </button>
         </div>
 
-        <!-- Legend and Instructions -->
-        <div class="mb-6 flex justify-between items-center">
-            <!-- Status Legend -->
-            <div class="flex gap-6">
-                <div class="flex items-center space-x-2">
-                    <div class="w-4 h-4 bg-amber-700 rounded"></div>
-                    <span class="text-sm text-gray-600">Pending</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <div class="w-4 h-4 bg-green-600 rounded"></div>
-                    <span class="text-sm text-gray-600">Picked Up</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <div class="w-4 h-4 bg-blue-500 rounded"></div>
-                    <span class="text-sm text-gray-600">Returned</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <div class="w-4 h-4 bg-fuchsia-600 rounded"></div>
-                    <span class="text-sm text-gray-600">Overdue</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <div class="w-4 h-4 bg-red-600 rounded"></div>
-                    <span class="text-sm text-gray-600">Service</span>
-                </div>
-            </div>
-
-            <!-- Usage Instructions -->
-            <div>
-                <p class="text-sm text-gray-500">
-                    <span class="font-medium">Single click</span> contracts to update status •
-                    <span class="font-medium">Double click</span> events to edit
-                </p>
-            </div>
-        </div>
-
-        <!-- Calendar Container -->
-        <div id="calendar"></div>
-
-        <!-- Loading State -->
-        <div id="calendar-loading" class="calendar-loading hidden">
-            <div class="calendar-loading-spinner"></div>
+        <!-- Segmented control -->
+        <div class="inline-flex rounded-lg border bg-white shadow-sm overflow-hidden">
+            <button class="px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle"
+                    data-view="dayGridMonth"
+                    data-active="true">
+                Month
+            </button>
+            <button class="px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle"
+                    data-view="timeGridWeek"
+                    data-active="false">
+                Week
+            </button>
+            <button class="px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle"
+                    data-view="timeGridDay"
+                    data-active="false">
+                Day
+            </button>
         </div>
     </div>
 </div>
+
+<!-- Calendar Container -->
+<div id="calendar-container" class="calendar-main-container">
+    <div id="calendar" class="calendar-wrapper"></div>
+    
+    <!-- Loading State -->
+    <div id="calendar-loading" class="calendar-loading hidden">
+        {% include "rental_scheduler/components/loading.html" with 
+            type="spinner" 
+            size="lg" 
+            text="Loading calendar..." %}
+    </div>
+</div>
+
+<!-- Quick Actions Modal -->
+<div id="quick-actions-modal" x-data="quickActionsModal()" 
+     x-show="isOpen" 
+     x-cloak
+     class="fixed inset-0 z-50 overflow-y-auto"
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-200"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0">
+    
+    <!-- Background overlay -->
+    <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="close()"></div>
+    
+    <!-- Modal panel -->
+    <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+        <div class="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg"
+             x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+             x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+             x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95">
+            
+            <!-- Header -->
+            <div class="bg-gray-50 px-4 py-3 sm:px-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-medium leading-6 text-gray-900">Quick Actions</h3>
+                    <button @click="close()" type="button" class="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                        <span class="sr-only">Close</span>
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Content -->
+            <div class="px-4 py-5 sm:p-6">
+                <div class="quick-actions-content">
+                    <div class="job-info mb-4">
+                        <h4 class="text-lg font-medium text-gray-900 mb-2" id="modal-job-title"></h4>
+                        <p class="text-sm text-gray-600" id="modal-job-details"></p>
+                    </div>
+                    
+                    <div class="status-actions mb-4">
+                        <h5 class="text-sm font-medium text-gray-700 mb-2">Update Status</h5>
+                        <div class="grid grid-cols-2 gap-2">
+                            {% for status_value, status_display in status_choices %}
+                            <button class="status-action-btn status-{{ status_value|lower }}"
+                                    data-status="{{ status_value }}"
+                                    onclick="updateJobStatus('{{ status_value }}')">
+                                {% include "rental_scheduler/components/status_pill.html" with status=status_display %}
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <button class="action-btn edit-btn" onclick="editJob()">
+                            <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
+                            </svg>
+                            Edit Job
+                        </button>
+                        <button class="action-btn view-btn" onclick="viewJob()">
+                            <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                                <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
+                            </svg>
+                            View Details
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                {% include "rental_scheduler/components/button.html" with 
+                    text="Close" 
+                    variant="outline" 
+                    size="md"
+                    onclick="closeQuickActions()" %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status Update Modal -->
+<div id="status-update-modal" x-data="statusUpdateModal()" 
+     x-show="isOpen" 
+     x-cloak
+     class="fixed inset-0 z-50 overflow-y-auto"
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-200"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0">
+    
+    <!-- Background overlay -->
+    <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="close()"></div>
+    
+    <!-- Modal panel -->
+    <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+        <div class="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg"
+             x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+             x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+             x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95">
+            
+            <!-- Header -->
+            <div class="bg-gray-50 px-4 py-3 sm:px-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-medium leading-6 text-gray-900">Update Job Status</h3>
+                    <button @click="close()" type="button" class="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                        <span class="sr-only">Close</span>
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Content -->
+            <div class="px-4 py-5 sm:p-6">
+                <form id="status-update-form" class="status-update-form">
+                    <div class="form-group mb-4">
+                        <label for="new-status" class="form-label">New Status</label>
+                        <select id="new-status" name="status" class="form-input" required>
+                            {% for status_value, status_display in status_choices %}
+                            <option value="{{ status_value }}">{{ status_display }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="form-group mb-4">
+                        <label for="status-notes" class="form-label">Notes (Optional)</label>
+                        <textarea id="status-notes" name="notes" class="form-input" rows="3" 
+                                  placeholder="Add any notes about this status change..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="send-notification" name="send_notification" class="mr-2">
+                            Send notification to customer
+                        </label>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Footer -->
+            <div class="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                {% include "rental_scheduler/components/button.html" with 
+                    text="Cancel" 
+                    variant="outline" 
+                    size="md"
+                    onclick="closeStatusUpdate()" %}
+                {% include "rental_scheduler/components/button.html" with 
+                    text="Update Status" 
+                    variant="primary" 
+                    size="md"
+                    onclick="submitStatusUpdate()" %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Calendar configuration and data
+window.calendarConfig = {
+    eventsUrl: "{% url 'rental_scheduler:job_calendar_data' %}",
+    jobUpdateUrl: "{% url 'rental_scheduler:update_job_status' 0 %}".replace('/0/', '/'),
+    jobDetailUrl: "{% url 'rental_scheduler:job_detail' 0 %}".replace('/0/', '/'),
+    jobEditUrl: "{% url 'rental_scheduler:job_update' 0 %}".replace('/0/', '/'),
+    csrfToken: "{{ csrf_token }}",
+    calendars: {{ calendars|safe }},
+    statusChoices: {{ status_choices|safe }},
+    currentFilters: {
+        calendar: "{{ request.GET.calendar|default:'' }}",
+        status: "{{ request.GET.status|default:'' }}",
+        search: "{{ request.GET.search|default:'' }}"
+    }
+};
+
+// Quick actions modal functionality
+function quickActionsModal() {
+    return {
+        isOpen: false,
+        currentJob: null,
+        
+        open(jobData) {
+            this.currentJob = jobData;
+            this.isOpen = true;
+            this.updateModalContent();
+        },
+        
+        close() {
+            this.isOpen = false;
+            this.currentJob = null;
+        },
+        
+        updateModalContent() {
+            if (this.currentJob) {
+                document.getElementById('modal-job-title').textContent = this.currentJob.title;
+                document.getElementById('modal-job-details').textContent = 
+                    `${this.currentJob.customer} • ${this.currentJob.start_time}`;
+            }
+        }
+    }
+}
+
+// Status update modal functionality
+function statusUpdateModal() {
+    return {
+        isOpen: false,
+        currentJobId: null,
+        
+        open(jobId) {
+            this.currentJobId = jobId;
+            this.isOpen = true;
+        },
+        
+        close() {
+            this.isOpen = false;
+            this.currentJobId = null;
+            document.getElementById('status-update-form').reset();
+        }
+    }
+}
+
+// Global functions for modal interactions
+function openQuickActions(jobData) {
+    document.getElementById('quick-actions-modal').__x.$data.open(jobData);
+}
+
+function closeQuickActions() {
+    document.getElementById('quick-actions-modal').__x.$data.close();
+}
+
+function openStatusUpdate(jobId) {
+    document.getElementById('status-update-modal').__x.$data.open(jobId);
+}
+
+function closeStatusUpdate() {
+    document.getElementById('status-update-modal').__x.$data.close();
+}
+
+function updateJobStatus(status) {
+    const jobId = document.getElementById('quick-actions-modal').__x.$data.currentJob?.id;
+    if (jobId) {
+        openStatusUpdate(jobId);
+        document.getElementById('new-status').value = status;
+        closeQuickActions();
+    }
+}
+
+function editJob() {
+    const jobId = document.getElementById('quick-actions-modal').__x.$data.currentJob?.id;
+    if (jobId) {
+        window.location.href = window.calendarConfig.jobEditUrl + jobId + '/';
+    }
+}
+
+function viewJob() {
+    const jobId = document.getElementById('quick-actions-modal').__x.$data.currentJob?.id;
+    if (jobId) {
+        window.location.href = window.calendarConfig.jobDetailUrl + jobId + '/';
+    }
+}
+
+function submitStatusUpdate() {
+    const form = document.getElementById('status-update-form');
+    const formData = new FormData(form);
+    const jobId = document.getElementById('status-update-modal').__x.$data.currentJobId;
+    
+    if (!jobId) return;
+    
+    formData.append('job_id', jobId);
+    formData.append('csrfmiddlewaretoken', window.calendarConfig.csrfToken);
+    
+    fetch(window.calendarConfig.jobUpdateUrl, {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success message
+            if (window.layout && window.layout.showToast) {
+                window.layout.showToast('Job status updated successfully', 'success');
+            }
+            
+            // Refresh calendar
+            if (window.calendar && window.calendar.refetchEvents) {
+                window.calendar.refetchEvents();
+            }
+            
+            closeStatusUpdate();
+        } else {
+            // Show error message
+            if (window.layout && window.layout.showToast) {
+                window.layout.showToast(data.error || 'Failed to update job status', 'error');
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error updating job status:', error);
+        if (window.layout && window.layout.showToast) {
+            window.layout.showToast('Network error occurred', 'error');
+        }
+    });
+}
+
+// Helpers for hx-vals (build comma-separated lists of active toggles)
+function getActiveCalendars() {
+    return Array.from(document.querySelectorAll('[data-calendar-id][data-active="true"]'))
+        .map(btn => btn.getAttribute('data-calendar-id'))
+        .filter(Boolean)
+        .join(',');
+}
+
+function getActiveStatuses() {
+    return Array.from(document.querySelectorAll('[data-status][data-active="true"]'))
+        .map(btn => btn.getAttribute('data-status'))
+        .filter(Boolean)
+        .join(',');
+}
+
+// Toggle filter functions
+function toggleCalendarFilter(button) {
+    const isActive = button.getAttribute('data-active') === 'true';
+    button.setAttribute('data-active', isActive ? 'false' : 'true');
+    updateToggleButtonStyles(button);
+}
+
+function toggleStatusFilter(button) {
+    const isActive = button.getAttribute('data-active') === 'true';
+    button.setAttribute('data-active', isActive ? 'false' : 'true');
+    updateToggleButtonStyles(button);
+}
+
+function updateToggleButtonStyles(button) {
+    const isActive = button.getAttribute('data-active') === 'true';
+    const isCalendar = button.hasAttribute('data-calendar-id');
+    
+    if (isActive) {
+        if (isCalendar) {
+            // Get the calendar color from the color dot
+            const colorDot = button.querySelector('.w-2\\.5');
+            const color = colorDot ? colorDot.style.backgroundColor : '#ef4444';
+            button.className = `inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border shadow-sm transition-colors duration-200 text-white`;
+            button.style.backgroundColor = color;
+        } else {
+            button.className = `px-3 py-1.5 text-sm rounded-lg border shadow-sm capitalize transition-colors duration-200 bg-gray-900 text-white`;
+        }
+    } else {
+        button.className = `${isCalendar ? 'inline-flex items-center gap-2 ' : ''}px-3 py-1.5 text-sm rounded-lg border shadow-sm ${isCalendar ? '' : 'capitalize '}transition-colors duration-200 bg-gray-100 text-gray-700`;
+        if (isCalendar) {
+            button.style.backgroundColor = '';
+        }
+    }
+}
+
+// Initialize toggle button styles on page load
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('[data-active]').forEach(updateToggleButtonStyles);
+    
+    // View toggle functionality
+    document.querySelectorAll('.view-toggle').forEach(button => {
+        button.addEventListener('click', function() {
+            // Update active states
+            document.querySelectorAll('.view-toggle').forEach(btn => {
+                btn.setAttribute('data-active', 'false');
+                btn.className = 'px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle';
+            });
+            
+            this.setAttribute('data-active', 'true');
+            this.className = 'px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle bg-gray-900 text-white';
+            
+            // Change calendar view
+            const view = this.getAttribute('data-view');
+            if (window.calendar) {
+                window.calendar.changeView(view);
+            }
+        });
+    });
+});
+</script>
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'rental_scheduler/js/calendar.js' %}"></script>
+<script src="{% static 'rental_scheduler/js/job_calendar.js' %}"></script>
 {% endblock %}

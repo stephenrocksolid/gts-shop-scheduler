@@ -1,0 +1,413 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
+            <div class="flex space-x-3">
+                <div class="relative" x-data="{ open: false }">
+                    <button @click="open = !open" 
+                            class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 print:hidden">
+                        Print Options ▼
+                    </button>
+                    <div x-show="open" @click.away="open = false" 
+                         class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50">
+                        <a href="{% url 'rental_scheduler:workorder_print' work_order.pk %}" 
+                           class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            Print Internal Copy
+                        </a>
+                        <a href="{% url 'rental_scheduler:workorder_customer_print' work_order.pk %}" 
+                           class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            Print Customer Copy
+                        </a>
+                    </div>
+                </div>
+                <a href="{% url 'rental_scheduler:workorder_update' work_order.pk %}" 
+                   class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Edit Work Order
+                </a>
+                <a href="{% url 'rental_scheduler:invoice_create_from_wo' work_order.pk %}" 
+                   class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Create Invoice
+                </a>
+                <a href="{% url 'rental_scheduler:workorder_list' %}" 
+                   class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Back to Work Orders
+                </a>
+            </div>
+        </div>
+
+        <!-- Toast Messages -->
+        <div id="toast-container" class="fixed top-4 right-4 z-50"></div>
+
+        <!-- Work Order Information -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            <!-- Left Column - Work Order Details -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Work Order Header -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-900">{{ work_order.wo_number }}</h2>
+                            <p class="text-gray-600">Work Order Date: {{ work_order.wo_date|date:"F j, Y" }}</p>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-bold text-blue-600">${{ total_amount|floatformat:2 }}</div>
+                            <div class="text-sm text-gray-500">{{ line_count }} line item{{ line_count|pluralize }}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Job Information -->
+                    <div class="border-t border-gray-200 pt-4">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Associated Job</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Customer:</span>
+                                <span class="ml-2 text-gray-900">{{ work_order.job.display_name }}</span>
+                            </div>
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Trailer:</span>
+                                <span class="ml-2 text-gray-900">{{ work_order.job.trailer.number }} - {{ work_order.job.trailer.model }}</span>
+                            </div>
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Job Status:</span>
+                                <span class="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                    {% if work_order.job.status == 'scheduled' %}bg-blue-100 text-blue-800
+                                    {% elif work_order.job.status == 'in_progress' %}bg-yellow-100 text-yellow-800
+                                    {% elif work_order.job.status == 'completed' %}bg-green-100 text-green-800
+                                    {% elif work_order.job.status == 'canceled' %}bg-red-100 text-red-800{% endif %}">
+                                    {{ work_order.job.get_status_display }}
+                                </span>
+                            </div>
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Job Date:</span>
+                                <span class="ml-2 text-gray-900">{{ work_order.job.start_dt|date:"M j, Y" }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {% if work_order.notes %}
+                        <div class="border-t border-gray-200 pt-4 mt-4">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-2">Notes</h3>
+                            <div class="bg-gray-50 p-3 rounded-md text-gray-900 whitespace-pre-wrap">{{ work_order.notes }}</div>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <!-- Repair List Table -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-semibold text-gray-900">Repair List</h3>
+                        <button onclick="showAddLineForm()" 
+                                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                            <i class="fas fa-plus mr-2"></i>Add Line Item
+                        </button>
+                    </div>
+                    
+                    <!-- Add Line Form (Hidden by default) -->
+                    <div id="add-line-form" class="hidden mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                        <h4 class="text-lg font-medium text-gray-900 mb-3">Add New Line Item</h4>
+                        <form id="line-form" class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                            <div>
+                                <label for="item_code" class="block text-sm font-medium text-gray-700 mb-1">Item Code</label>
+                                <input type="text" id="item_code" name="item_code" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="Part #">
+                            </div>
+                            <div class="md:col-span-2">
+                                <label for="description" class="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+                                <input type="text" id="description" name="description" required
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="Description of work or item">
+                            </div>
+                            <div>
+                                <label for="qty" class="block text-sm font-medium text-gray-700 mb-1">Qty</label>
+                                <input type="number" id="qty" name="qty" value="1" step="0.01" min="0"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       onchange="calculateLineTotal()">
+                            </div>
+                            <div>
+                                <label for="rate" class="block text-sm font-medium text-gray-700 mb-1">Rate</label>
+                                <input type="number" id="rate" name="rate" value="0" step="0.01" min="0"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       onchange="calculateLineTotal()">
+                            </div>
+                            <div class="md:col-span-3 flex space-x-3">
+                                <button type="submit" 
+                                        class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                                    <i class="fas fa-save mr-2"></i>Save Line Item
+                                </button>
+                                <button type="button" onclick="hideAddLineForm()"
+                                        class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                                    Cancel
+                                </button>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Line Total</label>
+                                <div id="line-total-preview" class="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md text-gray-900 font-medium">
+                                    $0.00
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <!-- Lines Table -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Code</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200" id="lines-table-body">
+                                {% for line in lines %}
+                                    {% include 'rental_scheduler/partials/work_order_line.html' with line=line work_order=work_order %}
+                                {% empty %}
+                                    <tr>
+                                        <td colspan="6" class="px-6 py-4 text-center text-gray-500">
+                                            <div class="flex flex-col items-center py-8">
+                                                <i class="fas fa-tools text-4xl text-gray-300 mb-4"></i>
+                                                <p class="text-lg font-medium text-gray-500">No line items yet</p>
+                                                <p class="text-sm text-gray-400">Click "Add Line Item" to get started</p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot class="bg-gray-50">
+                                <tr>
+                                    <td colspan="4" class="px-6 py-3 text-right text-sm font-medium text-gray-900">Total:</td>
+                                    <td class="px-6 py-3 text-sm font-bold text-gray-900" id="total-amount">${{ total_amount|floatformat:2 }}</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column - Actions and Info -->
+            <div class="space-y-6">
+                <!-- Quick Actions -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+                    <div class="space-y-3">
+                        <a href="{% url 'rental_scheduler:workorder_update' work_order.pk %}" 
+                           class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 text-center block">
+                            <i class="fas fa-edit mr-2"></i>Edit Work Order
+                        </a>
+                        <a href="{% url 'rental_scheduler:invoice_create_from_wo' work_order.pk %}" 
+                           class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 text-center block">
+                            <i class="fas fa-file-invoice mr-2"></i>Create Invoice
+                        </a>
+                        <div class="relative" x-data="{ open: false }">
+                            <button @click="open = !open" 
+                                    class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 print:hidden">
+                                <i class="fas fa-print mr-2"></i>Print Options
+                            </button>
+                            <div x-show="open" @click.away="open = false" 
+                                 class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50">
+                                <a href="{% url 'rental_scheduler:workorder_print' work_order.pk %}" 
+                                   class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <i class="fas fa-print mr-2"></i>Internal Copy
+                                </a>
+                                <a href="{% url 'rental_scheduler:workorder_customer_print' work_order.pk %}" 
+                                   class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <i class="fas fa-user mr-2"></i>Customer Copy
+                                </a>
+                            </div>
+                        </div>
+                        <a href="{% url 'rental_scheduler:workorder_delete' work_order.pk %}" 
+                           class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 text-center block">
+                            <i class="fas fa-trash mr-2"></i>Delete Work Order
+                        </a>
+                    </div>
+                </div>
+
+                <!-- System Information -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">System Information</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Created:</span>
+                            <span class="ml-2 text-gray-900">{{ work_order.created_at|date:"F j, Y g:i A" }}</span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Last Updated:</span>
+                            <span class="ml-2 text-gray-900">{{ work_order.updated_at|date:"F j, Y g:i A" }}</span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Line Items:</span>
+                            <span class="ml-2 text-gray-900">{{ line_count }}</span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Total Amount:</span>
+                            <span class="ml-2 text-gray-900 font-bold">${{ total_amount|floatformat:2 }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Print Styles -->
+<style>
+    @media print {
+        .print\\:hidden { display: none !important; }
+        body { margin: 0; padding: 20px; }
+        .container { max-width: none; }
+        .shadow-md { box-shadow: none; }
+        .bg-white { background: white; }
+        .bg-gray-50 { background: #f9fafb; }
+        .bg-gray-100 { background: #f3f4f6; }
+    }
+</style>
+
+<script>
+class WorkOrderManager {
+    constructor() {
+        this.workOrderId = {{ work_order.pk }};
+        this.toastContainer = document.getElementById('toast-container');
+        this.setupEventListeners();
+    }
+    
+    setupEventListeners() {
+        // Line form submission
+        const lineForm = document.getElementById('line-form');
+        if (lineForm) {
+            lineForm.addEventListener('submit', (e) => this.handleLineSubmit(e));
+        }
+        
+        // Real-time total calculation
+        const qtyInput = document.getElementById('qty');
+        const rateInput = document.getElementById('rate');
+        if (qtyInput && rateInput) {
+            qtyInput.addEventListener('input', () => this.calculateLineTotal());
+            rateInput.addEventListener('input', () => this.calculateLineTotal());
+        }
+    }
+    
+    calculateLineTotal() {
+        const qty = parseFloat(document.getElementById('qty').value) || 0;
+        const rate = parseFloat(document.getElementById('rate').value) || 0;
+        const total = qty * rate;
+        document.getElementById('line-total-preview').textContent = `$${total.toFixed(2)}`;
+    }
+    
+    async handleLineSubmit(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const data = {
+            item_code: formData.get('item_code'),
+            description: formData.get('description'),
+            qty: formData.get('qty'),
+            rate: formData.get('rate')
+        };
+        
+        try {
+            const response = await fetch(`/rental_scheduler/api/workorders/${this.workOrderId}/add-line/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                },
+                body: new URLSearchParams(data)
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                // Add the new line to the table
+                const tbody = document.getElementById('lines-table-body');
+                if (tbody.querySelector('td[colspan="6"]')) {
+                    tbody.innerHTML = result.line_html;
+                } else {
+                    tbody.insertAdjacentHTML('beforeend', result.line_html);
+                }
+                
+                // Update totals
+                document.getElementById('total-amount').textContent = `$${parseFloat(result.total_amount).toFixed(2)}`;
+                
+                // Reset form and hide it
+                e.target.reset();
+                hideAddLineForm();
+                
+                this.showToast('success', result.message);
+            } else {
+                this.showToast('error', result.error);
+            }
+        } catch (error) {
+            this.showToast('error', 'Failed to add line item');
+        }
+    }
+    
+    showToast(type, message) {
+        const toast = document.createElement('div');
+        const borderColor = type === 'success' ? 'border-green-500' : 'border-red-500';
+        const textColor = type === 'success' ? 'text-green-700' : 'text-red-700';
+        
+        toast.className = `toast ${borderColor} bg-white border-l-4 p-4 shadow-lg rounded mb-2 max-w-sm`;
+        
+        toast.innerHTML = `
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    ${type === 'success' ? '✓' : '✗'}
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium ${textColor}">${message}</p>
+                </div>
+                <div class="ml-auto pl-3">
+                    <button onclick="this.parentElement.parentElement.parentElement.remove()" class="text-gray-400 hover:text-gray-600">
+                        ×
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        this.toastContainer.appendChild(toast);
+        
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.remove();
+            }
+        }, 5000);
+    }
+}
+
+// Global functions for form visibility
+function showAddLineForm() {
+    document.getElementById('add-line-form').classList.remove('hidden');
+    document.getElementById('description').focus();
+}
+
+function hideAddLineForm() {
+    document.getElementById('add-line-form').classList.add('hidden');
+    document.getElementById('line-form').reset();
+    document.getElementById('line-total-preview').textContent = '$0.00';
+}
+
+function calculateLineTotal() {
+    const qty = parseFloat(document.getElementById('qty').value) || 0;
+    const rate = parseFloat(document.getElementById('rate').value) || 0;
+    const total = qty * rate;
+    document.getElementById('line-total-preview').textContent = `$${total.toFixed(2)}`;
+}
+
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    new WorkOrderManager();
+});
+</script>
+{% endblock %}

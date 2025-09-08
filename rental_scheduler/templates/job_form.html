@@ -1,0 +1,537 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
+            <a href="{% url 'rental_scheduler:job_list' %}" 
+               class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                Back to Jobs
+            </a>
+        </div>
+
+        <form method="post" class="bg-white rounded-lg shadow-md p-6" id="job-form">
+            {% csrf_token %}
+            
+            <!-- Toast Messages -->
+            <div id="toast-container" class="fixed top-4 right-4 z-50"></div>
+            
+            <!-- Scheduling Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Scheduling</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="{{ form.calendar.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Calendar *
+                        </label>
+                        {{ form.calendar }}
+                        {% if form.calendar.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.calendar.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.status.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Status *
+                        </label>
+                        {{ form.status }}
+                        {% if form.status.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.status.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.start_dt.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Start Date & Time *
+                        </label>
+                        {{ form.start_dt }}
+                        {% if form.start_dt.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.start_dt.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.end_dt.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            End Date & Time *
+                        </label>
+                        {{ form.end_dt }}
+                        {% if form.end_dt.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.end_dt.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="flex items-center">
+                            {{ form.all_day }}
+                            <span class="ml-2 text-sm text-gray-700">All Day Event</span>
+                        </label>
+                        {% if form.all_day.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.all_day.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Customer & Trailer Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Customer & Trailer</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="{{ form.customer.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Customer *
+                        </label>
+                        {{ form.customer }}
+                        {% if form.customer.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.customer.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.trailer.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Trailer *
+                        </label>
+                        {{ form.trailer }}
+                        {% if form.trailer.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.trailer.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contact Override Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">
+                    Contact Information Override
+                    <span class="text-sm font-normal text-gray-500">(Leave blank to use customer defaults)</span>
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="{{ form.business_name.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Business Name
+                        </label>
+                        {{ form.business_name }}
+                        {% if form.business_name.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.business_name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.contact_name.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Contact Name
+                        </label>
+                        {{ form.contact_name }}
+                        {% if form.contact_name.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.contact_name.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.phone.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Phone
+                        </label>
+                        {{ form.phone }}
+                        {% if form.phone.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.phone.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Address Override Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">
+                    Address Override
+                    <span class="text-sm font-normal text-gray-500">(Leave blank to use customer defaults)</span>
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="md:col-span-2">
+                        <label for="{{ form.address_line1.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Address Line 1
+                        </label>
+                        {{ form.address_line1 }}
+                        {% if form.address_line1.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.address_line1.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="{{ form.address_line2.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Address Line 2
+                        </label>
+                        {{ form.address_line2 }}
+                        {% if form.address_line2.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.address_line2.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.city.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            City
+                        </label>
+                        {{ form.city }}
+                        {% if form.city.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.city.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.state.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            State
+                        </label>
+                        {{ form.state }}
+                        {% if form.state.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.state.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.postal_code.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Postal Code
+                        </label>
+                        {{ form.postal_code }}
+                        {% if form.postal_code.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.postal_code.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Job Details Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Job Details</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="{{ form.date_call_received.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Date Call Received
+                        </label>
+                        {{ form.date_call_received }}
+                        {% if form.date_call_received.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.date_call_received.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.trailer_color_overwrite.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Trailer Color Override
+                        </label>
+                        {{ form.trailer_color_overwrite }}
+                        {% if form.trailer_color_overwrite.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.trailer_color_overwrite.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="{{ form.repair_notes.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Repair Notes
+                        </label>
+                        {{ form.repair_notes }}
+                        {% if form.repair_notes.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.repair_notes.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="{{ form.quote_text.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Quote Text
+                        </label>
+                        {{ form.quote_text }}
+                        {% if form.quote_text.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.quote_text.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Repeat Settings Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Repeat Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="{{ form.repeat_type.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Repeat Type
+                        </label>
+                        {{ form.repeat_type }}
+                        {% if form.repeat_type.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.repeat_type.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label for="{{ form.repeat_n_months.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Repeat Every N Months
+                        </label>
+                        {{ form.repeat_n_months }}
+                        {% if form.repeat_n_months.errors %}
+                            <p class="text-red-600 text-sm mt-1">{{ form.repeat_n_months.errors.0 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Actions -->
+            <div class="flex justify-end space-x-4 pt-6 border-t border-gray-200">
+                <a href="{% url 'rental_scheduler:job_list' %}" 
+                   class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Cancel
+                </a>
+                <button type="submit" 
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    {% if object %}Update Job{% else %}Create Job{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    /* Form field styling */
+    form select, form input, form textarea {
+        @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+    }
+    
+    form textarea {
+        @apply resize-vertical min-h-[100px];
+    }
+    
+    /* Error styling */
+    form .errorlist {
+        @apply text-red-600 text-sm mt-1;
+    }
+    
+    /* Checkbox styling */
+    form input[type="checkbox"] {
+        @apply h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded;
+    }
+    
+    /* Field save indicator */
+    .field-saving {
+        @apply opacity-50;
+    }
+    
+    .field-saved {
+        @apply border-green-500 bg-green-50;
+    }
+    
+    .field-error {
+        @apply border-red-500 bg-red-50;
+    }
+</style>
+
+<script>
+class JobFormManager {
+    constructor() {
+        this.form = document.getElementById('job-form');
+        this.toastContainer = document.getElementById('toast-container');
+        this.setupFieldSaves();
+        this.setupKeyboardFlow();
+        this.setupCustomerTrailerInfo();
+    }
+    
+    setupFieldSaves() {
+        // Add HTMX attributes to form fields for auto-save
+        const fields = this.form.querySelectorAll('input, select, textarea');
+        fields.forEach(field => {
+            if (field.name && !field.name.includes('csrf')) {
+                field.addEventListener('blur', (e) => this.saveField(e.target));
+                field.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.advanceToNextField(e.target);
+                    }
+                });
+            }
+        });
+    }
+    
+    setupKeyboardFlow() {
+        // Add tabindex to fields for proper keyboard navigation
+        const fields = this.form.querySelectorAll('input, select, textarea');
+        fields.forEach((field, index) => {
+            if (field.name && !field.name.includes('csrf')) {
+                field.setAttribute('tabindex', index + 1);
+            }
+        });
+    }
+    
+    setupCustomerTrailerInfo() {
+        // Auto-fill customer info when customer is selected
+        const customerSelect = this.form.querySelector('[name="customer"]');
+        if (customerSelect) {
+            customerSelect.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    this.loadCustomerInfo(e.target.value);
+                }
+            });
+        }
+        
+        // Auto-fill trailer info when trailer is selected
+        const trailerSelect = this.form.querySelector('[name="trailer"]');
+        if (trailerSelect) {
+            trailerSelect.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    this.loadTrailerInfo(e.target.value);
+                }
+            });
+        }
+    }
+    
+    async saveField(field) {
+        if (!field.name || field.name.includes('csrf')) return;
+        
+        const jobId = '{{ object.pk|default:"" }}';
+        if (!jobId) return; // Only save fields for existing jobs
+        
+        const fieldName = field.name;
+        const fieldValue = field.value;
+        
+        // Add saving indicator
+        field.classList.add('field-saving');
+        
+        try {
+            const response = await fetch(`/rental_scheduler/api/jobs/${jobId}/save-field/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                },
+                body: `field=${fieldName}&value=${encodeURIComponent(fieldValue)}`
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                field.classList.remove('field-saving');
+                field.classList.add('field-saved');
+                this.showToast('success', data.message);
+                
+                // Remove saved indicator after 2 seconds
+                setTimeout(() => {
+                    field.classList.remove('field-saved');
+                }, 2000);
+            } else {
+                field.classList.remove('field-saving');
+                field.classList.add('field-error');
+                this.showToast('error', data.error);
+                
+                // Remove error indicator after 3 seconds
+                setTimeout(() => {
+                    field.classList.remove('field-error');
+                }, 3000);
+            }
+        } catch (error) {
+            field.classList.remove('field-saving');
+            field.classList.add('field-error');
+            this.showToast('error', 'Failed to save field');
+            
+            setTimeout(() => {
+                field.classList.remove('field-error');
+            }, 3000);
+        }
+    }
+    
+    advanceToNextField(currentField) {
+        const fields = Array.from(this.form.querySelectorAll('input, select, textarea'))
+            .filter(field => field.name && !field.name.includes('csrf') && !field.disabled);
+        
+        const currentIndex = fields.indexOf(currentField);
+        const nextField = fields[currentIndex + 1];
+        
+        if (nextField) {
+            nextField.focus();
+            if (nextField.tagName === 'SELECT') {
+                nextField.click();
+            }
+        }
+    }
+    
+    async loadCustomerInfo(customerId) {
+        try {
+            const response = await fetch(`/rental_scheduler/api/customers/${customerId}/info/`);
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                const customer = data.customer;
+                
+                // Only fill empty fields
+                if (!this.form.querySelector('[name="business_name"]').value) {
+                    this.form.querySelector('[name="business_name"]').value = customer.business_name;
+                }
+                if (!this.form.querySelector('[name="contact_name"]').value) {
+                    this.form.querySelector('[name="contact_name"]').value = customer.contact_name;
+                }
+                if (!this.form.querySelector('[name="phone"]').value) {
+                    this.form.querySelector('[name="phone"]').value = customer.phone;
+                }
+                if (!this.form.querySelector('[name="address_line1"]').value) {
+                    this.form.querySelector('[name="address_line1"]').value = customer.address_line1;
+                }
+                if (!this.form.querySelector('[name="address_line2"]').value) {
+                    this.form.querySelector('[name="address_line2"]').value = customer.address_line2;
+                }
+                if (!this.form.querySelector('[name="city"]').value) {
+                    this.form.querySelector('[name="city"]').value = customer.city;
+                }
+                if (!this.form.querySelector('[name="state"]').value) {
+                    this.form.querySelector('[name="state"]').value = customer.state;
+                }
+                if (!this.form.querySelector('[name="postal_code"]').value) {
+                    this.form.querySelector('[name="postal_code"]').value = customer.postal_code;
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load customer info:', error);
+        }
+    }
+    
+    async loadTrailerInfo(trailerId) {
+        try {
+            const response = await fetch(`/rental_scheduler/api/trailers/${trailerId}/info/`);
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                const trailer = data.trailer;
+                
+                // Show trailer info in a tooltip or info box
+                this.showToast('info', `Trailer: ${trailer.number} - ${trailer.model} (${trailer.category})`);
+            }
+        } catch (error) {
+            console.error('Failed to load trailer info:', error);
+        }
+    }
+    
+    showToast(type, message) {
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type} bg-white border-l-4 p-4 shadow-lg rounded mb-2 max-w-sm`;
+        
+        const borderColor = type === 'success' ? 'border-green-500' : 
+                           type === 'error' ? 'border-red-500' : 
+                           type === 'info' ? 'border-blue-500' : 'border-gray-500';
+        
+        const textColor = type === 'success' ? 'text-green-700' : 
+                         type === 'error' ? 'text-red-700' : 
+                         type === 'info' ? 'text-blue-700' : 'text-gray-700';
+        
+        toast.className = `toast ${borderColor} bg-white border-l-4 p-4 shadow-lg rounded mb-2 max-w-sm`;
+        
+        toast.innerHTML = `
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    ${type === 'success' ? '✓' : type === 'error' ? '✗' : type === 'info' ? 'ℹ' : '•'}
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium ${textColor}">${message}</p>
+                </div>
+                <div class="ml-auto pl-3">
+                    <button onclick="this.parentElement.parentElement.parentElement.remove()" class="text-gray-400 hover:text-gray-600">
+                        ×
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        this.toastContainer.appendChild(toast);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.remove();
+            }
+        }, 5000);
+    }
+}
+
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    new JobFormManager();
+});
+</script>
+{% endblock %}

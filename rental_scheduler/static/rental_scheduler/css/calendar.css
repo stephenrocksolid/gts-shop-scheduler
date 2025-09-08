@@ -1,14 +1,24 @@
-/* Calendar Container */
+/* GTS Rental Scheduler - Calendar Styles */
+
+/* ===== CALENDAR CONTAINER ===== */
 .calendar-container {
     @apply bg-white rounded-lg shadow-lg p-4;
 }
 
-/* Calendar Header */
+.calendar-main-container {
+    @apply relative;
+}
+
+.calendar-wrapper {
+    @apply min-h-[600px];
+}
+
+/* ===== CALENDAR HEADER ===== */
 .calendar-header {
     @apply flex justify-between items-center mb-4;
 }
 
-/* Calendar Filters */
+/* ===== CALENDAR FILTERS ===== */
 .calendar-filters {
     @apply flex gap-4 mb-4;
 }
@@ -18,10 +28,271 @@
 }
 
 .calendar-filter select {
-    @apply rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500;
+    @apply rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500;
 }
 
-/* Calendar Event Styles */
+/* ===== CALENDAR LEGEND ===== */
+.calendar-legend-container {
+    @apply mb-6;
+}
+
+/* ===== CALENDAR GRID ===== */
+.calendar-grid-container {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden;
+}
+
+.calendar-grid-header {
+    @apply flex justify-between items-center p-4 border-b border-gray-200 bg-gray-50;
+}
+
+.calendar-nav {
+    @apply flex items-center gap-4;
+}
+
+.nav-btn {
+    @apply p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors duration-200;
+}
+
+.calendar-title {
+    @apply text-lg font-semibold text-gray-900;
+}
+
+.calendar-actions {
+    @apply flex items-center gap-3;
+}
+
+.action-btn {
+    @apply px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors duration-200;
+}
+
+.today-btn {
+    @apply text-red-600 border-red-300 hover:bg-red-50;
+}
+
+.view-selector {
+    @apply flex border border-gray-300 rounded-md overflow-hidden;
+}
+
+.view-btn {
+    @apply px-3 py-1.5 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors duration-200;
+}
+
+.view-btn.active {
+    @apply bg-red-600 text-white hover:bg-red-700;
+}
+
+.calendar-grid {
+    @apply divide-y divide-gray-200;
+}
+
+.calendar-day-headers {
+    @apply grid grid-cols-7 bg-gray-50;
+}
+
+.day-header {
+    @apply p-3 text-sm font-medium text-gray-700 text-center;
+}
+
+.calendar-days {
+    @apply divide-y divide-gray-200;
+}
+
+.calendar-week {
+    @apply grid grid-cols-7 divide-x divide-gray-200;
+}
+
+/* ===== DAY CELLS ===== */
+.day-cell {
+    @apply relative min-h-[120px] p-2 border border-gray-200 bg-white;
+    @apply hover:bg-gray-50 transition-colors duration-200;
+    @apply cursor-pointer;
+}
+
+.day-cell.today {
+    @apply bg-red-50 border-red-300;
+}
+
+.day-cell.today:hover {
+    @apply bg-red-100;
+}
+
+.day-cell.other-month {
+    @apply bg-gray-50 border-gray-100;
+    @apply opacity-60;
+}
+
+.day-cell.weekend {
+    @apply bg-gray-25;
+}
+
+.day-cell.weekend:hover {
+    @apply bg-gray-100;
+}
+
+.day-header {
+    @apply flex items-center justify-between mb-2;
+    @apply relative;
+}
+
+.day-number {
+    @apply text-sm font-medium text-gray-900;
+}
+
+.day-cell.today .day-number {
+    @apply text-red-600 font-semibold;
+}
+
+.day-cell.other-month .day-number {
+    @apply text-gray-400;
+}
+
+.today-indicator {
+    @apply absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full;
+}
+
+.event-count-badge {
+    @apply bg-red-100 text-red-800 text-xs font-medium px-1.5 py-0.5 rounded-full;
+}
+
+.day-events-container {
+    @apply space-y-1 min-h-[60px];
+}
+
+.more-events-indicator {
+    @apply text-xs text-gray-500 text-center py-1;
+    @apply bg-gray-100 rounded;
+    @apply cursor-pointer hover:bg-gray-200 transition-colors duration-200;
+}
+
+.quick-add-btn {
+    @apply absolute bottom-1 right-1 p-1.5 text-gray-400 hover:text-red-600;
+    @apply hover:bg-red-50 rounded transition-colors duration-200;
+    @apply opacity-0 group-hover:opacity-100;
+}
+
+.day-cell:hover .quick-add-btn {
+    @apply opacity-100;
+}
+
+.day-summary {
+    @apply hidden;
+}
+
+.summary-stats {
+    @apply flex flex-wrap gap-1 mt-1;
+}
+
+.stat {
+    @apply text-xs px-1.5 py-0.5 rounded-full;
+}
+
+.stat.completed {
+    @apply bg-green-100 text-green-800;
+}
+
+.stat.pending {
+    @apply bg-yellow-100 text-yellow-800;
+}
+
+/* ===== JOB CHIPS ===== */
+.job-chip {
+    @apply relative p-2 rounded-md text-xs font-medium cursor-pointer transition-all duration-200 select-none;
+    @apply border border-transparent hover:border-gray-300;
+    @apply shadow-sm hover:shadow-md;
+    @apply transform hover:scale-105;
+    @apply overflow-hidden;
+    min-height: 2.5rem;
+}
+
+.job-chip:hover {
+    @apply z-10;
+}
+
+.job-time {
+    @apply text-xs font-bold text-gray-700 mb-1;
+    @apply opacity-90;
+}
+
+.job-content {
+    @apply space-y-0.5;
+}
+
+.job-title {
+    @apply font-semibold text-gray-900 leading-tight;
+    line-height: 1.1;
+}
+
+.job-customer {
+    @apply text-gray-600 leading-tight;
+    line-height: 1.1;
+}
+
+.job-status-indicator {
+    @apply absolute top-1 right-1;
+}
+
+.job-status-indicator .status-pill {
+    @apply text-xs px-1 py-0.5;
+}
+
+.calendar-indicator {
+    @apply absolute left-0 top-0 bottom-0 w-1;
+}
+
+/* Status-based styling */
+.job-scheduled {
+    @apply bg-blue-50 border-blue-200;
+}
+
+.job-scheduled:hover {
+    @apply bg-blue-100 border-blue-300;
+}
+
+.job-inprogress {
+    @apply bg-yellow-50 border-yellow-200;
+}
+
+.job-inprogress:hover {
+    @apply bg-yellow-100 border-yellow-300;
+}
+
+.job-completed {
+    @apply bg-green-50 border-green-200;
+}
+
+.job-completed:hover {
+    @apply bg-green-100 border-green-300;
+}
+
+.job-canceled {
+    @apply bg-red-50 border-red-200;
+}
+
+.job-canceled:hover {
+    @apply bg-red-100 border-red-300;
+}
+
+/* Completion states */
+.job-completed .job-title,
+.job-completed .job-customer {
+    @apply line-through opacity-70;
+}
+
+.job-canceled .job-title,
+.job-canceled .job-customer {
+    @apply line-through opacity-50;
+}
+
+.completion-overlay {
+    @apply absolute inset-0 bg-green-100 bg-opacity-50 flex items-center justify-center;
+    @apply pointer-events-none;
+}
+
+.completion-icon {
+    @apply w-4 h-4 text-green-600;
+}
+
+/* ===== CALENDAR EVENT STYLES ===== */
 .fc-event {
     @apply cursor-pointer transition-all duration-200 select-none;
 }
@@ -70,11 +341,11 @@
 }
 
 .fc-button {
-    @apply bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500;
+    @apply bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500;
 }
 
 .fc-button-active {
-    @apply bg-indigo-800;
+    @apply bg-red-800;
 }
 
 /* Calendar Grid */
@@ -146,265 +417,273 @@
     vertical-align: baseline;
 }
 
-/* Loading State */
+/* ===== QUICK ACTIONS MODAL ===== */
+.quick-actions-content {
+    @apply space-y-4;
+}
+
+.job-info {
+    @apply border-b border-gray-200 pb-4;
+}
+
+.status-actions {
+    @apply space-y-3;
+}
+
+.status-action-btn {
+    @apply w-full p-2 rounded-md border border-gray-200 hover:bg-gray-50 transition-colors duration-200;
+    @apply text-left;
+}
+
+.action-buttons {
+    @apply flex gap-2 pt-4 border-t border-gray-200;
+}
+
+.action-btn {
+    @apply flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200;
+}
+
+.edit-btn {
+    @apply bg-blue-50 text-blue-700 hover:bg-blue-100;
+}
+
+.view-btn {
+    @apply bg-gray-50 text-gray-700 hover:bg-gray-100;
+}
+
+/* ===== STATUS UPDATE MODAL ===== */
+.status-update-form {
+    @apply space-y-4;
+}
+
+.form-group {
+    @apply space-y-2;
+}
+
+.form-label {
+    @apply block text-sm font-medium text-gray-700;
+}
+
+.form-input {
+    @apply block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm;
+    @apply focus:ring-red-500 focus:border-red-500 sm:text-sm;
+}
+
+/* ===== LOADING STATE ===== */
 .calendar-loading {
     @apply flex items-center justify-center h-64;
 }
 
 .calendar-loading-spinner {
-    @apply animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600;
+    @apply animate-spin rounded-full h-8 w-8 border-b-2 border-red-600;
 }
 
-/* Status Popover */
-.status-popover {
-    position: absolute;
-    background-color: #ffffff;
-    border: 1px solid #d1d5db;
-    border-radius: 0.375rem;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    padding: 0.75rem;
-    z-index: 1000;
-    min-width: 220px;
+/* ===== DRAG AND DROP STATES ===== */
+.day-cell.drag-over {
+    @apply bg-blue-100 border-blue-400;
+    @apply ring-2 ring-blue-500 ring-opacity-50;
 }
 
-.status-popover::after {
-    content: '';
-    position: absolute;
-    left: -6px;
-    top: 12px;
-    width: 0;
-    height: 0;
-    border-style: solid;
-    border-width: 6px 6px 6px 0;
-    border-color: transparent #d1d5db transparent transparent;
+.day-cell.drag-over .day-number {
+    @apply text-blue-600 font-semibold;
 }
 
-.status-popover.arrow-right::after {
-    left: auto;
-    right: -6px;
-    border-width: 6px 0 6px 6px;
-    border-color: transparent transparent transparent #d1d5db;
+.job-chip.dragging {
+    @apply opacity-50 transform scale-95;
+    @apply shadow-lg;
 }
 
-/* Status Popover Form Elements */
-.status-popover label {
-    @apply cursor-pointer text-sm;
+.job-chip.drag-over {
+    @apply bg-blue-100 border-blue-400;
 }
 
-.status-popover input[type="checkbox"] {
-    @apply cursor-pointer;
+/* ===== ANIMATIONS ===== */
+.job-chip.new-job {
+    animation: jobAppear 0.3s ease-out;
 }
 
-/* License Status Badge */
-.status-popover .license-badge {
-    @apply px-2 inline-flex text-xs leading-5 font-semibold rounded-full;
+@keyframes jobAppear {
+    from {
+        opacity: 0;
+        transform: scale(0.8) translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
 }
 
-.status-popover .license-badge.scanned {
-    @apply bg-green-100 text-green-800;
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 768px) {
+    .calendar-grid-header {
+        @apply flex-col gap-3;
+    }
+    
+    .calendar-nav {
+        @apply w-full justify-between;
+    }
+    
+    .calendar-actions {
+        @apply w-full justify-center;
+    }
+    
+    .day-cell {
+        @apply min-h-[80px] p-1;
+    }
+    
+    .day-number {
+        @apply text-xs;
+    }
+    
+    .day-events-container {
+        @apply min-h-[40px] space-y-0.5;
+    }
+    
+    .quick-add-btn {
+        @apply p-1 opacity-100;
+    }
+    
+    .day-summary {
+        @apply block;
+    }
+    
+    .summary-stats {
+        @apply mt-0.5;
+    }
+    
+    .stat {
+        @apply text-xs px-1 py-0.5;
+    }
+    
+    .job-chip {
+        @apply p-1.5 text-xs;
+        min-height: 2rem;
+    }
+    
+    .job-title {
+        @apply text-xs;
+    }
+    
+    .job-customer {
+        @apply text-xs;
+    }
+    
+    .job-status-indicator {
+        @apply top-0.5 right-0.5;
+    }
+    
+    .job-status-indicator .status-pill {
+        @apply text-xs px-0.5 py-0;
+    }
 }
 
-.status-popover .license-badge.not-scanned {
-    @apply bg-red-100 text-red-800;
+@media (max-width: 640px) {
+    .day-cell {
+        @apply min-h-[60px];
+    }
+    
+    .day-events-container {
+        @apply min-h-[30px];
+    }
+    
+    .event-count-badge {
+        @apply hidden;
+    }
+    
+    .more-events-indicator {
+        @apply hidden;
+    }
+    
+    .job-chip {
+        @apply p-1 text-xs;
+        min-height: 1.5rem;
+    }
+    
+    .job-time {
+        @apply hidden;
+    }
+    
+    .job-content {
+        @apply space-y-0;
+    }
+    
+    .job-title {
+        @apply text-xs leading-tight;
+    }
+    
+    .job-customer {
+        @apply hidden;
+    }
+    
+    .job-status-indicator {
+        @apply hidden;
+    }
 }
 
-.status-popover input[type="datetime-local"] {
-    @apply text-xs border border-gray-300 rounded px-2 py-1 w-full;
-    @apply focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500;
+/* ===== ACCESSIBILITY ===== */
+.day-cell:focus,
+.job-chip:focus {
+    @apply outline-none ring-2 ring-red-500 ring-offset-2;
 }
 
-.status-popover #return_datetime_container {
-    @apply transition-all duration-200 ease-in-out;
+.day-cell:focus-within {
+    @apply ring-2 ring-red-500 ring-offset-2;
 }
 
-.status-popover #return_datetime_container.hidden {
-    @apply opacity-0 max-h-0 overflow-hidden;
+/* ===== PRINT STYLES ===== */
+@media print {
+    .day-cell {
+        @apply border border-gray-300 bg-white;
+        @apply min-h-[100px] p-2;
+    }
+    
+    .day-cell.today {
+        @apply bg-red-50 border-red-300;
+    }
+    
+    .quick-add-btn {
+        @apply hidden;
+    }
+    
+    .day-summary {
+        @apply hidden;
+    }
+    
+    .job-chip {
+        @apply border border-gray-300 shadow-none;
+        @apply transform-none;
+        @apply break-inside-avoid;
+    }
+    
+    .job-chip:hover {
+        @apply transform-none shadow-none;
+    }
 }
 
-.status-popover #return_datetime_container:not(.hidden) {
-    @apply opacity-100 max-h-20;
+/* ===== HIGH CONTRAST MODE ===== */
+@media (prefers-contrast: high) {
+    .day-cell {
+        @apply border-2;
+    }
+    
+    .job-chip {
+        @apply border-2;
+    }
+    
+    .status-pill {
+        @apply border border-current;
+    }
 }
 
-.event-active {
-    outline: 2px solid #6366f1;
-}
-
-/* Return Date Dialog Modal */
-.return-dialog-backdrop {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-}
-
-.return-dialog-modal {
-    background-color: white;
-    border-radius: 0.5rem;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-    max-width: 28rem;
-    width: 100%;
-    max-height: 90vh;
-    overflow: hidden;
-    border: 1px solid #e5e7eb;
-}
-
-.return-dialog-header {
-    background-color: #f9fafb;
-    border-bottom: 1px solid #e5e7eb;
-    padding: 1.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.return-dialog-title {
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: #111827;
-    margin: 0;
-}
-
-.return-dialog-close {
-    color: #6b7280;
-    background-color: transparent;
-    border: none;
-    border-radius: 0.375rem;
-    padding: 0.5rem;
-    cursor: pointer;
-    transition: color 0.2s ease, background-color 0.2s ease;
-}
-
-.return-dialog-close:hover {
-    color: #374151;
-    background-color: #f3f4f6;
-}
-
-.return-dialog-close:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px #e5e7eb;
-}
-
-.return-dialog-body {
-    padding: 1.5rem;
-}
-
-.return-dialog-text {
-    font-size: 0.875rem;
-    color: #6b7280;
-    margin: 0 0 1rem 0;
-    line-height: 1.5;
-}
-
-.return-dialog-contract {
-    background-color: #f9fafb;
-    border: 1px solid #e5e7eb;
-    border-radius: 0.375rem;
-    padding: 1rem;
-    margin: 1rem 0 1.5rem 0;
-}
-
-.return-dialog-contract strong {
-    color: #111827;
-    font-weight: 600;
-}
-
-.return-dialog-input-group {
-    margin-top: 1rem;
-}
-
-.return-dialog-label {
-    display: block;
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: #374151;
-    margin-bottom: 0.5rem;
-}
-
-.return-dialog-input {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid #d1d5db;
-    border-radius: 0.375rem;
-    font-size: 0.875rem;
-    background-color: white;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.return-dialog-input:focus {
-    outline: none;
-    border-color: #6366f1;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-}
-
-.return-dialog-footer {
-    background-color: #f9fafb;
-    border-top: 1px solid #e5e7eb;
-    padding: 1rem 1.5rem;
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.75rem;
-}
-
-.return-dialog-btn {
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    border-radius: 0.375rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    outline: none;
-}
-
-.return-dialog-btn-cancel {
-    background-color: white;
-    color: #374151;
-    border: 1px solid #d1d5db;
-}
-
-.return-dialog-btn-cancel:hover {
-    background-color: #f9fafb;
-    border-color: #9ca3af;
-}
-
-.return-dialog-btn-cancel:focus {
-    box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.2);
-}
-
-.return-dialog-btn-save {
-    background-color: #4f46e5;
-    color: white;
-    border: 1px solid #4f46e5;
-}
-
-.return-dialog-btn-save:hover {
-    background-color: #4338ca;
-    border-color: #4338ca;
-}
-
-.return-dialog-btn-save:focus {
-    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
-}
-
-.fc-event,
-.fc-daygrid-event,
-.fc-h-event {
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    line-height: 1.2 !important;
-}
-
-.fc-event-main,
-.fc-daygrid-event .fc-event-main,
-.fc-event-main-frame {
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
+/* ===== REDUCED MOTION ===== */
+@media (prefers-reduced-motion: reduce) {
+    .job-chip,
+    .day-cell,
+    .fc-event {
+        @apply transition-none animate-none;
+    }
+    
+    .job-chip:hover {
+        @apply transform-none;
+    }
 }

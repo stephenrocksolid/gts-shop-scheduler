@@ -112,8 +112,8 @@ def get_available_trailers_for_period(category_id=None, start_datetime=None, end
     """
     from rental_scheduler.models import Trailer
     
-    # Base query for active trailers
-    trailers_query = Trailer.objects.filter(is_available=True)
+    # Base query for active rental trailers
+    trailers_query = Trailer.objects.filter(is_rental_trailer=True, is_available=True)
     
     # Filter by category if specified
     if category_id:

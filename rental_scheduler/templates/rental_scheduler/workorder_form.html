@@ -1,0 +1,217 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
+            <a href="{% url 'rental_scheduler:workorder_list' %}" 
+               class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                <i class="fas fa-arrow-left mr-2"></i>Back to Work Orders
+            </a>
+        </div>
+
+        <!-- Toast Messages -->
+        <div id="toast-container" class="fixed top-4 right-4 z-50"></div>
+
+        <!-- Work Order Form -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <form method="post" class="space-y-6">
+                {% csrf_token %}
+                
+                <!-- Job Selection -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="{{ form.job.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                            Associated Job *
+                        </label>
+                        <select name="{{ form.job.name }}" id="{{ form.job.id_for_label }}" required
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Select a job...</option>
+                            {% for job in jobs %}
+                                <option value="{{ job.id }}" 
+                                        {% if form.job.value == job.id or object.job.id == job.id %}selected{% endif %}>
+                                    {{ job.display_name }} - {{ job.start_dt|date:"M j, Y" }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        {% if form.job.errors %}
+                            <div class="mt-1 text-sm text-red-600">
+                                {% for error in form.job.errors %}
+                                    <p>{{ error }}</p>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div>
+                        <label for="{{ form.wo_date.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                            Work Order Date *
+                        </label>
+                        <input type="date" name="{{ form.wo_date.name }}" id="{{ form.wo_date.id_for_label }}" 
+                               value="{% if form.wo_date.value %}{{ form.wo_date.value|date:'Y-m-d' }}{% elif object.wo_date %}{{ object.wo_date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}" required
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        {% if form.wo_date.errors %}
+                            <div class="mt-1 text-sm text-red-600">
+                                {% for error in form.wo_date.errors %}
+                                    <p>{{ error }}</p>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Work Order Number -->
+                <div>
+                    <label for="{{ form.wo_number.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Work Order Number *
+                    </label>
+                    <input type="text" name="{{ form.wo_number.name }}" id="{{ form.wo_number.id_for_label }}" 
+                           value="{% if form.wo_number.value %}{{ form.wo_number.value }}{% elif object.wo_number %}{{ object.wo_number }}{% endif %}" required
+                           placeholder="e.g., WO-2024-001"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {% if form.wo_number.errors %}
+                        <div class="mt-1 text-sm text-red-600">
+                            {% for error in form.wo_number.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    <p class="mt-1 text-sm text-gray-500">Enter a unique work order number</p>
+                </div>
+
+                <!-- Notes -->
+                <div>
+                    <label for="{{ form.notes.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Work Order Notes
+                    </label>
+                    <textarea name="{{ form.notes.name }}" id="{{ form.notes.id_for_label }}" rows="4"
+                              placeholder="Enter any additional notes about this work order..."
+                              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">{% if form.notes.value %}{{ form.notes.value }}{% elif object.notes %}{{ object.notes }}{% endif %}</textarea>
+                    {% if form.notes.errors %}
+                        <div class="mt-1 text-sm text-red-600">
+                            {% for error in form.notes.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    <p class="mt-1 text-sm text-gray-500">Optional notes about the work order</p>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="flex justify-end space-x-4 pt-6 border-t border-gray-200">
+                    <a href="{% url 'rental_scheduler:workorder_list' %}" 
+                       class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200">
+                        Cancel
+                    </a>
+                    <button type="submit" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200">
+                        <i class="fas fa-save mr-2"></i>
+                        {% if object %}Update Work Order{% else %}Create Work Order{% endif %}
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Job Information Preview -->
+        <div id="job-preview" class="mt-8 bg-white rounded-lg shadow-md p-6 hidden">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Selected Job Information</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <span class="text-sm font-medium text-gray-500">Customer:</span>
+                    <span id="job-customer" class="ml-2 text-gray-900"></span>
+                </div>
+                <div>
+                    <span class="text-sm font-medium text-gray-500">Trailer:</span>
+                    <span id="job-trailer" class="ml-2 text-gray-900"></span>
+                </div>
+                <div>
+                    <span class="text-sm font-medium text-gray-500">Job Status:</span>
+                    <span id="job-status" class="ml-2 text-gray-900"></span>
+                </div>
+                <div>
+                    <span class="text-sm font-medium text-gray-500">Scheduled Date:</span>
+                    <span id="job-date" class="ml-2 text-gray-900"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+class WorkOrderFormManager {
+    constructor() {
+        this.jobSelect = document.getElementById('{{ form.job.id_for_label }}');
+        this.jobPreview = document.getElementById('job-preview');
+        this.setupEventListeners();
+    }
+    
+    setupEventListeners() {
+        if (this.jobSelect) {
+            this.jobSelect.addEventListener('change', (e) => this.handleJobChange(e));
+        }
+        
+        // Auto-generate work order number if empty
+        const woNumberInput = document.getElementById('{{ form.wo_number.id_for_label }}');
+        if (woNumberInput && !woNumberInput.value) {
+            this.generateWorkOrderNumber();
+        }
+    }
+    
+    async handleJobChange(e) {
+        const jobId = e.target.value;
+        if (jobId) {
+            try {
+                const response = await fetch(`/rental_scheduler/api/jobs/${jobId}/info/`);
+                const jobData = await response.json();
+                
+                if (jobData.status === 'success') {
+                    this.showJobPreview(jobData.job);
+                }
+            } catch (error) {
+                console.error('Failed to fetch job information:', error);
+            }
+        } else {
+            this.hideJobPreview();
+        }
+    }
+    
+    showJobPreview(job) {
+        document.getElementById('job-customer').textContent = job.display_name;
+        document.getElementById('job-trailer').textContent = `${job.trailer.number} - ${job.trailer.model}`;
+        document.getElementById('job-status').textContent = job.status_display;
+        document.getElementById('job-date').textContent = job.start_date;
+        
+        this.jobPreview.classList.remove('hidden');
+    }
+    
+    hideJobPreview() {
+        this.jobPreview.classList.add('hidden');
+    }
+    
+    generateWorkOrderNumber() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        
+        // Generate a simple number based on current time
+        const timeComponent = String(today.getHours()).padStart(2, '0') + 
+                            String(today.getMinutes()).padStart(2, '0');
+        
+        const woNumber = `WO-${year}-${month}${day}-${timeComponent}`;
+        document.getElementById('{{ form.wo_number.id_for_label }}').value = woNumber;
+    }
+}
+
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    new WorkOrderFormManager();
+});
+</script>
+{% endblock %}
+

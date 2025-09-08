@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
     operations = [
         # Add indexes for commonly searched/filtered fields
         migrations.RunSQL(
-            "CREATE INDEX IF NOT EXISTS idx_trailer_number_search ON rental_scheduler_trailer USING btree (LOWER(number) text_pattern_ops);",
+            "CREATE INDEX IF NOT EXISTS idx_trailer_number_search ON rental_scheduler_trailer (LOWER(number));",
             reverse_sql="DROP INDEX IF EXISTS idx_trailer_number_search;"
         ),
         migrations.RunSQL(

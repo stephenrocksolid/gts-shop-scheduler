@@ -26,7 +26,7 @@ class Migration(migrations.Migration):
                 'verbose_name': 'Trailer Service',
                 'verbose_name_plural': 'Trailer Services',
                 'indexes': [models.Index(fields=['start_datetime'], name='rental_sche_start_d_2c1cc2_idx'), models.Index(fields=['end_datetime'], name='rental_sche_end_dat_42ef92_idx'), models.Index(fields=['trailer', 'start_datetime'], name='rental_sche_trailer_d064be_idx')],
-                'constraints': [models.CheckConstraint(condition=models.Q(('end_datetime__gt', models.F('start_datetime'))), name='service_end_after_start')],
+                'constraints': [models.CheckConstraint(check=models.Q(end_datetime__gt=models.F('start_datetime')), name='service_end_after_start')],
             },
         ),
     ]

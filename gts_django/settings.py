@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-development-key-change-in-production-12345')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -80,12 +80,8 @@ WSGI_APPLICATION = 'gts_django.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT'),
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
@@ -190,32 +186,26 @@ LOGGING = {
             'level': 'INFO',
         },
         'file': {
-            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'class': 'logging.FileHandler',
             'filename': BASE_DIR / 'logs' / 'gts_scheduler.log',
-            'when': 'midnight',
-            'interval': 1,
-            'backupCount': 7,
             'formatter': 'verbose',
             'level': 'INFO',
+            'mode': 'a',  # Append mode
         },
         'debug_file': {
-            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'class': 'logging.FileHandler',
             'filename': BASE_DIR / 'logs' / 'debug.log',
-            'when': 'midnight',
-            'interval': 1,
-            'backupCount': 3,
             'formatter': 'detailed',
             'level': 'DEBUG',
             'filters': ['require_debug_true'],
+            'mode': 'a',  # Append mode
         },
         'error_file': {
-            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'class': 'logging.FileHandler',
             'filename': BASE_DIR / 'logs' / 'error.log',
-            'when': 'midnight',
-            'interval': 1,
-            'backupCount': 14,  # Keep errors longer
             'formatter': 'detailed',
             'level': 'WARNING',  # Only warnings and errors
+            'mode': 'a',  # Append mode
         },
     },
     'loggers': {

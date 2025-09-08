@@ -20,19 +20,11 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
 import os
-from rental_scheduler.models import SystemSettings
 from rental_scheduler.error_views import handler400, handler403, handler404, handler500
 
 
 def license_serve(request, path):
-    """Serve license files from the custom location"""
-    try:
-        settings_obj = SystemSettings.objects.first()
-        if settings_obj and settings_obj.license_scan_path:
-            full_path = os.path.join(settings_obj.license_scan_path, path)
-            return serve(request, os.path.basename(full_path), os.path.dirname(full_path))
-    except:
-        pass
+    """Serve license files from the media directory"""
     return serve(request, path, document_root=os.path.join(settings.MEDIA_ROOT, 'licenses'))
 
 urlpatterns = [

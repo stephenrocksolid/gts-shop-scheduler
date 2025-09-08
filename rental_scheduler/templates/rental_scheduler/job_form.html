@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% load static %}
+{% load form_tags %}
+
+{% block content %}
+<div class="mx-auto max-w-6xl px-4 py-4">
+
+
+  <!-- Top action bar (right-aligned) -->
+  <div class="mb-4 flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Add Event/Job</h1>
+    <div class="flex items-center gap-2">
+      {% if object.pk %}
+        <a href="{% url 'rental_scheduler:job_print_wo' object.pk %}"
+           class="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition duration-200">
+          Print WO
+        </a>
+        <a href="{% url 'rental_scheduler:job_print_wo_customer' object.pk %}"
+           class="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition duration-200">
+          Print Customer Copy WO
+        </a>
+        <a href="{% url 'rental_scheduler:job_print_invoice' object.pk %}"
+           class="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition duration-200">
+          Print Invoice
+        </a>
+      {% else %}
+        <button type="button" disabled 
+                class="rounded-full bg-gray-300 px-4 py-2 text-sm font-medium text-gray-500 cursor-not-allowed"
+                title="Save first to enable print options">
+          Print WO
+        </button>
+        <button type="button" disabled 
+                class="rounded-full bg-gray-300 px-4 py-2 text-sm font-medium text-gray-500 cursor-not-allowed"
+                title="Save first to enable print options">
+          Print Customer Copy WO
+        </button>
+        <button type="button" disabled 
+                class="rounded-full bg-gray-300 px-4 py-2 text-sm font-medium text-gray-500 cursor-not-allowed"
+                title="Save first to enable print options">
+          Print Invoice
+        </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Card: Add Event/Job -->
+  <div class="rounded-lg border bg-white p-6 shadow-sm">
+    
+    <form id="job-form" method="post">
+      {% csrf_token %}
+      
+      <!-- Calendar Selection (prominent at top) -->
+      <div class="mb-6 p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
+        <label for="{{ form.calendar.id_for_label }}" class="block text-base font-semibold text-blue-900 mb-2">
+          📅 Calendar <span class="text-red-500">*</span>
+        </label>
+        <div class="w-64">
+          {{ form.calendar }}
+          {% if form.calendar.errors %}
+            {% for error in form.calendar.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <p class="text-sm text-blue-700 mt-1">{{ form.calendar.help_text }}</p>
+      </div>
+      
+      <!-- Row 1: Business Name | Date Call was Received -->
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 mb-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Business Name</label>
+          {{ form.business_name }}
+          {% if form.business_name.errors %}
+            {% for error in form.business_name.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Date Call was Received</label>
+          {{ form.date_call_received }}
+          {% if form.date_call_received.errors %}
+            {% for error in form.date_call_received.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Row 2: Contact Name | Phone # -->
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 mb-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
+          {{ form.contact_name }}
+          {% if form.contact_name.errors %}
+            {% for error in form.contact_name.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Phone #</label>
+          {{ form.phone }}
+          {% if form.phone.errors %}
+            {% for error in form.phone.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Row 3: Start Date & Time | End Date & Time | All Day Event | Repeat -->
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 mb-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Start Date & Time <span class="text-red-500">*</span></label>
+          {{ form.start_dt }}
+          {% if form.start_dt.errors %}
+            {% for error in form.start_dt.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">End Date & Time <span class="text-red-500">*</span></label>
+          {{ form.end_dt }}
+          {% if form.end_dt.errors %}
+            {% for error in form.end_dt.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div class="flex items-end">
+          <div class="pb-2">
+            <label class="inline-flex items-center">
+              {{ form.all_day }}
+              <span class="text-sm text-gray-700">All Day Event</span>
+            </label>
+            {% if form.all_day.errors %}
+              {% for error in form.all_day.errors %}
+                <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+              {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Repeat</label>
+          {{ form.repeat_type }}
+          {% if form.repeat_type.errors %}
+            {% for error in form.repeat_type.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Row 4: Notes (full width) -->
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+        {{ form.notes }}
+        {% if form.notes.errors %}
+          {% for error in form.notes.errors %}
+            <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      <!-- Divider -->
+      <hr class="border-gray-200 my-6">
+
+      <!-- Section header: Trailer Info -->
+      <h2 class="text-lg font-medium text-gray-900 mb-4">Trailer Info</h2>
+
+      <!-- Row A: Trailer Color | Serial # | Details -->
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-3 mb-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Trailer Color</label>
+          {{ form.trailer_color }}
+          {% if form.trailer_color.errors %}
+            {% for error in form.trailer_color.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Serial #</label>
+          {{ form.trailer_serial }}
+          {% if form.trailer_serial.errors %}
+            {% for error in form.trailer_serial.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Details</label>
+          {{ form.trailer_details }}
+          {% if form.trailer_details.errors %}
+            {% for error in form.trailer_details.errors %}
+              <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Row B: Repair Notes (full width, tall textarea) -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Repair Notes</label>
+        {{ form.repair_notes }}
+        {% if form.repair_notes.errors %}
+          {% for error in form.repair_notes.errors %}
+            <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      <!-- Row C: Quote (one-third width) -->
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Quote</label>
+        <div class="relative w-1/3">
+          <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+            <span class="text-gray-500 text-sm">$</span>
+          </div>
+          {{ form.quote }}
+        </div>
+        {% if form.quote.errors %}
+          {% for error in form.quote.errors %}
+            <p class="text-xs text-red-500 mt-1">{{ error }}</p>
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      <!-- Hidden status field -->
+      <div class="hidden">
+        {{ form.status }}
+      </div>
+
+
+      <!-- Form validation / messages area -->
+      <div id="form-messages" class="mb-4">
+        {% if form.non_field_errors %}
+          {% for error in form.non_field_errors %}
+            <div class="rounded-md bg-red-50 p-4 mb-3">
+              <div class="flex">
+                <div class="flex-shrink-0">
+                  <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <h3 class="text-sm font-medium text-red-800">{{ error }}</h3>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        {% endif %}
+        
+        <!-- Show all field errors at the top for debugging -->
+        {% if form.errors %}
+          <div class="rounded-md bg-red-50 p-4 mb-3">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <h3 class="text-sm font-medium text-red-800">Form Validation Errors:</h3>
+                <div class="mt-2 text-sm text-red-700">
+                  <ul class="list-disc list-inside space-y-1">
+                    {% for field, errors in form.errors.items %}
+                      {% for error in errors %}
+                        <li><strong>{{ field|title }}:</strong> {{ error }}</li>
+                      {% endfor %}
+                    {% endfor %}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Bottom action row (right-aligned controls) -->
+      <div class="flex justify-end items-center gap-3 pt-4 border-t border-gray-200">
+        <a href="{% url 'rental_scheduler:job_list' %}" 
+           class="rounded-md bg-gray-100 border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition duration-200">
+          Cancel
+        </a>
+        <button type="submit" 
+                class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition duration-200">
+          Save
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+{% endblock %}

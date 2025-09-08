@@ -1,0 +1,135 @@
+<div class="print-preview" style="font-family: {{ template.font_family }}; font-size: {{ template.font_size }}; color: {{ template.text_color }};">
+    <!-- Header -->
+    {% if template.show_company_info %}
+        <div class="header" style="background-color: {{ template.header_color }}; color: white; padding: 1rem; margin-bottom: 2rem; border-radius: 0.5rem;">
+            {% if template.show_logo %}
+                <div style="text-align: center; margin-bottom: 1rem;">
+                    <div style="width: 100px; height: 60px; background: rgba(255,255,255,0.2); border-radius: 0.25rem; display: inline-block; line-height: 60px; color: white;">
+                        LOGO
+                    </div>
+                </div>
+            {% endif %}
+            
+            <div style="text-align: center;">
+                <h1 style="margin: 0; font-size: 1.5rem; font-weight: bold;">{{ preview_data.company_name }}</h1>
+                {% if template.company_phone or template.company_email %}
+                    <div style="margin-top: 0.5rem; font-size: 0.875rem;">
+                        {% if template.company_phone %}{{ template.company_phone }}{% endif %}
+                        {% if template.company_phone and template.company_email %} • {% endif %}
+                        {% if template.company_email %}{{ template.company_email }}{% endif %}
+                    </div>
+                {% endif %}
+                {% if template.company_address %}
+                    <div style="margin-top: 0.25rem; font-size: 0.875rem;">{{ template.company_address }}</div>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+    
+    <!-- Document Title -->
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <h2 style="margin: 0; font-size: 1.25rem; font-weight: bold; color: {{ template.accent_color }};">
+            {{ template.get_template_type_display|upper }}
+        </h2>
+        <div style="margin-top: 0.5rem; font-size: 0.875rem; color: #6b7280;">
+            {{ preview_data.invoice_number }} • {{ preview_data.customer_name }}
+        </div>
+    </div>
+    
+    <!-- Customer Information -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+        <div>
+            <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: bold; color: {{ template.accent_color }};">Bill To:</h3>
+            <div style="font-size: 0.875rem;">
+                <div style="font-weight: 500;">{{ preview_data.customer_name }}</div>
+                <div>123 Main Street</div>
+                <div>Anytown, ST 12345</div>
+                <div>Phone: (555) 123-4567</div>
+            </div>
+        </div>
+        
+        <div>
+            <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem; font-weight: bold; color: {{ template.accent_color }};">Document Details:</h3>
+            <div style="font-size: 0.875rem;">
+                <div><strong>Number:</strong> {{ preview_data.invoice_number }}</div>
+                <div><strong>Date:</strong> {{ "now"|date:"M j, Y" }}</div>
+                <div><strong>Due Date:</strong> {{ "now"|date:"M j, Y" }}</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Items Table -->
+    <div style="margin-bottom: 2rem;">
+        <table style="width: 100%; border-collapse: collapse; border: 1px solid {{ template.accent_color }};">
+            <thead>
+                <tr style="background-color: {{ template.accent_color }}; color: white;">
+                    <th style="padding: 0.75rem; text-align: left; border-right: 1px solid {{ template.accent_color }};">Description</th>
+                    <th style="padding: 0.75rem; text-align: center; border-right: 1px solid {{ template.accent_color }};">Qty</th>
+                    <th style="padding: 0.75rem; text-align: right; border-right: 1px solid {{ template.accent_color }};">Rate</th>
+                    <th style="padding: 0.75rem; text-align: right;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in preview_data.items %}
+                    <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <td style="padding: 0.75rem; border-right: 1px solid #e5e7eb;">{{ item.description }}</td>
+                        <td style="padding: 0.75rem; text-align: center; border-right: 1px solid #e5e7eb;">{{ item.qty }}</td>
+                        <td style="padding: 0.75rem; text-align: right; border-right: 1px solid #e5e7eb;">{{ template.currency_symbol }}{{ item.rate|floatformat:2 }}</td>
+                        <td style="padding: 0.75rem; text-align: right;">{{ template.currency_symbol }}{{ item.total|floatformat:2 }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Totals -->
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 2rem;">
+        <div style="width: 300px;">
+            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #e5e7eb;">
+                <span>Subtotal:</span>
+                <span>{{ template.currency_symbol }}{{ preview_data.subtotal|floatformat:2 }}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #e5e7eb;">
+                <span>Tax ({{ template.default_tax_rate|floatformat:1 }}%):</span>
+                <span>{{ template.currency_symbol }}{{ preview_data.tax|floatformat:2 }}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.75rem 0; font-weight: bold; font-size: 1.125rem; border-top: 2px solid {{ template.accent_color }};">
+                <span>Total:</span>
+                <span>{{ template.currency_symbol }}{{ preview_data.total|floatformat:2 }}</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    {% if template.show_footer %}
+        <div style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; text-align: center; font-size: 0.75rem; color: #6b7280;">
+            {% if template.footer_text %}
+                {{ template.footer_text }}
+            {% else %}
+                Thank you for your business!<br>
+                Please make checks payable to {{ preview_data.company_name }}
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+
+<style>
+.print-preview {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem;
+    background: white;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    border-radius: 0.5rem;
+}
+
+@media print {
+    .print-preview {
+        box-shadow: none;
+        border-radius: 0;
+        padding: 0;
+    }
+}
+</style>
+
+

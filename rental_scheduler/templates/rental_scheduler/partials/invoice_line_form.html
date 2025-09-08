@@ -1,0 +1,140 @@
+<div class="bg-white border border-gray-300 rounded-lg p-4">
+    <h4 class="text-lg font-medium text-gray-900 mb-3">
+        {% if line %}Edit Line Item{% else %}Add New Line Item{% endif %}
+    </h4>
+    
+    <form id="{% if line %}edit-line-form-{{ line.id }}{% else %}add-line-form{% endif %}" 
+          class="grid grid-cols-1 md:grid-cols-4 gap-4"
+          hx-post="{% if line %}{% url 'rental_scheduler:update_invoice_line' line.id %}{% else %}{% url 'rental_scheduler:add_invoice_line' invoice.id %}{% endif %}"
+          hx-target="#lines-table-body"
+          hx-swap="beforeend">
+        
+        {% csrf_token %}
+        
+        <div>
+            <label for="{% if line %}edit-item_code-{{ line.id }}{% else %}item_code{% endif %}" 
+                   class="block text-sm font-medium text-gray-700 mb-1">
+                Item Code
+            </label>
+            <input type="text" 
+                   id="{% if line %}edit-item_code-{{ line.id }}{% else %}item_code{% endif %}" 
+                   name="item_code" 
+                   value="{% if line %}{{ line.item_code|default:'' }}{% endif %}"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                   placeholder="SKU or code">
+        </div>
+        
+        <div class="md:col-span-2">
+            <label for="{% if line %}edit-description-{{ line.id }}{% else %}description{% endif %}" 
+                   class="block text-sm font-medium text-gray-700 mb-1">
+                Description *
+            </label>
+            <input type="text" 
+                   id="{% if line %}edit-description-{{ line.id }}{% else %}description{% endif %}" 
+                   name="description" 
+                   value="{% if line %}{{ line.description }}{% endif %}" 
+                   required
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                   placeholder="Item or service description">
+        </div>
+        
+        <div>
+            <label for="{% if line %}edit-qty-{{ line.id }}{% else %}qty{% endif %}" 
+                   class="block text-sm font-medium text-gray-700 mb-1">
+                Quantity
+            </label>
+            <input type="number" 
+                   id="{% if line %}edit-qty-{{ line.id }}{% else %}qty{% endif %}" 
+                   name="qty" 
+                   value="{% if line %}{{ line.qty }}{% else %}1{% endif %}" 
+                   step="0.01" 
+                   min="0.01"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        
+        <div>
+            <label for="{% if line %}edit-price-{{ line.id }}{% else %}price{% endif %}" 
+                   class="block text-sm font-medium text-gray-700 mb-1">
+                Unit Price
+            </label>
+            <input type="number" 
+                   id="{% if line %}edit-price-{{ line.id }}{% else %}price{% endif %}" 
+                   name="price" 
+                   value="{% if line %}{{ line.price }}{% else %}{% endif %}" 
+                   step="0.01" 
+                   min="0"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                   placeholder="0.00">
+        </div>
+        
+        <div class="md:col-span-3 flex space-x-3">
+            <button type="submit" 
+                    class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                {% if line %}Update Line Item{% else %}Add Line Item{% endif %}
+            </button>
+            
+            {% if line %}
+            <button type="button" 
+                    onclick="cancelEdit({{ line.id }})"
+                    class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                Cancel
+            </button>
+            {% else %}
+            <button type="button" 
+                    onclick="hideAddForm()"
+                    class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                Cancel
+            </button>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<script>
+// Auto-calculate total when qty or price changes
+document.querySelectorAll('input[name="qty"], input[name="price"]').forEach(input => {
+    input.addEventListener('input', function() {
+        const form = this.closest('form');
+        const qtyInput = form.querySelector('input[name="qty"]');
+        const priceInput = form.querySelector('input[name="price"]');
+        
+        if (qtyInput.value && priceInput.value) {
+            const qty = parseFloat(qtyInput.value) || 0;
+            const price = parseFloat(priceInput.value) || 0;
+            // Total will be calculated on the server side
+        }
+    });
+});
+
+// Focus on description field when form loads
+document.addEventListener('DOMContentLoaded', function() {
+    const descriptionField = document.querySelector('input[name="description"]');
+    if (descriptionField) {
+        descriptionField.focus();
+    }
+});
+
+// Keyboard navigation: Enter to submit, Escape to cancel
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+        e.preventDefault();
+        const form = e.target.closest('form');
+        if (form) {
+            form.dispatchEvent(new Event('submit'));
+        }
+    } else if (e.key === 'Escape') {
+        const cancelButton = document.querySelector('button[onclick*="cancel"], button[onclick*="hideAddForm"]');
+        if (cancelButton) {
+            cancelButton.click();
+        }
+    }
+});
+
+function hideAddForm() {
+    const addForm = document.getElementById('add-line-form-container');
+    if (addForm) {
+        addForm.style.display = 'none';
+    }
+}
+</script>
+

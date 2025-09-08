@@ -1,0 +1,159 @@
+{% load static %}
+
+<div class="loading-container loading-{{ size|default:'md' }} {{ extra_classes|default:'' }}">
+    {% if type == 'spinner' %}
+    <div class="loading-spinner">
+        <svg class="loading-spinner-svg" fill="none" viewBox="0 0 24 24">
+            <circle class="loading-spinner-circle" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="loading-spinner-path" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+    </div>
+    {% elif type == 'dots' %}
+    <div class="loading-dots">
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+        <div class="loading-dot"></div>
+    </div>
+    {% elif type == 'pulse' %}
+    <div class="loading-pulse">
+        <div class="loading-pulse-circle"></div>
+    </div>
+    {% else %}
+    <!-- Default spinner -->
+    <div class="loading-spinner">
+        <svg class="loading-spinner-svg" fill="none" viewBox="0 0 24 24">
+            <circle class="loading-spinner-circle" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="loading-spinner-path" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+    </div>
+    {% endif %}
+    
+    {% if text %}
+    <p class="loading-text">{{ text }}</p>
+    {% endif %}
+</div>
+
+<style>
+.loading-container {
+    @apply flex flex-col items-center justify-center;
+}
+
+.loading-text {
+    @apply mt-2 text-sm text-gray-500;
+}
+
+/* Loading sizes */
+.loading-sm {
+    @apply p-2;
+}
+
+.loading-md {
+    @apply p-4;
+}
+
+.loading-lg {
+    @apply p-6;
+}
+
+.loading-xl {
+    @apply p-8;
+}
+
+/* Spinner */
+.loading-spinner {
+    @apply flex items-center justify-center;
+}
+
+.loading-spinner-svg {
+    @apply animate-spin;
+}
+
+.loading-spinner-circle {
+    @apply opacity-25;
+}
+
+.loading-spinner-path {
+    @apply opacity-75;
+}
+
+/* Dots */
+.loading-dots {
+    @apply flex space-x-1;
+}
+
+.loading-dot {
+    @apply w-2 h-2 bg-gray-400 rounded-full animate-bounce;
+}
+
+.loading-dot:nth-child(1) {
+    animation-delay: 0ms;
+}
+
+.loading-dot:nth-child(2) {
+    animation-delay: 150ms;
+}
+
+.loading-dot:nth-child(3) {
+    animation-delay: 300ms;
+}
+
+/* Pulse */
+.loading-pulse {
+    @apply flex items-center justify-center;
+}
+
+.loading-pulse-circle {
+    @apply w-8 h-8 bg-red-600 rounded-full animate-pulse;
+}
+
+/* Size-specific adjustments */
+.loading-sm .loading-spinner-svg {
+    @apply w-4 h-4;
+}
+
+.loading-sm .loading-dot {
+    @apply w-1.5 h-1.5;
+}
+
+.loading-sm .loading-pulse-circle {
+    @apply w-4 h-4;
+}
+
+.loading-md .loading-spinner-svg {
+    @apply w-6 h-6;
+}
+
+.loading-md .loading-dot {
+    @apply w-2 h-2;
+}
+
+.loading-md .loading-pulse-circle {
+    @apply w-6 h-6;
+}
+
+.loading-lg .loading-spinner-svg {
+    @apply w-8 h-8;
+}
+
+.loading-lg .loading-dot {
+    @apply w-2.5 h-2.5;
+}
+
+.loading-lg .loading-pulse-circle {
+    @apply w-8 h-8;
+}
+
+.loading-xl .loading-spinner-svg {
+    @apply w-12 h-12;
+}
+
+.loading-xl .loading-dot {
+    @apply w-3 h-3;
+}
+
+.loading-xl .loading-pulse-circle {
+    @apply w-12 h-12;
+}
+</style>
+
+

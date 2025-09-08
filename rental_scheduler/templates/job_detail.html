@@ -1,0 +1,381 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
+            <div class="flex space-x-3">
+                <a href="{% url 'rental_scheduler:job_update' job.pk %}" 
+                   class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Edit Job
+                </a>
+                <a href="{% url 'rental_scheduler:job_list' %}" 
+                   class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Back to Jobs
+                </a>
+            </div>
+        </div>
+
+        <!-- Status Badge -->
+        <div class="mb-6">
+            {% if job.status == 'scheduled' %}
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                    Scheduled
+                </span>
+            {% elif job.status == 'in_progress' %}
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                    In Progress
+                </span>
+            {% elif job.status == 'completed' %}
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                    Completed
+                </span>
+            {% elif job.status == 'canceled' %}
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                    Canceled
+                </span>
+            {% endif %}
+            {% if job.is_overdue %}
+                <span class="ml-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                    ⚠️ OVERDUE
+                </span>
+            {% endif %}
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="mb-6 border-b border-gray-200">
+            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                <button class="tab-button active border-b-2 border-blue-500 py-2 px-1 text-sm font-medium text-blue-600" 
+                        data-tab="overview">
+                    Overview
+                </button>
+                <button class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                        data-tab="details">
+                    Details
+                </button>
+                <button class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                        data-tab="history">
+                    History
+                </button>
+            </nav>
+        </div>
+
+        <!-- Tab Content -->
+        <div id="tab-content">
+            <!-- Overview Tab -->
+            <div id="overview-tab" class="tab-panel active">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Left Column -->
+                    <div class="space-y-6">
+                <!-- Scheduling Information -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Scheduling</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Calendar:</span>
+                            <span class="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                  style="background-color: {{ job.calendar.color }}20; color: {{ job.calendar.color }};">
+                                {{ job.calendar.name }}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Start Date & Time:</span>
+                            <span class="ml-2 text-gray-900">
+                                {{ job.start_dt|date:"F j, Y" }}
+                                {% if not job.all_day %}
+                                    at {{ job.start_dt|time:"g:i A" }}
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">End Date & Time:</span>
+                            <span class="ml-2 text-gray-900">
+                                {{ job.end_dt|date:"F j, Y" }}
+                                {% if not job.all_day %}
+                                    at {{ job.end_dt|time:"g:i A" }}
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% if job.all_day %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">All Day Event:</span>
+                                <span class="ml-2 text-gray-900">Yes</span>
+                            </div>
+                        {% endif %}
+                        {% if job.duration_hours %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Duration:</span>
+                                <span class="ml-2 text-gray-900">{{ job.duration_hours|floatformat:1 }} hours</span>
+                            </div>
+                        {% endif %}
+                        {% if job.date_call_received %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Call Received:</span>
+                                <span class="ml-2 text-gray-900">{{ job.date_call_received|date:"F j, Y g:i A" }}</span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Customer Information -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Customer Information</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Customer:</span>
+                            <span class="ml-2 text-gray-900">{{ job.customer.display_name }}</span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Contact:</span>
+                            <span class="ml-2 text-gray-900">{{ job.contact_info.name }}</span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Phone:</span>
+                            <span class="ml-2 text-gray-900">{{ job.contact_info.phone }}</span>
+                        </div>
+                        {% if job.full_address %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Address:</span>
+                                <span class="ml-2 text-gray-900">{{ job.full_address }}</span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Trailer Information -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Trailer Information</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Trailer:</span>
+                            <span class="ml-2 text-gray-900">{{ job.trailer.display_name }}</span>
+                        </div>
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Category:</span>
+                            <span class="ml-2 text-gray-900">{{ job.trailer.category.category }}</span>
+                        </div>
+                        {% if job.trailer.color %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Color:</span>
+                                <span class="ml-2 text-gray-900">{{ job.trailer.color }}</span>
+                            </div>
+                        {% endif %}
+                        {% if job.trailer.dimensions %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Dimensions:</span>
+                                <span class="ml-2 text-gray-900">{{ job.trailer.dimensions }}</span>
+                            </div>
+                        {% endif %}
+                        {% if job.trailer_color_overwrite %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Color Override:</span>
+                                <span class="ml-2 text-gray-900">{{ job.trailer_color_overwrite }}</span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column -->
+            <div class="space-y-6">
+                <!-- Job Details -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Job Details</h2>
+                    <div class="space-y-4">
+                        {% if job.repair_notes %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500 block mb-2">Repair Notes:</span>
+                                <div class="bg-gray-50 p-3 rounded-md text-gray-900 whitespace-pre-wrap">{{ job.repair_notes }}</div>
+                            </div>
+                        {% endif %}
+                        {% if job.quote_text %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500 block mb-2">Quote Text:</span>
+                                <div class="bg-gray-50 p-3 rounded-md text-gray-900 whitespace-pre-wrap">{{ job.quote_text }}</div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Repeat Settings -->
+                {% if job.repeat_type != 'none' %}
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Repeat Settings</h2>
+                        <div class="space-y-3">
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Repeat Type:</span>
+                                <span class="ml-2 text-gray-900">{{ job.get_repeat_type_display }}</span>
+                            </div>
+                            {% if job.repeat_n_months %}
+                                <div>
+                                    <span class="text-sm font-medium text-gray-500">Repeat Every:</span>
+                                    <span class="ml-2 text-gray-900">{{ job.repeat_n_months }} months</span>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- System Information -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">System Information</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Created:</span>
+                            <span class="ml-2 text-gray-900">{{ job.created_at|date:"F j, Y g:i A" }}</span>
+                        </div>
+                        {% if job.created_by %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Created By:</span>
+                                <span class="ml-2 text-gray-900">{{ job.created_by.get_full_name|default:job.created_by.username }}</span>
+                            </div>
+                        {% endif %}
+                        <div>
+                            <span class="text-sm font-medium text-gray-500">Last Updated:</span>
+                            <span class="ml-2 text-gray-900">{{ job.updated_at|date:"F j, Y g:i A" }}</span>
+                        </div>
+                        {% if job.updated_by %}
+                            <div>
+                                <span class="text-sm font-medium text-gray-500">Updated By:</span>
+                                <span class="ml-2 text-gray-900">{{ job.updated_by.get_full_name|default:job.updated_by.username }}</span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div> <!-- End Overview Tab -->
+
+        <!-- Details Tab -->
+        <div id="details-tab" class="tab-panel hidden">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Detailed Information</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Contact Override Details -->
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 mb-3">Contact Override</h3>
+                        <div class="space-y-2">
+                            {% if job.business_name %}
+                                <div><span class="text-sm font-medium text-gray-500">Business Name:</span> {{ job.business_name }}</div>
+                            {% endif %}
+                            {% if job.contact_name %}
+                                <div><span class="text-sm font-medium text-gray-500">Contact Name:</span> {{ job.contact_name }}</div>
+                            {% endif %}
+                            {% if job.phone %}
+                                <div><span class="text-sm font-medium text-gray-500">Phone:</span> {{ job.phone }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <!-- Address Override Details -->
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 mb-3">Address Override</h3>
+                        <div class="space-y-2">
+                            {% if job.address_line1 %}
+                                <div><span class="text-sm font-medium text-gray-500">Address:</span> {{ job.address_line1 }}</div>
+                            {% endif %}
+                            {% if job.address_line2 %}
+                                <div><span class="text-sm font-medium text-gray-500">Address 2:</span> {{ job.address_line2 }}</div>
+                            {% endif %}
+                            {% if job.city or job.state or job.postal_code %}
+                                <div><span class="text-sm font-medium text-gray-500">City/State/Zip:</span> 
+                                    {{ job.city }}{% if job.city and job.state %}, {% endif %}{{ job.state }} {{ job.postal_code }}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history-tab" class="tab-panel hidden">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-xl font-semibold text-gray-900 mb-4 border-b border-gray-200 pb-2">Job History</h2>
+                <div class="space-y-4">
+                    <div class="border-l-4 border-blue-500 pl-4">
+                        <div class="text-sm text-gray-500">{{ job.created_at|date:"F j, Y g:i A" }}</div>
+                        <div class="font-medium text-gray-900">Job Created</div>
+                        {% if job.created_by %}
+                            <div class="text-sm text-gray-600">by {{ job.created_by.get_full_name|default:job.created_by.username }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    {% if job.updated_at != job.created_at %}
+                        <div class="border-l-4 border-green-500 pl-4">
+                            <div class="text-sm text-gray-500">{{ job.updated_at|date:"F j, Y g:i A" }}</div>
+                            <div class="font-medium text-gray-900">Job Updated</div>
+                            {% if job.updated_by %}
+                                <div class="text-sm text-gray-600">by {{ job.updated_by.get_full_name|default:job.updated_by.username }}</div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                    
+                    {% if job.date_call_received %}
+                        <div class="border-l-4 border-yellow-500 pl-4">
+                            <div class="text-sm text-gray-500">{{ job.date_call_received|date:"F j, Y g:i A" }}</div>
+                            <div class="font-medium text-gray-900">Call Received</div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        </div> <!-- End Tab Content -->
+
+        <!-- Action Buttons -->
+        <div class="mt-8 flex justify-center space-x-4">
+            <a href="{% url 'rental_scheduler:job_update' job.pk %}" 
+               class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200">
+                Edit Job
+            </a>
+            <a href="{% url 'rental_scheduler:job_delete' job.pk %}" 
+               class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200">
+                Delete Job
+            </a>
+            <a href="{% url 'rental_scheduler:job_list' %}" 
+               class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200">
+                Back to Jobs
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+// Tab functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabPanels = document.querySelectorAll('.tab-panel');
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const targetTab = button.getAttribute('data-tab');
+            
+            // Update button states
+            tabButtons.forEach(btn => {
+                btn.classList.remove('active', 'border-blue-500', 'text-blue-600');
+                btn.classList.add('border-transparent', 'text-gray-500');
+            });
+            button.classList.add('active', 'border-blue-500', 'text-blue-600');
+            button.classList.remove('border-transparent', 'text-gray-500');
+            
+            // Update panel visibility
+            tabPanels.forEach(panel => {
+                panel.classList.add('hidden');
+                panel.classList.remove('active');
+            });
+            
+            const targetPanel = document.getElementById(targetTab + '-tab');
+            if (targetPanel) {
+                targetPanel.classList.remove('hidden');
+                targetPanel.classList.add('active');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

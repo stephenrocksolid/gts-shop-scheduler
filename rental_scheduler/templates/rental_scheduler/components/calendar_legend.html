@@ -1,0 +1,120 @@
+{% load static %}
+
+<div class="calendar-legend">
+    <!-- Calendar Colors Legend -->
+    <div class="legend-section">
+        <span class="legend-label">Calendars:</span>
+        <div class="legend-items">
+            {% for calendar in calendars %}
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: {{ calendar.color }};"></div>
+                <span class="legend-text">{{ calendar.name }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Status Legend -->
+    <div class="legend-section">
+        <span class="legend-label">Status:</span>
+        <div class="legend-items">
+            <div class="legend-item">
+                <div class="legend-color bg-blue-500"></div>
+                <span class="legend-text">Scheduled</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color bg-yellow-500"></div>
+                <span class="legend-text">In Progress</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color bg-green-500"></div>
+                <span class="legend-text">Completed</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color bg-red-500"></div>
+                <span class="legend-text">Canceled</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Usage Instructions -->
+    <div class="legend-instructions">
+        <p class="instruction-text">
+            <span class="font-medium">Single click</span> jobs to update status •
+            <span class="font-medium">Double click</span> events to edit
+        </p>
+    </div>
+</div>
+
+<style>
+.calendar-legend {
+    @apply flex flex-wrap items-center justify-between gap-4 p-4 bg-gray-50 border border-gray-200 rounded-lg;
+}
+
+.legend-section {
+    @apply flex items-center gap-3;
+}
+
+.legend-label {
+    @apply text-sm font-medium text-gray-700 whitespace-nowrap;
+}
+
+.legend-items {
+    @apply flex flex-wrap items-center gap-3;
+}
+
+.legend-item {
+    @apply flex items-center gap-2;
+}
+
+.legend-color {
+    @apply w-4 h-4 rounded border border-gray-300;
+}
+
+.legend-text {
+    @apply text-sm text-gray-600 whitespace-nowrap;
+}
+
+.legend-instructions {
+    @apply flex-shrink-0;
+}
+
+.instruction-text {
+    @apply text-sm text-gray-500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .calendar-legend {
+        @apply flex-col items-start gap-3;
+    }
+    
+    .legend-section {
+        @apply w-full justify-start;
+    }
+    
+    .legend-items {
+        @apply flex-wrap;
+    }
+    
+    .legend-instructions {
+        @apply w-full text-center;
+    }
+}
+
+@media (max-width: 640px) {
+    .legend-items {
+        @apply grid grid-cols-2 gap-2;
+    }
+    
+    .legend-item {
+        @apply text-xs;
+    }
+    
+    .legend-color {
+        @apply w-3 h-3;
+    }
+}
+</style>
+
+
