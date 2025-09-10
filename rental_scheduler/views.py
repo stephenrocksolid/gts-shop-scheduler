@@ -6,8 +6,10 @@ from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_protect
 from django.utils import timezone
 from .models import Calendar, Job, WorkOrder, WorkOrderLine, Invoice, InvoiceLine, StatusChange
+from .forms import JobForm
 import os
 from django.http import HttpResponse
 import json
@@ -15,6 +17,9 @@ from django.db import models, transaction
 from datetime import datetime
 from decimal import Decimal
 from django import forms
+
+# HTML5 datetime-local format constant
+DATETIME_LOCAL_FMT = "%Y-%m-%dT%H:%M"
 import logging
 from django.template.loader import render_to_string
 from rental_scheduler.utils.datetime import format_local, to_local
@@ -152,6 +157,7 @@ class JobListView(ListView):
             'contact_name': 'contact_name',
             'status': 'status',
             'calendar__name': 'calendar__name',
+            'repeat_type': 'repeat_type',
         }
         
         if sort_by in allowed_sort_fields:
@@ -190,32 +196,34 @@ class JobForm(forms.ModelForm):
     
     # Override datetime fields to use proper widgets
     start_dt = forms.DateTimeField(
+        required=True,
+        input_formats=[DATETIME_LOCAL_FMT],
         widget=forms.DateTimeInput(attrs={
             'type': 'datetime-local',
-            'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'
-        }),
-        input_formats=['%Y-%m-%dT%H:%M'],
-        required=True,
+            'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
+            'required': True
+        }, format=DATETIME_LOCAL_FMT),
         help_text="Start date and time of the job"
     )
     
     end_dt = forms.DateTimeField(
+        required=True,
+        input_formats=[DATETIME_LOCAL_FMT],
         widget=forms.DateTimeInput(attrs={
             'type': 'datetime-local',
-            'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'
-        }),
-        input_formats=['%Y-%m-%dT%H:%M'],
-        required=True,
+            'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
+            'required': True
+        }, format=DATETIME_LOCAL_FMT),
         help_text="End date and time of the job"
     )
     
     date_call_received = forms.DateTimeField(
+        required=False,
+        input_formats=[DATETIME_LOCAL_FMT],
         widget=forms.DateTimeInput(attrs={
             'type': 'datetime-local',
             'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'
-        }),
-        input_formats=['%Y-%m-%dT%H:%M'],
-        required=False,
+        }, format=DATETIME_LOCAL_FMT),
         help_text="Date and time the initial call was received"
     )
     
@@ -224,7 +232,8 @@ class JobForm(forms.ModelForm):
         queryset=Calendar.objects.filter(is_active=True),
         required=True,
         widget=forms.Select(attrs={
-            'class': 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'
+            'class': 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
+            'required': True
         }),
         help_text="Select which calendar this event belongs to"
     )
@@ -243,6 +252,7 @@ class JobForm(forms.ModelForm):
         model = Job
         fields = [
             'business_name', 'date_call_received', 'contact_name', 'phone',
+            'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'start_dt', 'end_dt', 'all_day', 'repeat_type', 'notes',
             'trailer_color', 'trailer_serial', 'trailer_details', 'repair_notes', 'quote',
             'calendar', 'status'
@@ -251,6 +261,11 @@ class JobForm(forms.ModelForm):
             'business_name': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
             'contact_name': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
             'phone': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
+            'address_line1': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
+            'address_line2': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
+            'city': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
+            'state': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
+            'postal_code': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
             'all_day': forms.CheckboxInput(attrs={'class': 'h-4 w-4 rounded border-gray-300 mr-2'}),
             'repeat_type': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
             'notes': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none h-20 resize-none', 'rows': 3}),
@@ -260,18 +275,40 @@ class JobForm(forms.ModelForm):
             'repair_notes': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none h-32 resize-none', 'rows': 5}),
             'quote': forms.NumberInput(attrs={'class': 'w-full rounded-md border border-gray-300 pl-7 pr-3 py-2 text-sm focus:border-gray-400 focus:outline-none', 'step': '0.01', 'min': '0'}),
         }
-
-
-class JobCreateView(CreateView):
-    """Create a new job"""
-    model = Job
-    form_class = JobForm
-    template_name = 'rental_scheduler/job_form.html'
-    success_url = reverse_lazy('rental_scheduler:job_list')
     
-    def get_initial(self):
-        """Set initial values for form fields"""
-        initial = super().get_initial()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Pre-fill existing values with correct format so the browser control shows them
+        for name in ("start_dt", "end_dt", "date_call_received"):
+            if self.instance and getattr(self.instance, name, None):
+                self.fields[name].initial = getattr(self.instance, name).strftime(DATETIME_LOCAL_FMT)
+    
+    def clean(self):
+        """Custom validation to ensure end date is after start date"""
+        cleaned_data = super().clean()
+        start_dt = cleaned_data.get("start_dt")
+        end_dt = cleaned_data.get("end_dt")
+        
+        if start_dt and end_dt and end_dt < start_dt:
+            self.add_error("end_dt", "End date must be after start date.")
+        
+        return cleaned_data
+
+
+def job_create(request):
+    """Create a new job - function-based view for better form handling"""
+    if request.method == "POST":
+        form = JobForm(request.POST)
+        if form.is_valid():
+            job = form.save()
+            messages.success(request, "Job created successfully.")
+            return redirect("rental_scheduler:job_detail", pk=job.pk)
+        else:
+            # TEMP debug – keep for now, remove later
+            print("FORM ERRORS:", form.errors.as_json())
+    else:
+        # Set initial values for new form
+        initial = {}
         
         # Set default calendar to first active calendar
         first_calendar = Calendar.objects.filter(is_active=True).first()
@@ -281,34 +318,14 @@ class JobCreateView(CreateView):
         # Set default status
         initial['status'] = 'uncompleted'
         
-        return initial
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Create Job'
-        context['calendars'] = Calendar.objects.filter(is_active=True)
-        context['is_create'] = True
-        return context
-    
-    def form_valid(self, form):
-        """Process form submission and create job"""
-        try:
-            # Set the user who created this job
-            if self.request.user.is_authenticated:
-                form.instance.created_by = self.request.user
-            
-            # No need for customer/trailer auto-creation anymore
-            # All info is stored directly in the job fields
-            
-            response = super().form_valid(form)
-            messages.success(self.request, f'Job for {form.instance.get_display_name()} created successfully.')
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error creating job: {str(e)}")
-            messages.error(self.request, f"Error creating job: {str(e)}")
-            return self.form_invalid(form)
+        form = JobForm(initial=initial)
+
+    context = {
+        'form': form,
+        'title': 'Create Job',
+        'calendars': Calendar.objects.filter(is_active=True)
+    }
+    return render(request, "rental_scheduler/job_form.html", context)
 
 
 class JobUpdateView(UpdateView):
@@ -349,7 +366,7 @@ class JobUpdateView(UpdateView):
 class JobDetailView(DetailView):
     """View job details"""
     model = Job
-    template_name = 'rental_scheduler/job_detail.html'
+    template_name = 'rental_scheduler/job_detail_simple.html'
     context_object_name = 'job'
     
     def get_queryset(self):
@@ -467,16 +484,23 @@ def get_job_calendar_data(request):
             }
             events.append(event)
         
-        return JsonResponse(events, safe=False)
+        return JsonResponse({
+            'status': 'success',
+            'events': events
+        })
         
     except Exception as e:
         logger.error(f"Error getting calendar data: {str(e)}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
 
 
 @require_http_methods(["POST"])
+@csrf_protect
 def update_job_status(request, job_id):
-    """API endpoint to update job status"""
+    """API endpoint to update job status with CSRF protection"""
     try:
         job = get_object_or_404(Job, id=job_id)
         data = json.loads(request.body)
@@ -576,3 +600,164 @@ class InvoiceDetailView(DetailView):
         context = super().get_context_data(**kwargs)
         context['title'] = f'Invoice: {self.object.invoice_number}'
         return context
+
+
+# Job Modal Views
+def job_detail_modal(request, pk):
+    """Return the read-only job details modal partial"""
+    job = get_object_or_404(Job, pk=pk)
+    return render(request, "rental_scheduler/_job_modal_detail.html", {"job": job})
+
+
+def job_edit_modal(request, pk):
+    """Return the editable job modal partial or handle form submission"""
+    job = get_object_or_404(Job, pk=pk)
+    
+    if request.method == "POST":
+        form = JobForm(request.POST, instance=job)
+        if form.is_valid():
+            job = form.save()
+            # Return the updated read-only modal with status 200
+            return render(request, "rental_scheduler/_job_modal_detail.html", {"job": job})
+        else:
+            # Return the edit modal with errors and status 400 so HTMX swaps it and shows errors
+            return render(request, "rental_scheduler/_job_modal_edit.html", {
+                "job": job, 
+                "form": form
+            }, status=400)
+    else:
+        # GET request - show edit form
+        form = JobForm(instance=job)
+        return render(request, "rental_scheduler/_job_modal_edit.html", {
+            "job": job, 
+            "form": form
+        })
+
+# API Views for Job Updates
+@require_http_methods(["POST"])
+@csrf_protect
+def job_create_api(request):
+    """API endpoint to create a new job"""
+    try:
+        # Parse JSON data
+        data = json.loads(request.body)
+        print(f"DEBUG: Received data: {data}")  # Debug logging
+        
+        # Create new job
+        job = Job()
+        
+        # Set job fields
+        job.business_name = data.get('business_name', '')
+        job.contact_name = data.get('contact_name', '')
+        job.phone = data.get('phone', '')
+        job.trailer_color = data.get('trailer_color', '')
+        job.trailer_serial = data.get('trailer_serial', '')
+        job.trailer_details = data.get('trailer_details', '')
+        job.notes = data.get('notes', '')
+        job.repair_notes = data.get('repair_notes', '')
+        job.status = data.get('status', 'uncompleted')
+        job.all_day = data.get('all_day') == 'on' or data.get('all_day') == True
+        
+        # Handle dates
+        if data.get('start_dt'):
+            from datetime import datetime
+            try:
+                # Parse datetime-local format (YYYY-MM-DDTHH:MM)
+                job.start_dt = datetime.fromisoformat(data['start_dt'])
+            except ValueError:
+                return JsonResponse({'error': 'Invalid start date format'}, status=400)
+        if data.get('end_dt'):
+            from datetime import datetime
+            try:
+                # Parse datetime-local format (YYYY-MM-DDTHH:MM)
+                job.end_dt = datetime.fromisoformat(data['end_dt'])
+            except ValueError:
+                return JsonResponse({'error': 'Invalid end date format'}, status=400)
+        
+        # Set default calendar to first active calendar
+        first_calendar = Calendar.objects.filter(is_active=True).first()
+        if first_calendar:
+            job.calendar = first_calendar
+        
+        # Save the job
+        print(f"DEBUG: About to save job with start_dt={job.start_dt}, end_dt={job.end_dt}")  # Debug logging
+        job.save()
+        print(f"DEBUG: Job saved successfully with ID: {job.id}")  # Debug logging
+        
+        # Return created job data
+        return JsonResponse({
+            'id': job.id,
+            'business_name': job.business_name,
+            'contact_name': job.contact_name,
+            'phone': job.phone,
+            'trailer_color': job.trailer_color,
+            'trailer_serial': job.trailer_serial,
+            'trailer_details': job.trailer_details,
+            'start_dt': job.start_dt.isoformat() if job.start_dt else None,
+            'end_dt': job.end_dt.isoformat() if job.end_dt else None,
+            'all_day': job.all_day,
+            'status': job.status,
+            'notes': job.notes,
+            'repair_notes': job.repair_notes,
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        print(f"DEBUG: Error creating job: {e}")  # Debug logging
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def job_update_api(request, pk):
+    """API endpoint for updating job data with CSRF protection"""
+    
+    try:
+        job = get_object_or_404(Job, pk=pk)
+        
+        # Parse JSON data
+        data = json.loads(request.body)
+        
+        # Update job fields
+        job.business_name = data.get('business_name', job.business_name)
+        job.contact_name = data.get('contact_name', job.contact_name)
+        job.phone = data.get('phone', job.phone)
+        job.trailer_color = data.get('trailer_color', job.trailer_color)
+        job.trailer_serial = data.get('trailer_serial', job.trailer_serial)
+        job.trailer_details = data.get('trailer_details', job.trailer_details)
+        job.notes = data.get('notes', job.notes)
+        job.repair_notes = data.get('repair_notes', job.repair_notes)
+        job.status = data.get('status', job.status)
+        job.all_day = data.get('all_day') == 'on' or data.get('all_day') == True
+        
+        # Handle dates
+        if data.get('start_dt'):
+            job.start_dt = data['start_dt']
+        if data.get('end_dt'):
+            job.end_dt = data['end_dt']
+        
+        # Save the job
+        job.save()
+        
+        # Return updated job data
+        return JsonResponse({
+            'id': job.id,
+            'business_name': job.business_name,
+            'contact_name': job.contact_name,
+            'phone': job.phone,
+            'trailer_color': job.trailer_color,
+            'trailer_serial': job.trailer_serial,
+            'trailer_details': job.trailer_details,
+            'start_dt': job.start_dt.isoformat() if job.start_dt else None,
+            'end_dt': job.end_dt.isoformat() if job.end_dt else None,
+            'all_day': job.all_day,
+            'status': job.status,
+            'notes': job.notes,
+            'repair_notes': job.repair_notes,
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

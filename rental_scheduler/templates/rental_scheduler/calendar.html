@@ -28,130 +28,48 @@
         @apply flex-col items-start gap-2;
     }
 }
+
+/* Full-bleed calendar styles */
+.full-bleed {
+    width: 100vw;
+    margin-left: 50%;
+    transform: translateX(-50%);
+}
+
+/* Allow FullCalendar to be as wide as its parent */
+.fc { 
+    max-width: none !important; 
+    margin: 0 !important; 
+    height: 100%;
+}
+
+/* Calendar should consume the viewport height below the navbar */
+#calendar-wrap {
+    /* adjust 120px if your header area is taller/shorter */
+    height: calc(100vh - 120px);
+}
+
+/* Make the FullCalendar canvas fill its parent */
+#calendar { 
+    height: 100%; 
+}
 </style>
 {% endblock %}
 
+{% block main_container_class %}full-bleed{% endblock %}
+
 {% block content %}
-<!-- Compact Calendar Toolbar -->
-<div class="px-6 py-2 mb-3 flex flex-col gap-3">
-    <!-- Row 1: Left = Filter groups, Right = Actions -->
-    <div class="flex items-center justify-between gap-3">
-        <!-- Filters group -->
-        <div class="flex flex-wrap items-center gap-3">
-            <!-- Calendars -->
-            <div class="flex items-center gap-2">
-                <span class="text-xs font-medium text-gray-500">Calendars:</span>
-                
-                {% for calendar in calendars %}
-                <button
-                    class="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border shadow-sm transition-colors duration-200"
-                    data-active="{% if calendar in selected_calendars %}true{% else %}true{% endif %}"
-                    data-calendar-id="{{ calendar.id }}"
-                    hx-get="{% url 'rental_scheduler:calendar' %}"
-                    hx-vals='js:{"cal":"{{ calendar.id }}","status":getActiveStatuses(),"toggle":"cal"}'
-                    hx-target="#calendar-container"
-                    hx-swap="innerHTML"
-                    onclick="toggleCalendarFilter(this)">
-                    <span class="w-2.5 h-2.5 rounded-full" style="background-color: {{ calendar.color|default:'#ef4444' }};"></span>
-                    {{ calendar.name }}
-                </button>
-                {% endfor %}
-            </div>
-
-            <!-- Divider -->
-            <div class="h-6 w-px bg-gray-200"></div>
-
-            <!-- Status -->
-            <div class="flex items-center gap-2">
-                <span class="text-xs font-medium text-gray-500">Status:</span>
-                
-                {% for status_value, status_display in status_choices %}
-                <button
-                    class="px-3 py-1.5 text-sm rounded-lg border shadow-sm capitalize transition-colors duration-200"
-                    data-active="{% if status_value in selected_statuses %}true{% else %}true{% endif %}"
-                    data-status="{{ status_value }}"
-                    hx-get="{% url 'rental_scheduler:calendar' %}"
-                    hx-vals='js:{"status":"{{ status_value }}","cal":getActiveCalendars(),"toggle":"status"}'
-                    hx-target="#calendar-container"
-                    hx-swap="innerHTML"
-                    onclick="toggleStatusFilter(this)">
-                    {{ status_display }}
-                </button>
-                {% endfor %}
-            </div>
+<div id="calendar-shell" class="container-fluid px-3">
+    <div id="calendar-wrap">
+        <div id="calendar"></div>
+        
+        <!-- Loading State -->
+        <div id="calendar-loading" class="calendar-loading hidden">
+            {% include "rental_scheduler/components/loading.html" with 
+                type="spinner" 
+                size="lg" 
+                text="Loading calendar..." %}
         </div>
-
-        <!-- Actions -->
-        <div class="flex items-center gap-2">
-            <a href="{% url 'rental_scheduler:job_create' %}?next={% url 'rental_scheduler:calendar' %}"
-               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white shadow hover:bg-blue-700 transition-colors duration-200">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule='evenodd' d='M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z' clip-rule='evenodd'/>
-                </svg>
-                <span>New Job</span>
-            </a>
-            <a href="{% url 'rental_scheduler:job_list' %}"
-               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors duration-200">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule='evenodd' d='M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z' clip-rule='evenodd'/>
-                </svg>
-                <span>Job List</span>
-            </a>
-        </div>
-    </div>
-
-    <!-- Row 2: Navigation (arrows/today on left; view toggle on right) -->
-    <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-            <button class="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 shadow-sm transition-colors duration-200"
-                    onclick="previousMonth()">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                </svg>
-            </button>
-            <button class="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 shadow-sm transition-colors duration-200"
-                    onclick="nextMonth()">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
-                </svg>
-            </button>
-            <button class="px-3 py-1.5 rounded-lg border bg-gray-100 hover:bg-gray-200 shadow-sm transition-colors duration-200"
-                    onclick="goToToday()">
-                Today
-            </button>
-        </div>
-
-        <!-- Segmented control -->
-        <div class="inline-flex rounded-lg border bg-white shadow-sm overflow-hidden">
-            <button class="px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle"
-                    data-view="dayGridMonth"
-                    data-active="true">
-                Month
-            </button>
-            <button class="px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle"
-                    data-view="timeGridWeek"
-                    data-active="false">
-                Week
-            </button>
-            <button class="px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle"
-                    data-view="timeGridDay"
-                    data-active="false">
-                Day
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Calendar Container -->
-<div id="calendar-container" class="calendar-main-container">
-    <div id="calendar" class="calendar-wrapper"></div>
-    
-    <!-- Loading State -->
-    <div id="calendar-loading" class="calendar-loading hidden">
-        {% include "rental_scheduler/components/loading.html" with 
-            type="spinner" 
-            size="lg" 
-            text="Loading calendar..." %}
     </div>
 </div>
 
@@ -333,6 +251,7 @@ window.calendarConfig = {
     jobUpdateUrl: "{% url 'rental_scheduler:update_job_status' 0 %}".replace('/0/', '/'),
     jobDetailUrl: "{% url 'rental_scheduler:job_detail' 0 %}".replace('/0/', '/'),
     jobEditUrl: "{% url 'rental_scheduler:job_update' 0 %}".replace('/0/', '/'),
+    jobCreateUrl: "{% url 'rental_scheduler:job_create' %}",
     csrfToken: "{{ csrf_token }}",
     calendars: {{ calendars|safe }},
     statusChoices: {{ status_choices|safe }},
@@ -475,79 +394,10 @@ function submitStatusUpdate() {
     });
 }
 
-// Helpers for hx-vals (build comma-separated lists of active toggles)
-function getActiveCalendars() {
-    return Array.from(document.querySelectorAll('[data-calendar-id][data-active="true"]'))
-        .map(btn => btn.getAttribute('data-calendar-id'))
-        .filter(Boolean)
-        .join(',');
-}
 
-function getActiveStatuses() {
-    return Array.from(document.querySelectorAll('[data-status][data-active="true"]'))
-        .map(btn => btn.getAttribute('data-status'))
-        .filter(Boolean)
-        .join(',');
-}
-
-// Toggle filter functions
-function toggleCalendarFilter(button) {
-    const isActive = button.getAttribute('data-active') === 'true';
-    button.setAttribute('data-active', isActive ? 'false' : 'true');
-    updateToggleButtonStyles(button);
-}
-
-function toggleStatusFilter(button) {
-    const isActive = button.getAttribute('data-active') === 'true';
-    button.setAttribute('data-active', isActive ? 'false' : 'true');
-    updateToggleButtonStyles(button);
-}
-
-function updateToggleButtonStyles(button) {
-    const isActive = button.getAttribute('data-active') === 'true';
-    const isCalendar = button.hasAttribute('data-calendar-id');
-    
-    if (isActive) {
-        if (isCalendar) {
-            // Get the calendar color from the color dot
-            const colorDot = button.querySelector('.w-2\\.5');
-            const color = colorDot ? colorDot.style.backgroundColor : '#ef4444';
-            button.className = `inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border shadow-sm transition-colors duration-200 text-white`;
-            button.style.backgroundColor = color;
-        } else {
-            button.className = `px-3 py-1.5 text-sm rounded-lg border shadow-sm capitalize transition-colors duration-200 bg-gray-900 text-white`;
-        }
-    } else {
-        button.className = `${isCalendar ? 'inline-flex items-center gap-2 ' : ''}px-3 py-1.5 text-sm rounded-lg border shadow-sm ${isCalendar ? '' : 'capitalize '}transition-colors duration-200 bg-gray-100 text-gray-700`;
-        if (isCalendar) {
-            button.style.backgroundColor = '';
-        }
-    }
-}
-
-// Initialize toggle button styles on page load
+// Initialize page
 document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('[data-active]').forEach(updateToggleButtonStyles);
-    
-    // View toggle functionality
-    document.querySelectorAll('.view-toggle').forEach(button => {
-        button.addEventListener('click', function() {
-            // Update active states
-            document.querySelectorAll('.view-toggle').forEach(btn => {
-                btn.setAttribute('data-active', 'false');
-                btn.className = 'px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle';
-            });
-            
-            this.setAttribute('data-active', 'true');
-            this.className = 'px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors duration-200 view-toggle bg-gray-900 text-white';
-            
-            // Change calendar view
-            const view = this.getAttribute('data-view');
-            if (window.calendar) {
-                window.calendar.changeView(view);
-            }
-        });
-    });
+    // Page initialization code can go here if needed
 });
 </script>
 {% endblock %}

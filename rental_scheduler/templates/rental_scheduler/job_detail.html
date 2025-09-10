@@ -109,66 +109,70 @@
                 <!-- Left Column -->
                 <div class="overview-column">
                     <!-- Scheduling Information -->
-                    {% include "rental_scheduler/components/card.html" with 
-                        card_title="Scheduling Information"
-                        card_icon="<path fill-rule='evenodd' d='M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z' clip-rule='evenodd'/>" %}
-                    
-                    {% block card_content %}
-                    <div class="info-list">
-                        <div class="info-item">
-                            <span class="info-label">Calendar:</span>
-                            <span class="info-value">
-                                <div class="calendar-badge" style="background-color: {{ job.calendar.color }}20; color: {{ job.calendar.color }};">
-                                    {{ job.calendar.name }}
+                    <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                        <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                            <h3 class="text-lg font-medium text-gray-900 flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/>
+                                </svg>
+                                Scheduling Information
+                            </h3>
+                        </div>
+                        <div class="px-6 py-4">
+                            <div class="info-list">
+                                <div class="info-item">
+                                    <span class="info-label">Calendar:</span>
+                                    <span class="info-value">
+                                        <div class="calendar-badge" style="background-color: {{ job.calendar.color }}20; color: {{ job.calendar.color }};">
+                                            {{ job.calendar.name }}
+                                        </div>
+                                    </span>
                                 </div>
-                            </span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Start Date & Time:</span>
-                            <span class="info-value">
-                                {{ job.start_dt|date:"F j, Y" }}
-                                {% if not job.all_day %}
-                                    at {{ job.start_dt|time:"g:i A" }}
+                                <div class="info-item">
+                                    <span class="info-label">Start Date & Time:</span>
+                                    <span class="info-value">
+                                        {{ job.start_dt|date:"F j, Y" }}
+                                        {% if not job.all_day %}
+                                            at {{ job.start_dt|time:"g:i A" }}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">End Date & Time:</span>
+                                    <span class="info-value">
+                                        {{ job.end_dt|date:"F j, Y" }}
+                                        {% if not job.all_day %}
+                                            at {{ job.end_dt|time:"g:i A" }}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                                {% if job.all_day %}
+                                    <div class="info-item">
+                                        <span class="info-label">All Day Event:</span>
+                                        <span class="info-value">Yes</span>
+                                    </div>
                                 {% endif %}
-                            </span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">End Date & Time:</span>
-                            <span class="info-value">
-                                {{ job.end_dt|date:"F j, Y" }}
-                                {% if not job.all_day %}
-                                    at {{ job.end_dt|time:"g:i A" }}
+                                {% if job.duration_hours %}
+                                    <div class="info-item">
+                                        <span class="info-label">Duration:</span>
+                                        <span class="info-value">{{ job.duration_hours|floatformat:1 }} hours</span>
+                                    </div>
                                 {% endif %}
-                            </span>
+                                {% if job.date_call_received %}
+                                    <div class="info-item">
+                                        <span class="info-label">Call Received:</span>
+                                        <span class="info-value">{{ job.date_call_received|date:"F j, Y g:i A" }}</span>
+                                    </div>
+                                {% endif %}
+                            </div>
                         </div>
-                        {% if job.all_day %}
-                            <div class="info-item">
-                                <span class="info-label">All Day Event:</span>
-                                <span class="info-value">Yes</span>
-                            </div>
-                        {% endif %}
-                        {% if job.duration_hours %}
-                            <div class="info-item">
-                                <span class="info-label">Duration:</span>
-                                <span class="info-value">{{ job.duration_hours|floatformat:1 }} hours</span>
-                            </div>
-                        {% endif %}
-                        {% if job.date_call_received %}
-                            <div class="info-item">
-                                <span class="info-label">Call Received:</span>
-                                <span class="info-value">{{ job.date_call_received|date:"F j, Y g:i A" }}</span>
-                            </div>
-                        {% endif %}
                     </div>
-                    {% endblock %}
-                </div>
 
                 <!-- Customer Information -->
                 {% include "rental_scheduler/components/card.html" with 
                     card_title="Customer Information"
                     card_icon="<path fill-rule='evenodd' d='M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z' clip-rule='evenodd'/>" %}
                 
-                {% block card_content %}
                 <div class="info-list">
                     <div class="info-item">
                         <span class="info-label">Customer:</span>
@@ -189,7 +193,6 @@
                         </div>
                     {% endif %}
                 </div>
-                {% endblock %}
             </div>
         </div>
 
@@ -198,7 +201,6 @@
             card_title="Trailer Information"
             card_icon="<path d='M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z'/>" %}
         
-        {% block card_content %}
         <div class="info-list">
             <div class="info-item">
                 <span class="info-label">Trailer:</span>
@@ -227,7 +229,6 @@
                 </div>
             {% endif %}
         </div>
-        {% endblock %}
     </div>
 
     <!-- Right Column -->
@@ -237,7 +238,6 @@
             card_title="Job Details"
             card_icon="<path fill-rule='evenodd' d='M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z' clip-rule='evenodd'/>" %}
         
-        {% block card_content %}
         <div class="job-details">
             {% if job.repair_notes %}
                 <div class="detail-section">
@@ -252,7 +252,6 @@
                 </div>
             {% endif %}
         </div>
-        {% endblock %}
 
         <!-- Repeat Settings -->
         {% if job.repeat_type != 'none' %}
@@ -260,7 +259,6 @@
                 card_title="Repeat Settings"
                 card_icon="<path fill-rule='evenodd' d='M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z' clip-rule='evenodd'/>" %}
             
-            {% block card_content %}
             <div class="info-list">
                 <div class="info-item">
                     <span class="info-label">Repeat Type:</span>
@@ -273,7 +271,6 @@
                     </div>
                 {% endif %}
             </div>
-            {% endblock %}
         {% endif %}
 
         <!-- System Information -->
@@ -281,7 +278,6 @@
             card_title="System Information"
             card_icon="<path fill-rule='evenodd' d='M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z' clip-rule='evenodd'/>" %}
         
-        {% block card_content %}
         <div class="info-list">
             <div class="info-item">
                 <span class="info-label">Created:</span>
@@ -304,7 +300,6 @@
                 </div>
             {% endif %}
         </div>
-        {% endblock %}
     </div>
 </div>
 
@@ -314,7 +309,6 @@
         card_title="Detailed Information"
         card_icon="<path fill-rule='evenodd' d='M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z' clip-rule='evenodd'/>" %}
     
-    {% block card_content %}
     <div class="details-grid">
         <!-- Contact Override Details -->
         <div class="detail-section">
@@ -368,7 +362,6 @@
             </div>
         </div>
     </div>
-    {% endblock %}
 </div>
 
 <!-- History Tab -->
@@ -377,7 +370,6 @@
         card_title="Job History"
         card_icon="<path fill-rule='evenodd' d='M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z' clip-rule='evenodd'/>" %}
     
-    {% block card_content %}
     <div class="history-timeline">
         <div class="timeline-item">
             <div class="timeline-marker bg-blue-500"></div>
@@ -413,7 +405,6 @@
             </div>
         {% endif %}
     </div>
-    {% endblock %}
 </div>
 
 <!-- Actions Tab -->
@@ -422,7 +413,6 @@
         card_title="Job Actions"
         card_icon="<path d='M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z'/>" %}
     
-    {% block card_content %}
     <div class="actions-grid">
         <div class="action-group">
             <h3 class="action-group-title">Primary Actions</h3>
@@ -434,16 +424,16 @@
                     onclick="window.location.href='{% url 'rental_scheduler:job_update' job.pk %}'" %}
                 
                 {% include "rental_scheduler/components/button.html" with 
-                    text="Create Work Order" 
+                    text="Print Work Order" 
                     variant="success" 
                     size="md"
-                    onclick="window.location.href='{% url 'rental_scheduler:workorder_create' %}?job={{ job.pk }}'" %}
+                    onclick="window.location.href='{% url 'rental_scheduler:job_print_wo' job.pk %}'" %}
                 
                 {% include "rental_scheduler/components/button.html" with 
-                    text="Create Invoice" 
+                    text="Print Invoice" 
                     variant="warning" 
                     size="md"
-                    onclick="window.location.href='{% url 'rental_scheduler:invoice_create' %}?job={{ job.pk }}'" %}
+                    onclick="window.location.href='{% url 'rental_scheduler:job_print_invoice' job.pk %}'" %}
             </div>
         </div>
         
@@ -487,7 +477,6 @@
             </div>
         </div>
     </div>
-    {% endblock %}
 </div>
 </div>
 
@@ -501,10 +490,10 @@
             onclick="window.location.href='{% url 'rental_scheduler:job_update' job.pk %}'" %}
         
         {% include "rental_scheduler/components/button.html" with 
-            text="Create Work Order" 
+            text="Print Work Order" 
             variant="success" 
             size="md"
-            onclick="window.location.href='{% url 'rental_scheduler:workorder_create' %}?job={{ job.pk }}'" %}
+            onclick="window.location.href='{% url 'rental_scheduler:job_print_wo' job.pk %}'" %}
         
         {% include "rental_scheduler/components/button.html" with 
             text="Back to Jobs" 
@@ -518,11 +507,18 @@
 // Job status update function
 function updateJobStatus(status) {
     if (confirm(`Are you sure you want to mark this job as ${status}?`)) {
-        fetch(`{% url 'rental_scheduler:job_status_update' job.pk %}`, {
+        // Get CSRF token from cookie
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+        }
+        
+        fetch(`{% url 'rental_scheduler:update_job_status' job.id %}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                'X-CSRFToken': getCookie('csrftoken'),
             },
             body: JSON.stringify({
                 status: status
@@ -759,5 +755,6 @@ function deleteJob() {
 }
 </style>
 {% endblock %}
+
 
 

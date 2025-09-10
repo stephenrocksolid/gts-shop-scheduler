@@ -250,16 +250,18 @@ class Migration(migrations.Migration):
             name='created_by',
             field=models.ForeignKey(blank=True, help_text='User who created this job', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='created_jobs', to=settings.AUTH_USER_MODEL),
         ),
-        migrations.AddField(
-            model_name='job',
-            name='customer',
-            field=models.ForeignKey(help_text='Customer requesting the work', on_delete=django.db.models.deletion.CASCADE, related_name='jobs', to='rental_scheduler.customer'),
-        ),
-        migrations.AddField(
-            model_name='job',
-            name='trailer',
-            field=models.ForeignKey(help_text='Trailer being worked on or rented', on_delete=django.db.models.deletion.CASCADE, related_name='jobs', to='rental_scheduler.trailer'),
-        ),
+        # Skip adding customer field since it will be removed later
+        # migrations.AddField(
+        #     model_name='job',
+        #     name='customer',
+        #     field=models.ForeignKey(help_text='Customer requesting the work', on_delete=django.db.models.deletion.CASCADE, related_name='jobs', to='rental_scheduler.customer'),
+        # ),
+        # Skip adding trailer field since it will be removed later
+        # migrations.AddField(
+        #     model_name='job',
+        #     name='trailer',
+        #     field=models.ForeignKey(help_text='Trailer being worked on or rented', on_delete=django.db.models.deletion.CASCADE, related_name='jobs', to='rental_scheduler.trailer'),
+        # ),
         migrations.AddField(
             model_name='job',
             name='updated_by',
@@ -313,14 +315,16 @@ class Migration(migrations.Migration):
             model_name='job',
             index=models.Index(fields=['calendar', 'status'], name='rental_sche_calenda_283477_idx'),
         ),
-        migrations.AddIndex(
-            model_name='job',
-            index=models.Index(fields=['customer', 'status'], name='rental_sche_custome_82a1c7_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='job',
-            index=models.Index(fields=['trailer', 'status'], name='rental_sche_trailer_84eb26_idx'),
-        ),
+        # Skip adding customer index since customer field is not added
+        # migrations.AddIndex(
+        #     model_name='job',
+        #     index=models.Index(fields=['customer', 'status'], name='rental_sche_custome_82a1c7_idx'),
+        # ),
+        # Skip adding trailer index since trailer field is not added
+        # migrations.AddIndex(
+        #     model_name='job',
+        #     index=models.Index(fields=['trailer', 'status'], name='rental_sche_trailer_84eb26_idx'),
+        # ),
         migrations.AddIndex(
             model_name='job',
             index=models.Index(fields=['start_dt', 'end_dt'], name='rental_sche_start_d_9bb2cd_idx'),

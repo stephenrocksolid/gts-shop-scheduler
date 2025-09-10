@@ -1,4 +1,4 @@
-<tr class="hover:bg-gray-50 job-row" id="job-row-{{ job.id }}" data-job-id="{{ job.id }}">
+<tr class="hover:bg-gray-50 job-row cursor-pointer" id="job-row-{{ job.id }}" data-job-id="{{ job.id }}" data-job-url="{% url 'rental_scheduler:job_detail' job.pk %}">
     <td class="px-6 py-4 whitespace-nowrap">
         <div class="text-sm font-medium text-gray-900">{{ job.display_name }}</div>
         {% if job.get_phone %}
@@ -34,6 +34,21 @@
         {{ job.end_dt|date:"M j, Y" }}
         {% if not job.all_day %}
             <br><span class="text-gray-500">{{ job.end_dt|time:"g:i A" }}</span>
+        {% endif %}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        {% if job.repeat_type == 'none' %}
+            <span class="text-gray-400">None</span>
+        {% elif job.repeat_type == 'monthly' %}
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                Monthly
+            </span>
+        {% elif job.repeat_type == 'yearly' %}
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                Yearly
+            </span>
+        {% else %}
+            {{ job.get_repeat_type_display }}
         {% endif %}
     </td>
     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">

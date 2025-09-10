@@ -687,3 +687,236 @@
         @apply transform-none;
     }
 }
+
+/* ===== EVENT DETAILS DIALOG ===== */
+.event-details-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.event-details-dialog {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    max-width: 600px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    position: relative;
+    animation: slideIn 0.3s ease-out;
+}
+
+.event-details-header {
+    @apply flex justify-between items-center p-6 border-b border-gray-200;
+}
+
+.event-details-header .event-title {
+    @apply text-xl font-semibold text-gray-900 m-0;
+}
+
+.event-details-header .close-btn {
+    @apply text-gray-400 hover:text-gray-600 text-2xl font-bold;
+    @apply bg-transparent border-none cursor-pointer p-0;
+    @apply w-8 h-8 flex items-center justify-center;
+    @apply rounded-full hover:bg-gray-100 transition-colors duration-200;
+}
+
+.event-details-body {
+    @apply p-6;
+}
+
+.status-section {
+    @apply flex flex-wrap gap-2 mb-6;
+}
+
+.status-badge {
+    @apply px-3 py-1 text-sm font-medium rounded-full;
+}
+
+.status-badge.overdue {
+    @apply bg-fuchsia-100 text-fuchsia-800;
+}
+
+.status-badge.returned {
+    @apply bg-blue-100 text-blue-800;
+}
+
+.status-badge.picked-up {
+    @apply bg-green-100 text-green-800;
+}
+
+.status-badge.pending {
+    @apply bg-amber-100 text-amber-800;
+}
+
+.status-badge.completed {
+    @apply bg-green-100 text-green-800;
+}
+
+.status-badge.scheduled {
+    @apply bg-blue-100 text-blue-800;
+}
+
+.status-badge.active {
+    @apply bg-yellow-100 text-yellow-800;
+}
+
+.license-badge {
+    @apply px-3 py-1 text-sm font-medium rounded-full;
+}
+
+.license-badge.license-scanned {
+    @apply bg-green-100 text-green-800;
+}
+
+.license-badge.license-not-scanned {
+    @apply bg-red-100 text-red-800;
+}
+
+.details-grid {
+    @apply grid grid-cols-1 md:grid-cols-2 gap-6;
+}
+
+.detail-group {
+    @apply space-y-3;
+}
+
+.detail-group h4 {
+    @apply text-lg font-medium text-gray-900 mb-3;
+    @apply border-b border-gray-200 pb-2;
+}
+
+.detail-item {
+    @apply flex justify-between items-start;
+}
+
+.detail-item.full-width {
+    @apply flex-col;
+}
+
+.detail-item .label {
+    @apply text-sm font-medium text-gray-600 min-w-0 flex-shrink-0;
+    @apply mr-3;
+}
+
+.detail-item .value {
+    @apply text-sm text-gray-900 text-right;
+    @apply break-words;
+}
+
+.detail-item.full-width .value {
+    @apply text-left mt-1;
+}
+
+.event-details-footer {
+    @apply flex justify-end gap-3 p-6 border-t border-gray-200;
+    @apply bg-gray-50 rounded-b-lg;
+}
+
+.event-details-footer .btn {
+    @apply px-4 py-2 text-sm font-medium rounded-md;
+    @apply transition-colors duration-200;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2;
+}
+
+.event-details-footer .btn-secondary {
+    @apply bg-white text-gray-700 border border-gray-300;
+    @apply hover:bg-gray-50 focus:ring-gray-500;
+}
+
+.event-details-footer .btn-primary {
+    @apply bg-red-600 text-white border border-red-600;
+    @apply hover:bg-red-700 focus:ring-red-500;
+}
+
+/* Dialog animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Responsive design for dialog */
+@media (max-width: 768px) {
+    .event-details-backdrop {
+        @apply p-4;
+    }
+    
+    .event-details-dialog {
+        @apply max-w-full;
+    }
+    
+    .event-details-header {
+        @apply p-4;
+    }
+    
+    .event-details-body {
+        @apply p-4;
+    }
+    
+    .event-details-footer {
+        @apply p-4;
+    }
+    
+    .details-grid {
+        @apply grid-cols-1 gap-4;
+    }
+    
+    .detail-item {
+        @apply flex-col items-start;
+    }
+    
+    .detail-item .label {
+        @apply mr-0 mb-1;
+    }
+    
+    .detail-item .value {
+        @apply text-left;
+    }
+}
+
+@media (max-width: 640px) {
+    .event-details-backdrop {
+        @apply p-2;
+    }
+    
+    .event-details-header {
+        @apply p-3;
+    }
+    
+    .event-details-body {
+        @apply p-3;
+    }
+    
+    .event-details-footer {
+        @apply p-3 flex-col;
+    }
+    
+    .event-details-footer .btn {
+        @apply w-full;
+    }
+}

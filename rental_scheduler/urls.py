@@ -9,7 +9,7 @@ from .views import (
     CalendarUpdateView,
     CalendarDeleteView,
     JobListView,
-    JobCreateView,
+    job_create,
     JobDetailView,
     JobUpdateView,
     JobDeleteView,
@@ -20,6 +20,10 @@ from .views import (
     WorkOrderDetailView,
     InvoiceListView,
     InvoiceDetailView,
+    job_detail_modal,
+    job_edit_modal,
+    job_create_api,
+    job_update_api,
 )
 from . import error_views
 
@@ -32,7 +36,9 @@ urlpatterns = [
     
     # Calendar API
     path('api/job-calendar-data/', get_job_calendar_data, name='job_calendar_data'),
+    path('api/jobs/create/', job_create_api, name='job_create_api'),
     path('api/jobs/<int:job_id>/update-status/', update_job_status, name='update_job_status'),
+    path('api/jobs/<int:pk>/update/', job_update_api, name='job_update_api'),
     
     # Calendar Management URLs
     path('calendars/', CalendarListView.as_view(), name='calendar_list'),
@@ -42,13 +48,17 @@ urlpatterns = [
     
     # Job URLs
     path('jobs/', JobListView.as_view(), name='job_list'),
-    path('jobs/create/', JobCreateView.as_view(), name='job_create'),
+    path('jobs/create/', job_create, name='job_create'),
     path('jobs/<int:pk>/', JobDetailView.as_view(), name='job_detail'),
     path('jobs/<int:pk>/edit/', JobUpdateView.as_view(), name='job_update'),
     path('jobs/<int:pk>/delete/', JobDeleteView.as_view(), name='job_delete'),
     path('jobs/<int:pk>/print/wo/', JobPrintWOView.as_view(), name='job_print_wo'),
     path('jobs/<int:pk>/print/wo-customer/', JobPrintWOCustomerView.as_view(), name='job_print_wo_customer'),
     path('jobs/<int:pk>/print/invoice/', JobPrintInvoiceView.as_view(), name='job_print_invoice'),
+    
+    # Job Modal URLs
+    path('jobs/<int:pk>/detail/', job_detail_modal, name='job_detail_modal'),
+    path('jobs/<int:pk>/edit-modal/', job_edit_modal, name='job_edit_modal'),
     
     # Work Order URLs
     path('workorders/', WorkOrderListView.as_view(), name='workorder_list'),

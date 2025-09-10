@@ -68,6 +68,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'rental_scheduler.context_processors.calendars',
             ],
         },
     },
@@ -285,3 +286,11 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.ngrok-free.app',
     'http://*.ngrok-free.app',
 ]
+
+# Ensure CSRF cookie settings are appropriate for development
+CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
+CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript access for fetch requests
+CSRF_COOKIE_SAMESITE = 'Lax'  # Default value, good for development
+
+# Session cookie settings
+SESSION_COOKIE_SAMESITE = 'Lax'  # Default value

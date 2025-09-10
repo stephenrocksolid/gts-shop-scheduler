@@ -1,46 +1,6 @@
 {% load static %}
 
 <div class="calendar-grid-container">
-    <!-- Calendar Header -->
-    <div class="calendar-grid-header">
-        <!-- Left Group: Navigation and Today -->
-        <div class="flex items-center gap-4">
-            <div class="flex items-center gap-2">
-                <button class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 transition-colors duration-200" onclick="previousMonth()">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                    </svg>
-                </button>
-                
-                <h2 class="text-lg font-semibold text-gray-900 min-w-[140px] text-center">{{ current_month_year }}</h2>
-                
-                <button class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 transition-colors duration-200" onclick="nextMonth()">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
-                    </svg>
-                </button>
-            </div>
-            
-            <button class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 transition-colors duration-200" onclick="goToToday()">
-                Today
-            </button>
-        </div>
-        
-        <!-- Right Group: View Toggle -->
-        <div class="flex items-center">
-            <div class="flex bg-gray-200 rounded-lg p-1 gap-1">
-                <button class="view-btn px-3 py-1 text-sm font-medium rounded-md transition-colors duration-200 bg-blue-600 text-white" data-view="dayGridMonth">
-                    Month
-                </button>
-                <button class="view-btn px-3 py-1 text-sm font-medium rounded-md transition-colors duration-200 text-gray-700 hover:bg-gray-300" data-view="timeGridWeek">
-                    Week
-                </button>
-                <button class="view-btn px-3 py-1 text-sm font-medium rounded-md transition-colors duration-200 text-gray-700 hover:bg-gray-300" data-view="timeGridDay">
-                    Day
-                </button>
-            </div>
-        </div>
-    </div>
 
     <!-- Calendar Grid -->
     <div class="calendar-grid">
@@ -183,50 +143,11 @@
 </style>
 
 <script>
-function previousMonth() {
-    if (window.calendar) {
-        window.calendar.prev();
-    }
-}
-
-function nextMonth() {
-    if (window.calendar) {
-        window.calendar.next();
-    }
-}
-
-function goToToday() {
-    if (window.calendar) {
-        window.calendar.today();
-    }
-}
 
 function addEvent(date) {
     window.location.href = `{% url 'rental_scheduler:job_create' %}?date=${date}&next={% url 'rental_scheduler:calendar' %}`;
 }
 
-// View selector functionality
-document.addEventListener('DOMContentLoaded', function() {
-    const viewBtns = document.querySelectorAll('.view-btn');
-    viewBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const view = this.dataset.view;
-            
-            // Update active state
-            viewBtns.forEach(b => {
-                b.classList.remove('bg-blue-600', 'text-white');
-                b.classList.add('text-gray-700', 'hover:bg-gray-300');
-            });
-            this.classList.remove('text-gray-700', 'hover:bg-gray-300');
-            this.classList.add('bg-blue-600', 'text-white');
-            
-            // Change calendar view
-            if (window.calendar) {
-                window.calendar.changeView(view);
-            }
-        });
-    });
-});
 </script>
 
 

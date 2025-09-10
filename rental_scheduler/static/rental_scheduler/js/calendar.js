@@ -283,29 +283,20 @@
             }
 
             /**
-             * Handle single click on event - shows status popover (contracts only)
+             * Handle single click on event - shows event details dialog
              * @param {Object} info - FullCalendar event info
              */
             handleEventSingleClick(info) {
                 try {
-                    // Only show popover for contract events, not service events
-                    if (info.event.extendedProps.type === 'service' || info.event.extendedProps.is_service) {
-                        window.Logger?.debug('Calendar: Service event single-clicked - no action', {
-                            eventId: info.event.id,
-                            title: info.event.title,
-                            type: info.event.extendedProps.type
-                        });
-                        return;
-                    }
-
                     window.Logger?.debug('Calendar: Single click detected', {
                         eventId: info.event.id,
-                        title: info.event.title
+                        title: info.event.title,
+                        type: info.event.extendedProps.type
                     });
-                    this.openStatusPopover(info);
+                    this.openEventDetailsDialog(info);
                 } catch (error) {
                     window.Logger?.error('Calendar: Error handling single click', error);
-                    this.showError('Unable to open status popover. Please try again.');
+                    this.showError('Unable to open event details. Please try again.');
                 }
             }
 
@@ -919,6 +910,529 @@
             }
 
             /**
+             * Open comprehensive event details dialog
+             * @param {Object} info - FullCalendar event info
+             */
+            openEventDetailsDialog(info) {
+                try {
+                    // Close any existing popover first
+                    this.closeStatusPopover();
+
+                    // Get the latest event data from the calendar to ensure we have fresh info
+                    const latestEvent = this.calendar?.getEventById(info.event.id);
+                    const eventProps = latestEvent ? latestEvent.extendedProps : info.event.extendedProps;
+                    const event = latestEvent || info.event;
+
+                    // Create dialog backdrop
+                    const backdrop = document.createElement('div');
+                    backdrop.className = 'event-details-backdrop';
+                    backdrop.style.cssText = `
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background-color: rgba(0, 0, 0, 0.5);
+                        z-index: 1000;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    `;
+
+                    // Create dialog container
+                    const dialog = document.createElement('div');
+                    dialog.className = 'event-details-dialog';
+                    dialog.style.cssText = `
+                        background: white;
+                        border-radius: 8px;
+                        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+                        max-width: 600px;
+                        width: 100%;
+                        max-height: 80vh;
+                        overflow-y: auto;
+                        position: relative;
+                    `;
+
+                    // Build dialog content based on event type
+                    let content = '';
+                    const eventType = eventProps.type || 'unknown';
+
+                    if (eventType === 'contract') {
+                        content = this.buildContractEventContent(event, eventProps);
+                    } else if (eventType === 'service') {
+                        content = this.buildServiceEventContent(event, eventProps);
+                    } else if (eventType === 'job') {
+                        content = this.buildJobEventContent(event, eventProps);
+                    } else {
+                        content = this.buildGenericEventContent(event, eventProps);
+                    }
+
+                    dialog.innerHTML = content;
+
+                    // Add to DOM
+                    backdrop.appendChild(dialog);
+                    document.body.appendChild(backdrop);
+
+                    // Setup event listeners
+                    this.setupEventDetailsDialogListeners(backdrop, dialog, event, eventProps);
+
+                    // Store reference for cleanup
+                    this.eventDetailsDialog = backdrop;
+
+                } catch (error) {
+                    window.Logger?.error('Calendar: Error opening event details dialog', error);
+                    this.showError('Unable to open event details. Please try again.');
+                }
+            }
+
+            /**
+             * Build content for contract events
+             * @param {Object} event - FullCalendar event
+             * @param {Object} props - Event extended properties
+             * @returns {string} HTML content
+             */
+            buildContractEventContent(event, props) {
+                const formatDateTime = (isoString) => {
+                    if (!isoString) return 'Not set';
+                    try {
+                        const date = new Date(isoString);
+                        return date.toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    } catch (error) {
+                        return 'Invalid date';
+                    }
+                };
+
+                const getStatusBadge = (props) => {
+                    if (props.is_overdue) {
+                        return '<span class="status-badge overdue">Overdue</span>';
+                    } else if (props.is_returned) {
+                        return '<span class="status-badge returned">Returned</span>';
+                    } else if (props.is_picked_up) {
+                        return '<span class="status-badge picked-up">Picked Up</span>';
+                    } else {
+                        return '<span class="status-badge pending">Pending</span>';
+                    }
+                };
+
+                const getLicenseBadge = (scanned) => {
+                    const badgeClass = scanned ? 'license-scanned' : 'license-not-scanned';
+                    const badgeText = scanned ? 'License Scanned' : 'License Not Scanned';
+                    return `<span class="license-badge ${badgeClass}">${badgeText}</span>`;
+                };
+
+                return `
+                    <div class="event-details-header">
+                        <h3 class="event-title">${event.title}</h3>
+                        <button class="close-btn" type="button">&times;</button>
+                    </div>
+                    <div class="event-details-body">
+                        <div class="status-section">
+                            ${getStatusBadge(props)}
+                            ${getLicenseBadge(props.drivers_license_scanned)}
+                        </div>
+                        
+                        <div class="details-grid">
+                            <div class="detail-group">
+                                <h4>Customer Information</h4>
+                                <div class="detail-item">
+                                    <span class="label">Name:</span>
+                                    <span class="value">${props.customer_name || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Phone:</span>
+                                    <span class="value">${props.customer_phone || 'N/A'}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-group">
+                                <h4>Trailer Information</h4>
+                                <div class="detail-item">
+                                    <span class="label">Number:</span>
+                                    <span class="value">${props.trailer_number || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Model:</span>
+                                    <span class="value">${props.trailer_model || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Includes Winch:</span>
+                                    <span class="value">${props.includes_winch ? 'Yes' : 'No'}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-group">
+                                <h4>Schedule</h4>
+                                <div class="detail-item">
+                                    <span class="label">Start:</span>
+                                    <span class="value">${formatDateTime(event.start)}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">End:</span>
+                                    <span class="value">${formatDateTime(event.end)}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Pickup:</span>
+                                    <span class="value">${formatDateTime(props.pickup_datetime)}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Return:</span>
+                                    <span class="value">${formatDateTime(props.return_datetime)}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-group">
+                                <h4>Status</h4>
+                                <div class="detail-item">
+                                    <span class="label">Billed:</span>
+                                    <span class="value">${props.is_billed ? 'Yes' : 'No'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Invoiced:</span>
+                                    <span class="value">${props.is_invoiced ? 'Yes' : 'No'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="event-details-footer">
+                        <button class="btn btn-secondary cancel-btn" type="button">Close</button>
+                        <button class="btn btn-primary edit-btn" type="button">Edit Contract</button>
+                    </div>
+                `;
+            }
+
+            /**
+             * Build content for service events
+             * @param {Object} event - FullCalendar event
+             * @param {Object} props - Event extended properties
+             * @returns {string} HTML content
+             */
+            buildServiceEventContent(event, props) {
+                const formatDateTime = (isoString) => {
+                    if (!isoString) return 'Not set';
+                    try {
+                        const date = new Date(isoString);
+                        return date.toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    } catch (error) {
+                        return 'Invalid date';
+                    }
+                };
+
+                const getServiceStatusBadge = (props) => {
+                    if (props.is_past) {
+                        return '<span class="status-badge completed">Completed</span>';
+                    } else if (props.is_future) {
+                        return '<span class="status-badge scheduled">Scheduled</span>';
+                    } else {
+                        return '<span class="status-badge active">Active</span>';
+                    }
+                };
+
+                return `
+                    <div class="event-details-header">
+                        <h3 class="event-title">${event.title}</h3>
+                        <button class="close-btn" type="button">&times;</button>
+                    </div>
+                    <div class="event-details-body">
+                        <div class="status-section">
+                            ${getServiceStatusBadge(props)}
+                        </div>
+                        
+                        <div class="details-grid">
+                            <div class="detail-group">
+                                <h4>Service Information</h4>
+                                <div class="detail-item">
+                                    <span class="label">Description:</span>
+                                    <span class="value">${props.description || 'No description provided'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Active:</span>
+                                    <span class="value">${props.is_active ? 'Yes' : 'No'}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-group">
+                                <h4>Trailer Information</h4>
+                                <div class="detail-item">
+                                    <span class="label">Number:</span>
+                                    <span class="value">${props.trailer_number || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Model:</span>
+                                    <span class="value">${props.trailer_model || 'N/A'}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-group">
+                                <h4>Schedule</h4>
+                                <div class="detail-item">
+                                    <span class="label">Start:</span>
+                                    <span class="value">${formatDateTime(event.start)}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">End:</span>
+                                    <span class="value">${formatDateTime(event.end)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="event-details-footer">
+                        <button class="btn btn-secondary cancel-btn" type="button">Close</button>
+                        <button class="btn btn-primary edit-btn" type="button">Edit Service</button>
+                    </div>
+                `;
+            }
+
+            /**
+             * Build content for job events
+             * @param {Object} event - FullCalendar event
+             * @param {Object} props - Event extended properties
+             * @returns {string} HTML content
+             */
+            buildJobEventContent(event, props) {
+                const formatDateTime = (isoString) => {
+                    if (!isoString) return 'Not set';
+                    try {
+                        const date = new Date(isoString);
+                        return date.toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    } catch (error) {
+                        return 'Invalid date';
+                    }
+                };
+
+                const getJobStatusBadge = (status) => {
+                    const statusClass = status.toLowerCase().replace(' ', '-');
+                    return `<span class="status-badge ${statusClass}">${props.status_display || status}</span>`;
+                };
+
+                return `
+                    <div class="event-details-header">
+                        <h3 class="event-title">${event.title}</h3>
+                        <button class="close-btn" type="button">&times;</button>
+                    </div>
+                    <div class="event-details-body">
+                        <div class="status-section">
+                            ${getJobStatusBadge(props.status)}
+                        </div>
+                        
+                        <div class="details-grid">
+                            <div class="detail-group">
+                                <h4>Customer Information</h4>
+                                <div class="detail-item">
+                                    <span class="label">Name:</span>
+                                    <span class="value">${props.customer_name || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Phone:</span>
+                                    <span class="value">${props.customer_phone || 'N/A'}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-group">
+                                <h4>Trailer Information</h4>
+                                <div class="detail-item">
+                                    <span class="label">Number:</span>
+                                    <span class="value">${props.trailer_number || 'N/A'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Model:</span>
+                                    <span class="value">${props.trailer_model || 'N/A'}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-group">
+                                <h4>Schedule</h4>
+                                <div class="detail-item">
+                                    <span class="label">Start:</span>
+                                    <span class="value">${formatDateTime(event.start)}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">End:</span>
+                                    <span class="value">${formatDateTime(event.end)}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">All Day:</span>
+                                    <span class="value">${event.allDay ? 'Yes' : 'No'}</span>
+                                </div>
+                            </div>
+                            
+                            ${props.repair_notes ? `
+                            <div class="detail-group">
+                                <h4>Repair Notes</h4>
+                                <div class="detail-item full-width">
+                                    <span class="value">${props.repair_notes}</span>
+                                </div>
+                            </div>
+                            ` : ''}
+                            
+                            ${props.quote_text ? `
+                            <div class="detail-group">
+                                <h4>Quote</h4>
+                                <div class="detail-item full-width">
+                                    <span class="value">${props.quote_text}</span>
+                                </div>
+                            </div>
+                            ` : ''}
+                            
+                            ${props.calendar_name ? `
+                            <div class="detail-group">
+                                <h4>Calendar</h4>
+                                <div class="detail-item">
+                                    <span class="label">Name:</span>
+                                    <span class="value">${props.calendar_name}</span>
+                                </div>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="event-details-footer">
+                        <button class="btn btn-secondary cancel-btn" type="button">Close</button>
+                        ${props.status === 'uncompleted' ? 
+                            '<button class="btn btn-success mark-complete-btn" type="button">Mark as Complete</button>' : 
+                            ''
+                        }
+                        <button class="btn btn-primary edit-btn" type="button">Edit Job</button>
+                    </div>
+                `;
+            }
+
+            /**
+             * Build content for generic/unknown events
+             * @param {Object} event - FullCalendar event
+             * @param {Object} props - Event extended properties
+             * @returns {string} HTML content
+             */
+            buildGenericEventContent(event, props) {
+                const formatDateTime = (isoString) => {
+                    if (!isoString) return 'Not set';
+                    try {
+                        const date = new Date(isoString);
+                        return date.toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    } catch (error) {
+                        return 'Invalid date';
+                    }
+                };
+
+                return `
+                    <div class="event-details-header">
+                        <h3 class="event-title">${event.title}</h3>
+                        <button class="close-btn" type="button">&times;</button>
+                    </div>
+                    <div class="event-details-body">
+                        <div class="details-grid">
+                            <div class="detail-group">
+                                <h4>Event Information</h4>
+                                <div class="detail-item">
+                                    <span class="label">Type:</span>
+                                    <span class="value">${props.type || 'Unknown'}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">Start:</span>
+                                    <span class="value">${formatDateTime(event.start)}</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="label">End:</span>
+                                    <span class="value">${formatDateTime(event.end)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="event-details-footer">
+                        <button class="btn btn-secondary cancel-btn" type="button">Close</button>
+                    </div>
+                `;
+            }
+
+            /**
+             * Setup event listeners for the event details dialog
+             * @param {HTMLElement} backdrop - Dialog backdrop element
+             * @param {HTMLElement} dialog - Dialog element
+             * @param {Object} event - FullCalendar event
+             * @param {Object} props - Event extended properties
+             */
+            setupEventDetailsDialogListeners(backdrop, dialog, event, props) {
+                const closeDialog = () => {
+                    if (backdrop && backdrop.parentNode) {
+                        backdrop.parentNode.removeChild(backdrop);
+                    }
+                    this.eventDetailsDialog = null;
+                };
+
+                // Close button
+                const closeBtn = dialog.querySelector('.close-btn');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', closeDialog);
+                }
+
+                // Cancel button
+                const cancelBtn = dialog.querySelector('.cancel-btn');
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', closeDialog);
+                }
+
+                // Mark Complete button (for jobs only)
+                const markCompleteBtn = dialog.querySelector('.mark-complete-btn');
+                if (markCompleteBtn) {
+                    markCompleteBtn.addEventListener('click', () => {
+                        this.updateJobStatus(event, props, 'completed', closeDialog);
+                    });
+                }
+
+                // Edit button
+                const editBtn = dialog.querySelector('.edit-btn');
+                if (editBtn) {
+                    editBtn.addEventListener('click', () => {
+                        closeDialog();
+                        this.handleEventDoubleClick({ event: event });
+                    });
+                }
+
+                // Backdrop click
+                backdrop.addEventListener('click', (e) => {
+                    if (e.target === backdrop) {
+                        closeDialog();
+                    }
+                });
+
+                // Escape key
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        closeDialog();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
+            }
+
+            /**
              * Handle calendar loading state
              * @param {boolean} isLoading - Whether calendar is loading
              */
@@ -1136,6 +1650,105 @@
             }
 
             /**
+             * Update job status
+             * @param {Object} event - FullCalendar event
+             * @param {Object} props - Event extended properties
+             * @param {string} newStatus - New status to set
+             * @param {Function} closeDialog - Function to close the dialog
+             */
+            async updateJobStatus(event, props, newStatus, closeDialog) {
+                try {
+                    if (!confirm(`Are you sure you want to mark this job as ${newStatus}?`)) {
+                        return;
+                    }
+
+                    // Extract job ID from event ID (remove "job-" prefix)
+                    const jobId = event.id.replace(/^job-/, '');
+                    
+                    // Get CSRF token
+                    const csrfToken = this.getCSRFToken();
+                    
+                    const response = await fetch(`/api/jobs/${jobId}/update-status/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrfToken,
+                        },
+                        body: JSON.stringify({
+                            status: newStatus
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Show success message
+                        this.showSuccess('Job status updated successfully!');
+                        
+                        // Close dialog
+                        closeDialog();
+                        
+                        // Refresh calendar to show updated status
+                        this.refresh();
+                    } else {
+                        this.showError(data.error || 'Failed to update job status');
+                    }
+                } catch (error) {
+                    window.Logger?.error('Calendar: Error updating job status', error);
+                    this.showError('Network error occurred while updating status');
+                }
+            }
+
+            /**
+             * Get CSRF token from cookie
+             * @returns {string} CSRF token
+             */
+            getCSRFToken() {
+                const value = `; ${document.cookie}`;
+                const parts = value.split(`; csrftoken=`);
+                if (parts.length === 2) return parts.pop().split(';').shift();
+                return '';
+            }
+
+            /**
+             * Show success message to user
+             * @param {string} message - Success message to display
+             */
+            showSuccess(message) {
+                // Create a temporary success notification
+                const successDiv = document.createElement('div');
+                successDiv.className = 'fixed top-4 right-4 bg-green-50 border border-green-200 rounded-md p-4 z-50';
+                successDiv.innerHTML = `
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm text-green-700">${message}</p>
+                        </div>
+                        <div class="ml-auto pl-3">
+                            <button class="text-green-400 hover:text-green-600" onclick="this.parentElement.parentElement.parentElement.remove()">
+                                <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                document.body.appendChild(successDiv);
+
+                // Auto-remove after 3 seconds
+                setTimeout(() => {
+                    if (successDiv && successDiv.parentNode) {
+                        successDiv.parentNode.removeChild(successDiv);
+                    }
+                }, 3000);
+            }
+
+            /**
              * Refresh calendar data
              */
             async refresh() {
@@ -1161,6 +1774,12 @@
                 // Close any open popover and dialogs
                 this.closeStatusPopover();
                 this.removeReturnDateDialog();
+                
+                // Close event details dialog if open
+                if (this.eventDetailsDialog && this.eventDetailsDialog.parentNode) {
+                    this.eventDetailsDialog.parentNode.removeChild(this.eventDetailsDialog);
+                    this.eventDetailsDialog = null;
+                }
 
                 if (this.calendar) {
                     this.calendar.destroy();
