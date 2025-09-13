@@ -1,160 +1,28 @@
 {% load static %}
 
-<div class="page-header">
-    <div class="page-header-content">
-        <div class="page-header-main">
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-3">
             {% if page_icon %}
-            <div class="page-header-icon">
-                <svg class="page-icon" fill="currentColor" viewBox="0 0 20 20">
+            <div class="flex-shrink-0">
+                <svg class="h-8 w-8 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
                     {{ page_icon|safe }}
                 </svg>
             </div>
             {% endif %}
-            
-            <div class="page-header-text">
-                <h1 class="page-title">{{ page_title }}</h1>
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">
+                    {{ page_title|default:"Page Title" }}
+                </h1>
                 {% if page_subtitle %}
-                <p class="page-subtitle">{{ page_subtitle }}</p>
+                <p class="mt-2 text-sm text-gray-600">{{ page_subtitle }}</p>
                 {% endif %}
             </div>
         </div>
-        
         {% if page_actions %}
-        <div class="page-header-actions">
+        <div class="flex items-center space-x-3">
             {% block page_actions %}{% endblock %}
         </div>
         {% endif %}
     </div>
-    
-    {% if breadcrumbs %}
-    <div class="page-header-breadcrumbs">
-        {% include "rental_scheduler/components/breadcrumb.html" with breadcrumbs=breadcrumbs %}
-    </div>
-    {% endif %}
-    
-    {% if page_tabs %}
-    <div class="page-header-tabs">
-        <nav class="page-tabs-nav" aria-label="Page tabs">
-            <div class="page-tabs-list">
-                {% for tab in page_tabs %}
-                <a href="{{ tab.url }}" 
-                   class="page-tab {% if tab.active %}page-tab-active{% endif %}"
-                   {% if tab.hx_get %}hx-get="{{ tab.hx_get }}"{% endif %}
-                   {% if tab.hx_target %}hx-target="{{ tab.hx_target }}"{% endif %}
-                   {% if tab.hx_push_url %}hx-push-url="{{ tab.hx_push_url }}"{% endif %}>
-                    {% if tab.icon %}
-                    <svg class="page-tab-icon" fill="currentColor" viewBox="0 0 20 20">
-                        {{ tab.icon|safe }}
-                    </svg>
-                    {% endif %}
-                    <span class="page-tab-text">{{ tab.text }}</span>
-                    {% if tab.badge %}
-                    <span class="page-tab-badge">{{ tab.badge }}</span>
-                    {% endif %}
-                </a>
-                {% endfor %}
-            </div>
-        </nav>
-    </div>
-    {% endif %}
 </div>
-
-<style>
-.page-header {
-    @apply bg-white border-b border-gray-200 px-6 py-4;
-}
-
-.page-header-content {
-    @apply flex items-center justify-between;
-}
-
-.page-header-main {
-    @apply flex items-center;
-}
-
-.page-header-icon {
-    @apply flex-shrink-0 mr-4;
-}
-
-.page-icon {
-    @apply w-8 h-8 text-red-600;
-}
-
-.page-header-text {
-    @apply flex-1;
-}
-
-.page-title {
-    @apply text-2xl font-bold text-gray-900;
-}
-
-.page-subtitle {
-    @apply mt-1 text-sm text-gray-500;
-}
-
-.page-header-actions {
-    @apply flex items-center space-x-3;
-}
-
-.page-header-breadcrumbs {
-    @apply mt-4;
-}
-
-.page-header-tabs {
-    @apply mt-6 -mb-px;
-}
-
-.page-tabs-nav {
-    @apply border-b border-gray-200;
-}
-
-.page-tabs-list {
-    @apply flex space-x-8;
-}
-
-.page-tab {
-    @apply flex items-center py-2 px-1 border-b-2 font-medium text-sm transition-colors duration-200;
-}
-
-.page-tab:not(.page-tab-active) {
-    @apply border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300;
-}
-
-.page-tab-active {
-    @apply border-red-500 text-red-600;
-}
-
-.page-tab-icon {
-    @apply w-4 h-4 mr-2;
-}
-
-.page-tab-text {
-    @apply mr-2;
-}
-
-.page-tab-badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .page-header-content {
-        @apply flex-col items-start space-y-4;
-    }
-    
-    .page-header-actions {
-        @apply w-full justify-start;
-    }
-    
-    .page-tabs-list {
-        @apply flex-wrap;
-    }
-    
-    .page-tab {
-        @apply flex-1 justify-center;
-    }
-}
-</style>
-
-
-

@@ -88,6 +88,9 @@ local_settings.py
 .env
 db.sqlite3
 
+# Static files (collected by collectstatic)
+staticfiles/
+
 ### Node.js ###
 node_modules/
 npm-debug.log

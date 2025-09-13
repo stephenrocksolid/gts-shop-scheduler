@@ -4,28 +4,103 @@
 {% block extra_css %}
 <link href="{% static 'rental_scheduler/css/calendar.css' %}" rel="stylesheet">
 <link href="{% static 'rental_scheduler/css/job_calendar.css' %}" rel="stylesheet">
+
+<!-- Alpine.js Component Definitions -->
+<script>
+// Define Alpine.js components immediately and ensure they're available globally
+(function() {
+    'use strict';
+    
+    // Define the components
+    function quickActionsModal() {
+        return {
+            isOpen: false,
+            currentJob: null,
+            
+            open(jobData) {
+                this.currentJob = jobData;
+                this.isOpen = true;
+                this.updateModalContent();
+            },
+            
+            close() {
+                this.isOpen = false;
+                this.currentJob = null;
+            },
+            
+            updateModalContent() {
+                if (this.currentJob) {
+                    const titleEl = document.getElementById('modal-job-title');
+                    const detailsEl = document.getElementById('modal-job-details');
+                    if (titleEl) titleEl.textContent = this.currentJob.title;
+                    if (detailsEl) detailsEl.textContent = 
+                        `${this.currentJob.customer} • ${this.currentJob.start_time}`;
+                }
+            }
+        }
+    }
+
+    function statusUpdateModal() {
+        return {
+            isOpen: false,
+            currentJobId: null,
+            
+            open(jobId) {
+                this.currentJobId = jobId;
+                this.isOpen = true;
+            },
+            
+            close() {
+                this.isOpen = false;
+                this.currentJobId = null;
+                const form = document.getElementById('status-update-form');
+                if (form) form.reset();
+            }
+        }
+    }
+    
+    // Make them available globally
+    window.quickActionsModal = quickActionsModal;
+    window.statusUpdateModal = statusUpdateModal;
+    
+    // Also register with Alpine if it's available
+    if (typeof Alpine !== 'undefined') {
+        Alpine.data('quickActionsModal', quickActionsModal);
+        Alpine.data('statusUpdateModal', statusUpdateModal);
+    } else {
+        // Register when Alpine becomes available
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('quickActionsModal', quickActionsModal);
+            Alpine.data('statusUpdateModal', statusUpdateModal);
+        });
+    }
+})();
+</script>
 <style>
 /* Status indicator styles for calendar events */
 .status-pending {
-    @apply bg-yellow-400;
+    background-color: #fbbf24;
 }
 
 .status-confirmed {
-    @apply bg-blue-500;
+    background-color: #3b82f6;
 }
 
 .status-in_progress {
-    @apply bg-orange-500;
+    background-color: #f97316;
 }
 
 .status-completed {
-    @apply bg-green-500;
+    background-color: #10b981;
 }
 
 /* Responsive adjustments for compact toolbar */
 @media (max-width: 768px) {
     .flex-wrap {
-        @apply flex-col items-start gap-2;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
     }
 }
 
@@ -52,6 +127,41 @@
 /* Make the FullCalendar canvas fill its parent */
 #calendar { 
     height: 100%; 
+}
+
+/* Calendar and Status filter dropdown styling */
+#calendar-filter, #status-filter {
+    background: #f8f9fa !important;
+    border: 1px solid #dee2e6 !important;
+    color: #495057 !important;
+    font-size: 14px !important;
+    font-weight: normal !important;
+    padding: 6px 12px !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+    outline: none !important;
+    border-radius: 4px !important;
+    min-width: 120px !important;
+    transition: all 0.2s ease !important;
+}
+
+#calendar-filter:hover, #status-filter:hover {
+    background: #e9ecef !important;
+    border-color: #adb5bd !important;
+}
+
+#calendar-filter:focus, #status-filter:focus {
+    background: #ffffff !important;
+    border-color: #007bff !important;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+}
+
+/* Style the filter button containers */
+.fc-calendarFilterButton-button, .fc-statusFilterButton-button {
+    padding: 0 !important;
+    margin: 0 4px !important;
+    background: transparent !important;
+    border: none !important;
 }
 </style>
 {% endblock %}
@@ -253,60 +363,27 @@ window.calendarConfig = {
     jobEditUrl: "{% url 'rental_scheduler:job_update' 0 %}".replace('/0/', '/'),
     jobCreateUrl: "{% url 'rental_scheduler:job_create' %}",
     csrfToken: "{{ csrf_token }}",
-    calendars: {{ calendars|safe }},
-    statusChoices: {{ status_choices|safe }},
+    calendars: JSON.parse('{{ calendars_json|default:"[]"|escapejs }}'),
+    statusChoices: JSON.parse('{{ status_choices|default:"[]"|escapejs }}'),
     currentFilters: {
         calendar: "{{ request.GET.calendar|default:'' }}",
         status: "{{ request.GET.status|default:'' }}",
         search: "{{ request.GET.search|default:'' }}"
-    }
+    },
+    // Load saved filters from localStorage on page load
+    savedFilters: (function() {
+        try {
+            const saved = localStorage.getItem('gts-calendar-filters');
+            return saved ? JSON.parse(saved) : {};
+        } catch (error) {
+            console.warn('Error loading saved filters:', error);
+            return {};
+        }
+    })()
 };
 
-// Quick actions modal functionality
-function quickActionsModal() {
-    return {
-        isOpen: false,
-        currentJob: null,
-        
-        open(jobData) {
-            this.currentJob = jobData;
-            this.isOpen = true;
-            this.updateModalContent();
-        },
-        
-        close() {
-            this.isOpen = false;
-            this.currentJob = null;
-        },
-        
-        updateModalContent() {
-            if (this.currentJob) {
-                document.getElementById('modal-job-title').textContent = this.currentJob.title;
-                document.getElementById('modal-job-details').textContent = 
-                    `${this.currentJob.customer} • ${this.currentJob.start_time}`;
-            }
-        }
-    }
-}
 
-// Status update modal functionality
-function statusUpdateModal() {
-    return {
-        isOpen: false,
-        currentJobId: null,
-        
-        open(jobId) {
-            this.currentJobId = jobId;
-            this.isOpen = true;
-        },
-        
-        close() {
-            this.isOpen = false;
-            this.currentJobId = null;
-            document.getElementById('status-update-form').reset();
-        }
-    }
-}
+// Alpine.js components are now defined in the head section
 
 // Global functions for modal interactions
 function openQuickActions(jobData) {

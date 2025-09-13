@@ -9,7 +9,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_protect
 from django.utils import timezone
 from .models import Calendar, Job, WorkOrder, WorkOrderLine, Invoice, InvoiceLine, StatusChange
-from .forms import JobForm
+from .forms import JobForm, WorkOrderForm, WorkOrderLineForm
 import os
 from django.http import HttpResponse
 import json
@@ -42,14 +42,25 @@ class CalendarView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'Calendar'
-        context['calendars'] = Calendar.objects.filter(is_active=True)
+        
+        # Serialize calendars for JavaScript
+        calendars = Calendar.objects.filter(is_active=True)
+        context['calendars'] = [
+            {'id': cal.id, 'name': cal.name, 'color': cal.color}
+            for cal in calendars
+        ]
+        
+        # Also add as JSON string for debugging
+        import json
+        context['calendars_json'] = json.dumps(context['calendars'])
+        
         return context
 
 # Calendar CRUD Views
 class CalendarListView(ListView):
     """List all calendars with basic CRUD operations"""
     model = Calendar
-    template_name = 'rental_scheduler/calendar_list.html'
+    template_name = 'rental_scheduler/calendars/calendar_list.html'
     context_object_name = 'calendars'
     ordering = ['name']
     
@@ -61,7 +72,7 @@ class CalendarListView(ListView):
 class CalendarCreateView(CreateView):
     """Create a new calendar"""
     model = Calendar
-    template_name = 'rental_scheduler/calendar_form.html'
+    template_name = 'rental_scheduler/calendars/calendar_form.html'
     fields = ['name', 'color', 'is_active']
     success_url = reverse_lazy('rental_scheduler:calendar_list')
     
@@ -77,7 +88,7 @@ class CalendarCreateView(CreateView):
 class CalendarUpdateView(UpdateView):
     """Update an existing calendar"""
     model = Calendar
-    template_name = 'rental_scheduler/calendar_form.html'
+    template_name = 'rental_scheduler/calendars/calendar_form.html'
     fields = ['name', 'color', 'is_active']
     success_url = reverse_lazy('rental_scheduler:calendar_list')
     
@@ -93,7 +104,7 @@ class CalendarUpdateView(UpdateView):
 class CalendarDeleteView(DeleteView):
     """Delete a calendar"""
     model = Calendar
-    template_name = 'rental_scheduler/calendar_confirm_delete.html'
+    template_name = 'rental_scheduler/calendars/calendar_confirm_delete.html'
     success_url = reverse_lazy('rental_scheduler:calendar_list')
     
     def get_context_data(self, **kwargs):
@@ -111,7 +122,7 @@ class CalendarDeleteView(DeleteView):
 class JobListView(ListView):
     """List all jobs with filtering, search, and sorting capabilities"""
     model = Job
-    template_name = 'rental_scheduler/job_list.html'
+    template_name = 'rental_scheduler/jobs/job_list.html'
     context_object_name = 'jobs'
     paginate_by = 25
     
@@ -325,14 +336,14 @@ def job_create(request):
         'title': 'Create Job',
         'calendars': Calendar.objects.filter(is_active=True)
     }
-    return render(request, "rental_scheduler/job_form.html", context)
+    return render(request, "rental_scheduler/jobs/job_form.html", context)
 
 
 class JobUpdateView(UpdateView):
     """Update an existing job"""
     model = Job
     form_class = JobForm
-    template_name = 'rental_scheduler/job_form.html'
+    template_name = 'rental_scheduler/jobs/job_form.html'
     success_url = reverse_lazy('rental_scheduler:job_list')
     
     def get_queryset(self):
@@ -366,7 +377,7 @@ class JobUpdateView(UpdateView):
 class JobDetailView(DetailView):
     """View job details"""
     model = Job
-    template_name = 'rental_scheduler/job_detail_simple.html'
+    template_name = 'rental_scheduler/jobs/job_detail_simple.html'
     context_object_name = 'job'
     
     def get_queryset(self):
@@ -381,7 +392,7 @@ class JobDetailView(DetailView):
 class JobDeleteView(DeleteView):
     """Delete a job"""
     model = Job
-    template_name = 'rental_scheduler/job_confirm_delete.html'
+    template_name = 'rental_scheduler/jobs/job_confirm_delete.html'
     success_url = reverse_lazy('rental_scheduler:job_list')
     
     def get_context_data(self, **kwargs):
@@ -399,7 +410,7 @@ class JobDeleteView(DeleteView):
 class JobPrintWOView(DetailView):
     """Print work order view"""
     model = Job
-    template_name = 'rental_scheduler/job_print_wo.html'
+    template_name = 'rental_scheduler/jobs/job_print_wo.html'
     context_object_name = 'job'
     
     def get_context_data(self, **kwargs):
@@ -411,7 +422,7 @@ class JobPrintWOView(DetailView):
 class JobPrintWOCustomerView(DetailView):
     """Print customer copy work order view"""
     model = Job
-    template_name = 'rental_scheduler/job_print_wo_customer.html'
+    template_name = 'rental_scheduler/jobs/job_print_wo_customer.html'
     context_object_name = 'job'
     
     def get_context_data(self, **kwargs):
@@ -423,7 +434,7 @@ class JobPrintWOCustomerView(DetailView):
 class JobPrintInvoiceView(DetailView):
     """Print invoice view"""
     model = Job
-    template_name = 'rental_scheduler/job_print_invoice.html'
+    template_name = 'rental_scheduler/jobs/job_print_invoice.html'
     context_object_name = 'job'
     
     def get_context_data(self, **kwargs):
@@ -440,13 +451,40 @@ def get_job_calendar_data(request):
         start_date = request.GET.get('start')
         end_date = request.GET.get('end')
         
+        # Get filter parameters
+        status_filter = request.GET.get('status')
+        calendar_filter = request.GET.get('calendar')
+        search_filter = request.GET.get('search')
+        
         # Build queryset
         jobs = Job.objects.select_related('calendar').filter(is_deleted=False)
         
+        # Apply date range filter
         if start_date and end_date:
             jobs = jobs.filter(
                 start_dt__lte=end_date,
                 end_dt__gte=start_date
+            )
+        
+        # Apply status filter
+        if status_filter:
+            jobs = jobs.filter(status=status_filter)
+        
+        # Apply calendar filter
+        if calendar_filter:
+            jobs = jobs.filter(calendar_id=calendar_filter)
+        
+        # Apply search filter
+        if search_filter:
+            jobs = jobs.filter(
+                models.Q(business_name__icontains=search_filter) |
+                models.Q(contact_name__icontains=search_filter) |
+                models.Q(phone__icontains=search_filter) |
+                models.Q(trailer_color__icontains=search_filter) |
+                models.Q(trailer_serial__icontains=search_filter) |
+                models.Q(trailer_details__icontains=search_filter) |
+                models.Q(notes__icontains=search_filter) |
+                models.Q(repair_notes__icontains=search_filter)
             )
         
         # Convert to calendar events
@@ -463,7 +501,7 @@ def get_job_calendar_data(request):
             
             event = {
                 'id': f"job-{job.id}",
-                'title': f"{job.trailer_color or 'Unknown'} Trailer - {display_name}{phone_display}",
+                'title': f"{job.trailer_details or 'Unknown'} Trailer - {display_name}{phone_display}",
                 'start': job.start_dt.isoformat(),
                 'end': job.end_dt.isoformat(),
                 'backgroundColor': STATUS_COLORS.get(job.status, '#6B7280'),
@@ -527,38 +565,93 @@ def update_job_status(request, job_id):
 
 # Work Order Views
 class WorkOrderListView(ListView):
-    """List all work orders"""
+    """List all work orders with filtering, search, and sorting capabilities"""
     model = WorkOrder
-    template_name = 'rental_scheduler/workorder_list.html'
+    template_name = 'rental_scheduler/workorders/workorder_list.html'
     context_object_name = 'work_orders'
     paginate_by = 25
     
     def get_queryset(self):
-        queryset = WorkOrder.objects.select_related('job__calendar')
+        """Filter and sort work orders based on query parameters"""
+        queryset = WorkOrder.objects.select_related('job__calendar').filter(job__is_deleted=False)
         
-        # Search functionality
-        search_query = self.request.GET.get('search')
-        if search_query:
+        # Filter by job status
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(job__status=status)
+        
+        # Filter by calendar
+        calendar_id = self.request.GET.get('calendar')
+        if calendar_id:
+            queryset = queryset.filter(job__calendar_id=calendar_id)
+        
+        # Search across multiple fields
+        search = self.request.GET.get('search')
+        if search:
             queryset = queryset.filter(
-                models.Q(wo_number__icontains=search_query) |
-                models.Q(job__business_name__icontains=search_query) |
-                models.Q(job__contact_name__icontains=search_query) |
-                models.Q(notes__icontains=search_query)
+                models.Q(wo_number__icontains=search) |
+                models.Q(job__business_name__icontains=search) |
+                models.Q(job__contact_name__icontains=search) |
+                models.Q(job__phone__icontains=search) |
+                models.Q(job__address_line1__icontains=search) |
+                models.Q(job__city__icontains=search) |
+                models.Q(job__trailer_color__icontains=search) |
+                models.Q(job__trailer_serial__icontains=search) |
+                models.Q(job__trailer_details__icontains=search) |
+                models.Q(job__repair_notes__icontains=search) |
+                models.Q(notes__icontains=search)
             )
         
-        return queryset.order_by('-wo_date', '-created_at')
+        # Sorting
+        sort_by = self.request.GET.get('sort', '-wo_date')
+        sort_direction = self.request.GET.get('direction', 'desc')
+        
+        # Validate sort field
+        allowed_sort_fields = {
+            'wo_number': 'wo_number',
+            'wo_date': 'wo_date',
+            'job__business_name': 'job__business_name',
+            'job__contact_name': 'job__contact_name',
+            'job__status': 'job__status',
+            'job__calendar__name': 'job__calendar__name',
+            'created_at': 'created_at',
+        }
+        
+        if sort_by in allowed_sort_fields:
+            sort_field = allowed_sort_fields[sort_by]
+            if sort_direction == 'desc':
+                sort_field = f'-{sort_field}'
+            queryset = queryset.order_by(sort_field)
+        else:
+            # Default sorting
+            queryset = queryset.order_by('-wo_date')
+        
+        return queryset
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'Work Orders'
-        context['search_query'] = self.request.GET.get('search', '')
+        context['calendars'] = Calendar.objects.filter(is_active=True)
+        context['status_choices'] = Job.STATUS_CHOICES
+        
+        # Add sorting context
+        context['current_sort'] = self.request.GET.get('sort', 'wo_date')
+        context['current_direction'] = self.request.GET.get('direction', 'desc')
+        
+        # Add filter context for maintaining state
+        context['current_filters'] = {
+            'search': self.request.GET.get('search', ''),
+            'status': self.request.GET.get('status', ''),
+            'calendar': self.request.GET.get('calendar', ''),
+        }
+        
         return context
 
 
 class WorkOrderDetailView(DetailView):
     """View work order details"""
     model = WorkOrder
-    template_name = 'rental_scheduler/workorder_detail.html'
+    template_name = 'rental_scheduler/workorders/workorder_detail.html'
     context_object_name = 'work_order'
     
     def get_queryset(self):
@@ -570,11 +663,98 @@ class WorkOrderDetailView(DetailView):
         return context
 
 
+class WorkOrderCreateView(CreateView):
+    """Create a new work order"""
+    model = WorkOrder
+    form_class = WorkOrderForm
+    template_name = 'rental_scheduler/workorders/workorder_form.html'
+    success_url = reverse_lazy('rental_scheduler:workorder_list')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Create Work Order'
+        return context
+    
+    def form_valid(self, form):
+        messages.success(self.request, f'Work Order "{form.instance.wo_number}" created successfully.')
+        return super().form_valid(form)
+
+
+class WorkOrderUpdateView(UpdateView):
+    """Update an existing work order"""
+    model = WorkOrder
+    form_class = WorkOrderForm
+    template_name = 'rental_scheduler/workorders/workorder_form.html'
+    success_url = reverse_lazy('rental_scheduler:workorder_list')
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Update Work Order: {self.object.wo_number}'
+        return context
+    
+    def form_valid(self, form):
+        messages.success(self.request, f'Work Order "{form.instance.wo_number}" updated successfully.')
+        return super().form_valid(form)
+
+
+class WorkOrderDeleteView(DeleteView):
+    """Delete a work order"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_confirm_delete.html'
+    success_url = reverse_lazy('rental_scheduler:workorder_list')
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Delete Work Order: {self.object.wo_number}'
+        return context
+    
+    def delete(self, request, *args, **kwargs):
+        work_order = self.get_object()
+        messages.success(request, f'Work Order "{work_order.wo_number}" deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+
+class WorkOrderPrintView(DetailView):
+    """Print work order view"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_print.html'
+    context_object_name = 'work_order'
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Work Order'
+        return context
+
+
+class WorkOrderCustomerPrintView(DetailView):
+    """Print customer copy work order view"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_customer_print.html'
+    context_object_name = 'work_order'
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Customer Work Order'
+        return context
+
+
 # Invoice Views  
 class InvoiceListView(ListView):
     """List all invoices"""
     model = Invoice
-    template_name = 'rental_scheduler/invoice_list.html'
+    template_name = 'rental_scheduler/invoices/invoice_list.html'
     context_object_name = 'invoices'
     paginate_by = 25
     
@@ -590,7 +770,7 @@ class InvoiceListView(ListView):
 class InvoiceDetailView(DetailView):
     """View invoice details"""
     model = Invoice
-    template_name = 'rental_scheduler/invoice_detail.html'
+    template_name = 'rental_scheduler/invoices/invoice_detail.html'
     context_object_name = 'invoice'
     
     def get_queryset(self):
@@ -606,7 +786,7 @@ class InvoiceDetailView(DetailView):
 def job_detail_modal(request, pk):
     """Return the read-only job details modal partial"""
     job = get_object_or_404(Job, pk=pk)
-    return render(request, "rental_scheduler/_job_modal_detail.html", {"job": job})
+    return render(request, "rental_scheduler/jobs/_job_modal_detail.html", {"job": job})
 
 
 def job_edit_modal(request, pk):
@@ -618,17 +798,17 @@ def job_edit_modal(request, pk):
         if form.is_valid():
             job = form.save()
             # Return the updated read-only modal with status 200
-            return render(request, "rental_scheduler/_job_modal_detail.html", {"job": job})
+            return render(request, "rental_scheduler/jobs/_job_modal_detail.html", {"job": job})
         else:
             # Return the edit modal with errors and status 400 so HTMX swaps it and shows errors
-            return render(request, "rental_scheduler/_job_modal_edit.html", {
+            return render(request, "rental_scheduler/jobs/_job_modal_edit.html", {
                 "job": job, 
                 "form": form
             }, status=400)
     else:
         # GET request - show edit form
         form = JobForm(instance=job)
-        return render(request, "rental_scheduler/_job_modal_edit.html", {
+        return render(request, "rental_scheduler/jobs/_job_modal_edit.html", {
             "job": job, 
             "form": form
         })
@@ -761,3 +941,45 @@ def job_update_api(request, pk):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_protect
+@require_http_methods(["POST"])
+def workorder_add_line_api(request, pk):
+    """API endpoint to add a line item to a work order"""
+    try:
+        # Get the work order
+        work_order = get_object_or_404(WorkOrder, pk=pk)
+        
+        # Create form with the submitted data
+        form = WorkOrderLineForm(request.POST)
+        
+        if form.is_valid():
+            # Save the line item with the work order
+            line_item = form.save(commit=False)
+            line_item.work_order = work_order
+            line_item.save()
+            
+            # Render the new line item HTML
+            from django.template.loader import render_to_string
+            line_html = render_to_string('rental_scheduler/partials/workorder_line_row.html', {
+                'line': line_item
+            })
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Line item added successfully',
+                'line_html': line_html,
+                'total_amount': str(work_order.total_amount)
+            })
+        else:
+            return JsonResponse({
+                'status': 'error',
+                'error': 'Validation failed: ' + ', '.join([f"{field}: {', '.join(errors)}" for field, errors in form.errors.items()])
+            }, status=400)
+            
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'error': f'Failed to add line item: {str(e)}'
+        }, status=500)

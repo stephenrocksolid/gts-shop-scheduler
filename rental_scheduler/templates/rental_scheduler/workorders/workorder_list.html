@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
+            <a href="{% url 'rental_scheduler:workorder_create' %}" 
+               class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+            Create New Work Order
+            </a>
+        </div>
+
+    <!-- Search and Filter Form -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <form method="get" class="flex flex-wrap items-end gap-3">
+            <div class="flex-1 min-w-0">
+                    <label for="search" class="block text-sm font-medium text-gray-700 mb-1">Search</label>
+                <input type="text" name="search" id="search" value="{{ current_filters.search }}"
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       placeholder="Search work orders...">
+                </div>
+            <div class="flex-shrink-0 w-32">
+                <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select name="status" id="status" 
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">All Statuses</option>
+                    {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if current_filters.status == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                    {% endfor %}
+                    </select>
+                </div>
+            <div class="flex-shrink-0 w-32">
+                <label for="calendar" class="block text-sm font-medium text-gray-700 mb-1">Calendar</label>
+                <select name="calendar" id="calendar" 
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">All Calendars</option>
+                    {% for calendar in calendars %}
+                        <option value="{{ calendar.id }}" {% if current_filters.calendar == calendar.id|stringformat:"s" %}selected{% endif %}>
+                            {{ calendar.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+                </div>
+            <div class="flex-shrink-0">
+                <label class="block text-sm font-medium text-gray-700 mb-1 invisible">Filter</label>
+                    <button type="submit" 
+                        class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md transition duration-200 text-sm whitespace-nowrap">
+                    Filter
+                    </button>
+                </div>
+            </form>
+        </div>
+
+    <!-- Work Orders Table Container -->
+    <div id="workorder-table-container">
+        {% include 'rental_scheduler/partials/workorder_list_table.html' with work_orders=work_orders current_sort=current_sort current_direction=current_direction current_filters=current_filters %}
+                </div>
+            </div>
+            
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Make table rows clickable
+    const workorderRows = document.querySelectorAll('.workorder-row');
+    
+    workorderRows.forEach(row => {
+        row.addEventListener('click', function(e) {
+            // Don't navigate if user clicked on an action link
+            if (e.target.tagName === 'A' || e.target.closest('a')) {
+                return;
+            }
+            
+            // Get the work order detail URL from the data attribute
+            const workorderUrl = this.getAttribute('data-workorder-url');
+            if (workorderUrl) {
+                window.location.href = workorderUrl;
+            }
+        });
+        
+        // Add visual feedback on hover
+        row.addEventListener('mouseenter', function() {
+            this.style.backgroundColor = '#f9fafb';
+        });
+        
+        row.addEventListener('mouseleave', function() {
+            this.style.backgroundColor = '';
+        });
+    });
+});
+</script>
+
+{% endblock %}
+

@@ -18,12 +18,18 @@ from .views import (
     JobPrintInvoiceView,
     WorkOrderListView,
     WorkOrderDetailView,
+    WorkOrderCreateView,
+    WorkOrderUpdateView,
+    WorkOrderDeleteView,
+    WorkOrderPrintView,
+    WorkOrderCustomerPrintView,
     InvoiceListView,
     InvoiceDetailView,
     job_detail_modal,
     job_edit_modal,
     job_create_api,
     job_update_api,
+    workorder_add_line_api,
 )
 from . import error_views
 
@@ -62,12 +68,18 @@ urlpatterns = [
     
     # Work Order URLs
     path('workorders/', WorkOrderListView.as_view(), name='workorder_list'),
+    path('workorders/create/', WorkOrderCreateView.as_view(), name='workorder_create'),
     path('workorders/<int:pk>/', WorkOrderDetailView.as_view(), name='workorder_detail'),
+    path('workorders/<int:pk>/edit/', WorkOrderUpdateView.as_view(), name='workorder_update'),
+    path('workorders/<int:pk>/delete/', WorkOrderDeleteView.as_view(), name='workorder_delete'),
+    path('workorders/<int:pk>/print/', WorkOrderPrintView.as_view(), name='workorder_print'),
+    path('workorders/<int:pk>/print/customer/', WorkOrderCustomerPrintView.as_view(), name='workorder_customer_print'),
     
     # Invoice Management URLs
     path('invoices/', InvoiceListView.as_view(), name='invoice_list'),
     path('invoices/<int:pk>/', InvoiceDetailView.as_view(), name='invoice_detail'),
     
     # API endpoints
+    path('api/workorders/<int:pk>/add-line/', workorder_add_line_api, name='workorder_add_line_api'),
     path('api/send-error-report/', error_views.send_error_report, name='send_error_report'),
 ]

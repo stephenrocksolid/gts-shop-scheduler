@@ -24,6 +24,9 @@
                 year: new Date().getFullYear()
             };
             
+            // Load saved filters from localStorage
+            this.loadSavedFilters();
+            
             this.initialize();
         }
 
@@ -62,7 +65,7 @@
                 headerToolbar: {
                     left: 'prev,next today',
                     center: 'title',
-                    right: 'newJobButton dayGridMonth,timeGridWeek,timeGridDay'
+                    right: 'calendarFilterButton statusFilterButton newJobButton dayGridMonth,timeGridWeek,timeGridDay'
                 },
                 headerToolbarHeight: 'auto',
                 buttonText: {
@@ -78,9 +81,41 @@
                     newJobButton: {
                         text: '+ Job',
                         click: function() {
-                            // Use the URL from window.calendarConfig if available
-                            const createUrl = window.calendarConfig?.jobCreateUrl || '/jobs/create/';
-                            window.location.href = createUrl;
+                            // Create a mock event object for the new job dialog
+                            const now = new Date();
+                            const mockEvent = {
+                                date: now,
+                                dateStr: now.toISOString().split('T')[0],
+                                allDay: false
+                            };
+                            
+                            // Create mock props for new job
+                            const mockProps = {
+                                business_name: '',
+                                contact_name: '',
+                                phone: '',
+                                trailer_color: '',
+                                trailer_serial: '',
+                                trailer_details: '',
+                                notes: '',
+                                repair_notes: '',
+                                all_day: false
+                            };
+                            
+                            // Open the new job dialog
+                            this.openNewJobDialog(mockEvent, mockProps);
+                        }.bind(this)
+                    },
+                    calendarFilterButton: {
+                        text: 'Calendar',
+                        click: function() {
+                            // This will be replaced with a dropdown after render
+                        }
+                    },
+                    statusFilterButton: {
+                        text: 'Status',
+                        click: function() {
+                            // This will be replaced with a dropdown after render
                         }
                     }
                 },
@@ -127,6 +162,92 @@
                     newJobBtn.style.whiteSpace = 'nowrap';
                     newJobBtn.style.minWidth = 'auto';
                 }
+                
+                // Replace calendar filter button with dropdown
+                const calendarFilterBtn = document.querySelector('.fc-calendarFilterButton-button');
+                if (calendarFilterBtn) {
+                    // Create dropdown element
+                    const dropdown = document.createElement('select');
+                    dropdown.id = 'calendar-filter';
+                    
+                    // Build options
+                    let options = '<option value="">All Calendars</option>';
+                    if (window.calendarConfig?.calendars && Array.isArray(window.calendarConfig.calendars)) {
+                        options += window.calendarConfig.calendars.map(cal => 
+                            `<option value="${cal.id}">${cal.name}</option>`
+                        ).join('');
+                    }
+                    dropdown.innerHTML = options;
+                    
+                    // Style the dropdown
+                    dropdown.style.cssText = `
+                        background: transparent;
+                        border: 1px solid #ccc;
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        font-size: 14px;
+                        color: #333;
+                        cursor: pointer;
+                        min-width: 120px;
+                    `;
+                    
+                    // Replace button content with dropdown
+                    calendarFilterBtn.innerHTML = '';
+                    calendarFilterBtn.appendChild(dropdown);
+                    calendarFilterBtn.style.padding = '0';
+                    calendarFilterBtn.style.border = 'none';
+                    calendarFilterBtn.style.background = 'transparent';
+                    
+                    // Store reference for event handling
+                    this.calendarFilter = dropdown;
+                    dropdown.addEventListener('change', this.handleFilterChange.bind(this));
+                    
+                    // Set initial value from saved filters
+                    if (this.currentFilters.calendar) {
+                        dropdown.value = this.currentFilters.calendar;
+                    }
+                }
+                
+                // Replace status filter button with dropdown
+                const statusFilterBtn = document.querySelector('.fc-statusFilterButton-button');
+                if (statusFilterBtn) {
+                    // Create dropdown element
+                    const dropdown = document.createElement('select');
+                    dropdown.id = 'status-filter';
+                    dropdown.innerHTML = `
+                        <option value="">All Status</option>
+                        <option value="uncompleted">Uncompleted</option>
+                        <option value="completed">Completed</option>
+                    `;
+                    
+                    // Style the dropdown
+                    dropdown.style.cssText = `
+                        background: transparent;
+                        border: 1px solid #ccc;
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        font-size: 14px;
+                        color: #333;
+                        cursor: pointer;
+                        min-width: 120px;
+                    `;
+                    
+                    // Replace button content with dropdown
+                    statusFilterBtn.innerHTML = '';
+                    statusFilterBtn.appendChild(dropdown);
+                    statusFilterBtn.style.padding = '0';
+                    statusFilterBtn.style.border = 'none';
+                    statusFilterBtn.style.background = 'transparent';
+                    
+                    // Store reference for event handling
+                    this.statusFilter = dropdown;
+                    dropdown.addEventListener('change', this.handleFilterChange.bind(this));
+                    
+                    // Set initial value from saved filters
+                    if (this.currentFilters.status) {
+                        dropdown.value = this.currentFilters.status;
+                    }
+                }
             }, 100);
         }
 
@@ -157,7 +278,10 @@
                 end: info.endStr
             });
 
-            fetch(`/api/job-calendar-data/?${params}`)
+            // Use the correct API endpoint from calendarConfig
+            const apiUrl = window.calendarConfig?.eventsUrl || '/api/job-calendar-data/';
+            
+            fetch(`${apiUrl}?${params}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
@@ -177,12 +301,130 @@
         }
 
         /**
+         * Load saved filters from localStorage
+         */
+        loadSavedFilters() {
+            try {
+                // First, check if there are URL parameters (from direct links or browser back/forward)
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlCalendar = urlParams.get('calendar') || '';
+                const urlStatus = urlParams.get('status') || '';
+                const urlSearch = urlParams.get('search') || '';
+                
+                // If URL has parameters, use them (they take priority)
+                if (urlCalendar || urlStatus || urlSearch) {
+                    this.currentFilters.calendar = urlCalendar;
+                    this.currentFilters.status = urlStatus;
+                    this.currentFilters.search = urlSearch;
+                    console.log('JobCalendar: Loaded filters from URL', this.currentFilters);
+                } else {
+                    // Otherwise, load from localStorage
+                    const savedFilters = localStorage.getItem('gts-calendar-filters');
+                    if (savedFilters) {
+                        const filters = JSON.parse(savedFilters);
+                        this.currentFilters.calendar = filters.calendar || '';
+                        this.currentFilters.status = filters.status || '';
+                        this.currentFilters.search = filters.search || '';
+                        console.log('JobCalendar: Loaded saved filters', this.currentFilters);
+                    }
+                }
+            } catch (error) {
+                console.warn('JobCalendar: Error loading saved filters', error);
+            }
+        }
+
+        /**
+         * Save current filters to localStorage
+         */
+        saveFilters() {
+            try {
+                const filtersToSave = {
+                    calendar: this.currentFilters.calendar,
+                    status: this.currentFilters.status,
+                    search: this.currentFilters.search
+                };
+                localStorage.setItem('gts-calendar-filters', JSON.stringify(filtersToSave));
+                console.log('JobCalendar: Saved filters', filtersToSave);
+            } catch (error) {
+                console.warn('JobCalendar: Error saving filters', error);
+            }
+        }
+
+        /**
+         * Update URL parameters to reflect current filter state
+         */
+        updateURLParams() {
+            try {
+                const url = new URL(window.location);
+                const params = url.searchParams;
+                
+                // Update or remove filter parameters
+                if (this.currentFilters.calendar) {
+                    params.set('calendar', this.currentFilters.calendar);
+                } else {
+                    params.delete('calendar');
+                }
+                
+                if (this.currentFilters.status) {
+                    params.set('status', this.currentFilters.status);
+                } else {
+                    params.delete('status');
+                }
+                
+                if (this.currentFilters.search) {
+                    params.set('search', this.currentFilters.search);
+                } else {
+                    params.delete('search');
+                }
+                
+                // Update URL without page reload
+                const newURL = url.pathname + (params.toString() ? '?' + params.toString() : '');
+                window.history.replaceState({}, '', newURL);
+            } catch (error) {
+                console.warn('JobCalendar: Error updating URL params', error);
+            }
+        }
+
+        /**
+         * Clear all filters
+         */
+        clearFilters() {
+            this.currentFilters.calendar = '';
+            this.currentFilters.status = '';
+            this.currentFilters.search = '';
+            
+            // Update dropdowns
+            if (this.calendarFilter) {
+                this.calendarFilter.value = '';
+            }
+            if (this.statusFilter) {
+                this.statusFilter.value = '';
+            }
+            if (this.searchFilter) {
+                this.searchFilter.value = '';
+            }
+            
+            // Save and update URL
+            this.saveFilters();
+            this.updateURLParams();
+            this.refreshCalendar();
+            
+            console.log('JobCalendar: Cleared all filters');
+        }
+
+        /**
          * Handle filter changes
          */
         handleFilterChange() {
             this.currentFilters.calendar = this.calendarFilter?.value || '';
             this.currentFilters.status = this.statusFilter?.value || '';
             this.currentFilters.search = this.searchFilter?.value || '';
+            
+            console.log('JobCalendar: Filter changed', this.currentFilters);
+            
+            // Save filters and update URL
+            this.saveFilters();
+            this.updateURLParams();
             
             this.refreshCalendar();
         }
@@ -310,14 +552,14 @@
             const event = info.event;
             const props = event.extendedProps;
             
-            // Format status display
-            const statusDisplay = props.status ? props.status.charAt(0).toUpperCase() + props.status.slice(1) : 'Unknown';
+            // Add strikethrough styling for completed jobs
+            const isCompleted = props.status === 'completed';
+            const titleClass = isCompleted ? 'job-title job-title-completed' : 'job-title';
             
             return {
                 html: `
                     <div class="job-event-content">
-                        <div class="job-title">${event.title}</div>
-                        <div class="job-status">${statusDisplay}</div>
+                        <div class="${titleClass}">${event.title}</div>
                     </div>
                 `
             };
@@ -1666,39 +1908,15 @@
          */
         updateCalendarEvent(event, newData) {
             try {
-                // Update event properties
-                event.setExtendedProp('business_name', newData.business_name);
-                event.setExtendedProp('contact_name', newData.contact_name);
-                event.setExtendedProp('phone', newData.phone);
-                event.setExtendedProp('trailer_color', newData.trailer_color);
-                event.setExtendedProp('trailer_serial', newData.trailer_serial);
-                event.setExtendedProp('trailer_details', newData.trailer_details);
-                event.setExtendedProp('start_dt', newData.start_dt);
-                event.setExtendedProp('end_dt', newData.end_dt);
-                event.setExtendedProp('all_day', newData.all_day);
-                event.setExtendedProp('status', newData.status);
-                event.setExtendedProp('notes', newData.notes);
-                event.setExtendedProp('repair_notes', newData.repair_notes);
-                
-                // Update event title if needed
-                if (newData.business_name) {
-                    event.setTitle(newData.business_name);
-                }
-                
-                // Update event dates if changed
-                if (newData.start_dt) {
-                    event.setStart(newData.start_dt);
-                }
-                if (newData.end_dt) {
-                    event.setEnd(newData.end_dt);
-                }
-                
-                // Update allDay property
-                if (newData.all_day !== undefined) {
-                    event.setAllDay(newData.all_day === 'on' || newData.all_day === true);
-                }
+                // For any changes, remove the event and let the refresh add it back with updated data
+                // This ensures all changes (dates, names, phone, etc.) are properly reflected
+                console.log('JobCalendar: Removing event to refresh with updated data');
+                event.remove();
                 
                 console.log('JobCalendar: Calendar event updated');
+                
+                // Always refresh the calendar to show all changes and re-fetch events
+                this.refreshCalendar();
                 
             } catch (error) {
                 console.error('JobCalendar: Error updating calendar event', error);

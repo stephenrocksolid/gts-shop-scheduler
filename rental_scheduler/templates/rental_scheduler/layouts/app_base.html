@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<link href="{% static 'rental_scheduler/css/components.css' %}" rel="stylesheet">
+{% block page_css %}{% endblock %}
+{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl px-4 py-6">
+    <!-- Page Header -->
+    {% block page_header %}
+    <div class="mb-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">
+                    {% block page_title %}{{ title|default:"Page Title" }}{% endblock %}
+                </h1>
+                {% block page_subtitle %}
+                <p class="mt-2 text-sm text-gray-600">
+                    {% if page_subtitle %}{{ page_subtitle }}{% endif %}
+                </p>
+                {% endblock %}
+            </div>
+            {% block page_actions %}{% endblock %}
+        </div>
+    </div>
+    {% endblock %}
+
+    <!-- Main Content -->
+    <div class="space-y-6">
+        {% block main_content %}{% endblock %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% block page_js %}{% endblock %}
+{% endblock %}

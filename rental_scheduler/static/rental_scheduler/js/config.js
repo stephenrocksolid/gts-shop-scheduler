@@ -384,7 +384,7 @@
 
                 // If in development, log the issue for debugging
                 if (this.isDevelopment()) {
-                    window.Logger?.warn('CSRF token not found - API calls may fail', {
+                    console.warn('CSRF token not found - API calls may fail', {
                         strategies_checked: ['meta[csrf-token]', 'cookie[csrftoken]', 'input[csrfmiddlewaretoken]', 'meta[csrf_token]'],
                         current_url: window.location.href
                     });
@@ -442,7 +442,7 @@
 
                 if (!token) {
                     if (this.isDevelopment()) {
-                        window.Logger?.warn('No CSRF token available for validation');
+                        console.warn('No CSRF token available for validation');
                     }
                     return false;
                 }
@@ -483,7 +483,7 @@
 
     } else {
         // Config already exists - do nothing
-        window.Logger?.debug('RentalConfig already exists, skipping initialization');
+        console.debug('RentalConfig already exists, skipping initialization');
     }
 
 })(); // End of IIFE 

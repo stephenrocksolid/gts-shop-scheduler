@@ -17,8 +17,6 @@
     <link rel="apple-touch-icon" sizes="180x180" href="{% static 'rental_scheduler/img/apple-touch-icon.png' %}">
     <link rel="manifest" href="{% static 'rental_scheduler/img/site.webmanifest' %}">
 
-    <!-- Production Logger -->
-    <script src="{% static 'rental_scheduler/js/logger.js' %}"></script>
 
     <!-- Centralized Configuration -->
     <script src="{% static 'rental_scheduler/js/config.js' %}"></script>
@@ -35,8 +33,6 @@
     <!-- Flatpickr CSS -->
     <link rel="stylesheet" href="{% static 'rental_scheduler/css/flatpickr.min.css' %}">
 
-    <!-- Modern Form Styles -->
-    <link href="{% static 'rental_scheduler/css/form-modern.css' %}" rel="stylesheet">
 
     <!-- Component Styles -->
     <link href="{% static 'rental_scheduler/css/components.css' %}" rel="stylesheet">
@@ -121,44 +117,12 @@
 
                 <!-- Right side - Navigation -->
                 <div class="hidden md:flex items-center space-x-4">
-                    <!-- Calendar Dropdown -->
-                    <div class="relative" x-data="{ open: false }">
-                        <button @click="open = !open" @click.away="open = false" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150 inline-flex items-center gap-1">
-                            <span>Calendar</span>
-                            <svg class="w-4 h-4 transition-transform duration-200" :class="{ 'transform rotate-180': open }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                            </svg>
-                        </button>
-                        <div x-show="open" x-cloak class="absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 z-50" role="menu">
-                            <div class="py-1">
-                                <a href="{% url 'rental_scheduler:home' %}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-red-500" role="menuitem">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-2.5 h-2.5 rounded-full bg-gray-400"></span>
-                                        All Calendars
-                                    </div>
-                                </a>
-                                {% for calendar in global_calendars %}
-                                <a href="{% url 'rental_scheduler:home' %}?calendar={{ calendar.id }}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-red-500" role="menuitem">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-2.5 h-2.5 rounded-full" style="background-color: {{ calendar.color|default:'#3B82F6' }};"></span>
-                                        {{ calendar.name }}
-                                    </div>
-                                </a>
-                                {% endfor %}
-                            </div>
-                            <div class="py-1">
-                                <a href="{% url 'rental_scheduler:calendar_list' %}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-red-500" role="menuitem">Manage Calendars</a>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- Calendar Button -->
+                    <a href="{% url 'rental_scheduler:home' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
+                        Calendar
+                    </a>
                     <a href="{% url 'rental_scheduler:job_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
                         Jobs
-                    </a>
-                    <a href="{% url 'rental_scheduler:workorder_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
-                        Work Orders
-                    </a>
-                    <a href="{% url 'rental_scheduler:invoice_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
-                        Invoices
                     </a>
                     <!-- Settings Dropdown -->
                     <div class="relative" x-data="{ open: false }">
@@ -191,44 +155,12 @@
         <!-- Mobile menu -->
         <div class="md:hidden" x-show="mobileMenuOpen" x-cloak>
             <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-                <!-- Mobile Calendar Menu -->
-                <div x-data="{ calendarOpen: false }">
-                    <button @click="calendarOpen = !calendarOpen" class="w-full text-left text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
-                        <div class="flex justify-between items-center">
-                            <span>Calendar</span>
-                            <svg class="h-4 w-4 transform" :class="{ 'rotate-180': calendarOpen }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                            </svg>
-                        </div>
-                    </button>
-                    <div x-show="calendarOpen" x-cloak class="pl-4">
-                        <a href="{% url 'rental_scheduler:home' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-sm font-medium">
-                            <div class="flex items-center gap-2">
-                                <span class="w-2.5 h-2.5 rounded-full bg-gray-400"></span>
-                                All Calendars
-                            </div>
-                        </a>
-                        {% for calendar in global_calendars %}
-                        <a href="{% url 'rental_scheduler:home' %}?calendar={{ calendar.id }}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-sm font-medium">
-                            <div class="flex items-center gap-2">
-                                <span class="w-2.5 h-2.5 rounded-full" style="background-color: {{ calendar.color|default:'#3B82F6' }};"></span>
-                                {{ calendar.name }}
-                            </div>
-                        </a>
-                        {% endfor %}
-                        <a href="{% url 'rental_scheduler:calendar_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-sm font-medium">
-                            Manage Calendars
-                        </a>
-                    </div>
-                </div>
+                <!-- Mobile Calendar Button -->
+                <a href="{% url 'rental_scheduler:home' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
+                    Calendar
+                </a>
                 <a href="{% url 'rental_scheduler:job_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
                     Jobs
-                </a>
-                <a href="{% url 'rental_scheduler:workorder_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
-                    Work Orders
-                </a>
-                <a href="{% url 'rental_scheduler:invoice_list' %}" class="text-gray-300 hover:text-red-500 hover:bg-zinc-700 block px-3 py-2 rounded-md text-base font-medium">
-                    Invoices
                 </a>
                 <!-- Mobile Settings Menu -->
                 <div x-data="{ settingsOpen: false }">
@@ -321,6 +253,15 @@
 
         // Configure HTMX to include CSRF token in all requests
         document.addEventListener('DOMContentLoaded', function () {
+            // Apply calendar color indicators
+            const calendarIndicators = document.querySelectorAll('.calendar-color-indicator');
+            calendarIndicators.forEach(indicator => {
+                const color = indicator.getAttribute('data-calendar-color');
+                if (color) {
+                    indicator.style.backgroundColor = color;
+                }
+            });
+            
             document.body.addEventListener('htmx:configRequest', function (evt) {
                 const token = window.getCookie('csrftoken');
                 if (token) evt.detail.headers['X-CSRFToken'] = token;

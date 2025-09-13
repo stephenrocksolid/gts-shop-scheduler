@@ -26,11 +26,11 @@
     line-height: 1.2;
 }
 
-.job-status {
-    font-size: 0.75rem;
-    opacity: 0.9;
-    font-weight: 400;
+.job-title-completed {
+    text-decoration: line-through;
+    opacity: 0.7;
 }
+
 
 /* Completion states */
 .job-completed {

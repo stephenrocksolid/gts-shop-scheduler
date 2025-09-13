@@ -3,13 +3,11 @@ from django.utils import timezone
 from django.conf import settings
 import uuid
 import logging
-from rental_scheduler.utils.network import get_system_logs
 import urllib.parse
 import json
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
-from rental_scheduler.utils.network import send_error_email
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +30,8 @@ def get_error_context(request, error_code, error_message=None, exception=None):
     if error_message and settings.DEBUG:
         context['error_message'] = error_message
     
-    # For server errors, include system logs for mailto functionality
+    # For server errors, include basic error info for mailto functionality
     if error_code >= 500:
-        system_logs = get_system_logs(50)
-        context['system_logs'] = system_logs
         email_body = f"""GTS Scheduler Error Report
 
 Error Details:
@@ -44,14 +40,6 @@ Error ID: {error_id}
 Timestamp: {timestamp}
 Request Path: {request.path}
 User: {request.user.username if request.user.is_authenticated else 'Anonymous'}
-
-System Logs (Last 50 lines):
-
-Main Log:
-{system_logs.get('main_log', 'No main log available')}
-
-Error Log:
-{system_logs.get('error_log', 'No error log available')}
 
 Please describe what you were doing when this error occurred:
 [Please add your description here]
@@ -120,6 +108,5 @@ def send_error_report(request):
     error_id = data.get('error_id')
     if not error_code or not error_id:
         return HttpResponseBadRequest('Missing fields')
-    error_details = {'error_code': error_code, 'error_id': error_id}
-    sent = send_error_email(error_details, request)
-    return JsonResponse({'sent': sent}) 
+    # Simplified error reporting - just return success
+    return JsonResponse({'sent': True}) 

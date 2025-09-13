@@ -1,0 +1,51 @@
+{% extends "rental_scheduler/layouts/app_base.html" %}
+
+{% block main_content %}
+<div class="bg-white shadow-sm rounded-lg border border-gray-200">
+    <form method="post" {% if form_id %}id="{{ form_id }}"{% endif %} class="space-y-6 p-6">
+        {% csrf_token %}
+        
+        <!-- Error Summary -->
+        {% if form.errors %}
+        <div class="bg-red-50 border border-red-200 rounded-md p-4">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <h3 class="text-sm font-medium text-red-800">Please correct the following errors:</h3>
+                    <div class="mt-2 text-sm text-red-700">
+                        <ul class="list-disc pl-5 space-y-1">
+                            {% for field, errors in form.errors.items %}
+                                {% for error in errors %}
+                                    <li>{{ field|title }}: {{ error }}</li>
+                                {% endfor %}
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Form Fields -->
+        {% block form_fields %}{% endblock %}
+
+        <!-- Form Actions -->
+        <div class="flex items-center justify-end space-x-3 pt-6 border-t border-gray-200">
+            {% block form_actions %}
+            <a href="{% block cancel_url %}{% url 'rental_scheduler:home' %}{% endblock %}" 
+               class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-200">
+                Cancel
+            </a>
+            <button type="submit" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                {% block submit_text %}Save{% endblock %}
+            </button>
+            {% endblock %}
+        </div>
+    </form>
+</div>
+{% endblock %}
