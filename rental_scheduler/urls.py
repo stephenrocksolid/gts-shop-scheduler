@@ -29,6 +29,7 @@ from .views import (
     job_edit_modal,
     job_create_api,
     job_update_api,
+    job_detail_api,
     workorder_add_line_api,
 )
 from . import error_views
@@ -45,6 +46,7 @@ urlpatterns = [
     path('api/jobs/create/', job_create_api, name='job_create_api'),
     path('api/jobs/<int:job_id>/update-status/', update_job_status, name='update_job_status'),
     path('api/jobs/<int:pk>/update/', job_update_api, name='job_update_api'),
+    path('api/jobs/<int:pk>/detail/', job_detail_api, name='job_detail_api'),
     
     # Calendar Management URLs
     path('calendars/', CalendarListView.as_view(), name='calendar_list'),

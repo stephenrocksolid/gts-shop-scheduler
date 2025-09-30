@@ -3,14 +3,18 @@
 
 {% block title %}{{ title }}{% endblock %}
 
+{% block extra_js %}
+<script src="{% static 'rental_scheduler/js/job_dialog.js' %}"></script>
+{% endblock %}
+
 {% block content %}
 <div class="container mx-auto px-4 py-8">
     <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
-        <a href="{% url 'rental_scheduler:job_create' %}" 
-           class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
-            Create New Job
-        </a>
+        <button onclick="openNewJobDialog()" 
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+            + Job
+        </button>
     </div>
 
     <!-- Search and Filter Form -->
@@ -63,21 +67,59 @@
 </div>
 
 <script>
+// Initialize job dialog instance
+let jobDialog = null;
+
+// Function to open new job dialog
+function openNewJobDialog() {
+    if (!jobDialog) {
+        jobDialog = new JobDialog();
+    }
+    jobDialog.openNewJobDialog();
+}
+
+// Function to open dialog from action buttons
+function openJobDialogFromRow(button) {
+    const jobId = button.getAttribute('data-job-id');
+    
+    if (jobId) {
+        // Create minimal job data - the dialog will fetch full details
+        const jobData = {
+            job_id: jobId
+        };
+        
+        // Open the comprehensive dialog
+        if (!jobDialog) {
+            jobDialog = new JobDialog();
+        }
+        jobDialog.openJobDetailsDialog(jobData);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Make table rows clickable
     const jobRows = document.querySelectorAll('.job-row');
     
     jobRows.forEach(row => {
         row.addEventListener('click', function(e) {
-            // Don't navigate if user clicked on an action link
-            if (e.target.tagName === 'A' || e.target.closest('a')) {
+            // Don't navigate if user clicked on an action link or button
+            if (e.target.tagName === 'A' || e.target.closest('a') || e.target.tagName === 'BUTTON' || e.target.closest('button')) {
                 return;
             }
             
-            // Get the job detail URL from the data attribute
-            const jobUrl = this.getAttribute('data-job-url');
-            if (jobUrl) {
-                window.location.href = jobUrl;
+            // Get job data from the row
+            const jobId = this.getAttribute('data-job-id');
+            if (jobId) {
+                // Create minimal job data - the dialog will fetch full details
+                const jobData = {
+                    job_id: jobId
+                };
+                
+                // Open the comprehensive dialog
+                if (!jobDialog) {
+                    jobDialog = new JobDialog();
+                }
+                jobDialog.openJobDetailsDialog(jobData);
             }
         });
         
@@ -94,3 +136,4 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 {% endblock %}
+

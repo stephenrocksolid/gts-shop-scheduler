@@ -14,7 +14,6 @@
             this.statusFilter = null;
             this.searchFilter = null;
             this.loadingEl = null;
-            this.jobDialog = null;
             
             // Click tracking for double-click detection
             this.clickTimer = null;
@@ -103,10 +102,11 @@
                         text: '+ Job',
                         click: function() {
                             // Use the unified JobDialog for new job creation
-                            if (!this.jobDialog) {
-                                this.jobDialog = new JobDialog();
+                            if (typeof JobDialog === 'undefined') {
+                                console.error('JobDialog not available');
+                                return;
                             }
-                            this.jobDialog.openNewJobDialog();
+                            JobDialog.openWithUrl('/jobs/create/', 'Add Job');
                         }.bind(this)
                     },
                     jobsButton: {
@@ -724,37 +724,25 @@
                     extendedProps: info.event.extendedProps
                 });
                 
-                // Initialize job dialog if not already done
-                if (!this.jobDialog) {
-                    if (typeof JobDialog === 'undefined') {
-                        console.error('JobCalendar: JobDialog class not available');
-                        this.showError('Job dialog functionality not available. Please refresh the page.');
-                        return;
-                    }
-                    this.jobDialog = new JobDialog();
+                // Check if JobDialog is available
+                if (typeof JobDialog === 'undefined') {
+                    console.error('JobCalendar: JobDialog not available');
+                    this.showError('Job dialog functionality not available. Please refresh the page.');
+                    return;
                 }
                 
-                // Create job data from calendar event with defensive programming
+                // Get job ID from event
                 const extendedProps = info.event.extendedProps || {};
-                const jobData = {
-                    job_id: extendedProps.job_id,
-                    business_name: extendedProps.business_name || '',
-                    contact_name: extendedProps.contact_name || '',
-                    phone: extendedProps.phone || '',
-                    trailer_color: extendedProps.trailer_color || '',
-                    trailer_serial: extendedProps.trailer_serial || '',
-                    trailer_details: extendedProps.trailer_details || '',
-                    status: extendedProps.status || 'uncompleted',
-                    notes: extendedProps.notes || '',
-                    repair_notes: extendedProps.repair_notes || '',
-                    start_dt: info.event.start ? info.event.start.toISOString() : new Date().toISOString(),
-                    end_dt: info.event.end ? info.event.end.toISOString() : null,
-                    all_day: info.event.allDay || false,
-                    display_name: info.event.title || 'Job'
-                };
+                const jobId = extendedProps.job_id;
                 
-                console.log('JobCalendar: About to open dialog with job data:', jobData);
-                this.jobDialog.openJobDetailsDialog(jobData);
+                if (!jobId) {
+                    console.error('JobCalendar: No job ID found in event');
+                    this.showError('Unable to open job details. Please try again.');
+                    return;
+                }
+                
+                console.log('JobCalendar: Opening job edit dialog for job ID:', jobId);
+                JobDialog.openWithUrl(`/jobs/${jobId}/edit/`, 'Edit Job');
             } catch (error) {
                 console.error('JobCalendar: Error handling single click', error);
                 this.showError('Unable to open event details. Please try again.');
@@ -793,15 +781,12 @@
                     }
                     
                     // Use the unified JobDialog for new job creation
-                    if (!this.jobDialog) {
-                        if (typeof JobDialog === 'undefined') {
-                            console.error('JobCalendar: JobDialog class not available');
-                            this.showError('Job dialog functionality not available. Please refresh the page.');
-                            return;
-                        }
-                        this.jobDialog = new JobDialog();
+                    if (typeof JobDialog === 'undefined') {
+                        console.error('JobCalendar: JobDialog not available');
+                        this.showError('Job dialog functionality not available. Please refresh the page.');
+                        return;
                     }
-                    this.jobDialog.openNewJobDialog(info.date);
+                    JobDialog.openWithUrl('/jobs/create/', 'Add Job');
                     
                     // Reset tracking
                     this.lastClickDate = null;
@@ -889,61 +874,6 @@
             };
         }
 
-        /**
-         * Show status update modal
-         */
-        showStatusUpdateModal(jobId, currentStatus) {
-            const statusChoices = [
-                { value: 'uncompleted', label: 'Uncompleted' },
-                { value: 'completed', label: 'Completed' }
-            ];
-
-            const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
-            modal.innerHTML = `
-                <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-                    <div class="mt-3 text-center">
-                        <h3 class="text-lg font-medium text-gray-900 mb-4">Update Job Status</h3>
-                        <div class="space-y-2">
-                            ${statusChoices.map(status => `
-                                <button class="status-option w-full text-left px-3 py-2 rounded border ${status.value === currentStatus ? 'bg-blue-100 border-blue-300' : 'bg-white border-gray-300 hover:bg-gray-50'}" 
-                                        data-status="${status.value}">
-                                    ${status.label}
-                                </button>
-                            `).join('')}
-                        </div>
-                        <div class="flex justify-end space-x-3 mt-6">
-                            <button class="cancel-btn px-4 py-2 text-gray-600 border border-gray-300 rounded hover:bg-gray-50">
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            document.body.appendChild(modal);
-
-            // Handle status selection
-            modal.querySelectorAll('.status-option').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const newStatus = btn.dataset.status;
-                    this.updateJobStatus(jobId, newStatus);
-                    document.body.removeChild(modal);
-                });
-            });
-
-            // Handle cancel
-            modal.querySelector('.cancel-btn').addEventListener('click', () => {
-                document.body.removeChild(modal);
-            });
-
-            // Close on outside click
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    document.body.removeChild(modal);
-                }
-            });
-        }
 
         /**
          * Update job status via API
@@ -1150,8 +1080,6 @@
                 // Setup event listeners
                 this.setupEventDetailsDialogListeners(backdrop, dialog, event, eventProps);
 
-                // Store reference for cleanup
-                this.eventDetailsDialog = backdrop;
 
             } catch (error) {
                 console.error('JobCalendar: Error opening event details dialog', error);
@@ -1159,82 +1087,6 @@
             }
         }
 
-        /**
-         * Open new job creation dialog
-         * @param {Object} event - Mock event object with clicked date/time
-         * @param {Object} props - Mock props for new job
-         */
-        openNewJobDialog(event, props) {
-            try {
-                console.log('JobCalendar: Opening new job dialog', { event, props });
-
-                // Create dialog backdrop
-                const backdrop = document.createElement('div');
-                backdrop.className = 'event-details-backdrop';
-                backdrop.style.cssText = `
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background-color: rgba(0, 0, 0, 0.5);
-                    z-index: 1000;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                `;
-
-                // Create dialog container
-                const dialog = document.createElement('div');
-                dialog.className = 'card card-elevated';
-                dialog.style.cssText = `
-                    max-width: 800px;
-                    width: 100%;
-                    max-height: 90vh;
-                    overflow: hidden;
-                    position: relative;
-                    background-color: #ffffff;
-                    border-radius: 16px;
-                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-                    margin: 20px;
-                `;
-                
-                // Add responsive styles
-                const style = document.createElement('style');
-                style.textContent = `
-                    @media (max-width: 768px) {
-                        .event-details-dialog {
-                            margin: 10px !important;
-                            max-width: calc(100vw - 20px) !important;
-                            max-height: calc(100vh - 20px) !important;
-                        }
-                        .event-details-dialog .grid-responsive {
-                            grid-template-columns: 1fr !important;
-                        }
-                    }
-                `;
-                document.head.appendChild(style);
-
-                // Build new job form content
-                const content = this.buildNewJobFormContent(event, props);
-                dialog.innerHTML = content;
-
-                // Add to DOM
-                backdrop.appendChild(dialog);
-                document.body.appendChild(backdrop);
-
-                // Setup event listeners
-                this.setupNewJobDialogListeners(backdrop, dialog, event, props);
-
-                // Store reference for cleanup
-                this.eventDetailsDialog = backdrop;
-
-            } catch (error) {
-                console.error('JobCalendar: Error opening new job dialog', error);
-                this.showError('Unable to open new job form. Please try again.');
-            }
-        }
 
         /**
          * Build content for job events
@@ -1505,32 +1357,6 @@
                         " onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
                             Edit Job
                         </button>
-                        <button class="print-wo-btn" style="
-                            padding: 12px 24px;
-                            border: 1px solid #d1d5db;
-                            border-radius: 8px;
-                            background: #ffffff;
-                            color: #374151;
-                            font-weight: 500;
-                            font-size: 14px;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
-                            Print WO
-                        </button>
-                        <button class="print-customer-copy-wo-btn" style="
-                            padding: 12px 24px;
-                            border: 1px solid #d1d5db;
-                            border-radius: 8px;
-                            background: #ffffff;
-                            color: #374151;
-                            font-weight: 500;
-                            font-size: 14px;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
-                            Print Customer Copy WO
-                        </button>
                     </div>
                 </div>
             `;
@@ -1548,7 +1374,6 @@
                 if (backdrop && backdrop.parentNode) {
                     backdrop.parentNode.removeChild(backdrop);
                 }
-                this.eventDetailsDialog = null;
             };
 
             // Close button
@@ -1589,22 +1414,6 @@
                 editBtn.addEventListener('click', () => {
                     // Switch to edit mode instead of closing
                     this.switchToEditMode(backdrop, dialog, event, props);
-                });
-            }
-
-            // Print WO button
-            const printWoBtn = dialog.querySelector('.print-wo-btn');
-            if (printWoBtn) {
-                printWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
-                });
-            }
-
-            // Print Customer Copy WO button
-            const printCustomerCopyWoBtn = dialog.querySelector('.print-customer-copy-wo-btn');
-            if (printCustomerCopyWoBtn) {
-                printCustomerCopyWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
                 });
             }
 
@@ -1928,8 +1737,6 @@
                     <!-- Footer -->
                     <div style="display: flex; justify-content: flex-end; gap: 12px; padding: 20px 24px; border-top: 1px solid #e5e7eb; background-color: #ffffff;">
                         <button type="button" class="cancel-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Cancel</button>
-                        <button type="button" class="print-wo-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Print WO</button>
-                        <button type="button" class="print-customer-copy-wo-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Print Customer Copy WO</button>
                         <button type="button" class="save-btn" style="padding: 10px 20px; border: none; border-radius: 8px; background-color: #3b82f6; color: #ffffff; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Save Changes</button>
                     </div>
                 </div>
@@ -1937,28 +1744,13 @@
         }
 
         /**
-         * Build new job form content
-         * @param {Object} event - Mock event object with clicked date/time
-         * @param {Object} props - Mock props for new job
-         * @returns {string} HTML content
+         * Setup edit mode event listeners
+         * @param {HTMLElement} backdrop - Dialog backdrop
+         * @param {HTMLElement} dialog - Dialog container
+         * @param {Object} event - FullCalendar event
+         * @param {Object} props - Event extended properties
          */
-        buildNewJobFormContent(event, props) {
-            // Format dates for input fields
-            const formatDateForInput = (dateStr) => {
-                if (!dateStr) return '';
-                const date = new Date(dateStr);
-                // Check if date is valid
-                if (isNaN(date.getTime())) return '';
-                // Convert to local timezone and format for datetime-local input
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                return `${year}-${month}-${day}T${hours}:${minutes}`;
-            };
-
-            return `
+        setupEditModeListeners(backdrop, dialog, event, props) {
                 <div class="event-details-dialog" style="max-width: 800px; max-height: 90vh; overflow: hidden; background-color: #ffffff; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); margin: 20px;">
                     <!-- Header -->
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 24px 24px 0 24px; border-bottom: 1px solid #e5e7eb; margin-bottom: 0;">
@@ -2105,9 +1897,15 @@
                     </div>
 
                     <!-- Footer -->
-                    <div style="display: flex; justify-content: flex-end; gap: 12px; padding: 20px 24px; border-top: 1px solid #e5e7eb; background-color: #ffffff;">
-                        <button type="button" class="cancel-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Cancel</button>
-                        <button type="button" class="create-btn" style="padding: 10px 20px; border: none; border-radius: 8px; background-color: #10b981; color: #ffffff; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Create Job</button>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-top: 1px solid #e5e7eb; background-color: #ffffff;">
+                        <div style="display: flex; gap: 12px;">
+                            <button type="button" class="print-wo-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Print WO</button>
+                            <button type="button" class="print-customer-copy-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Print Customer Copy WO</button>
+                        </div>
+                        <div style="display: flex; gap: 12px;">
+                            <button type="button" class="cancel-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Cancel</button>
+                            <button type="button" class="create-btn" style="padding: 10px 20px; border: none; border-radius: 8px; background-color: #10b981; color: #ffffff; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Create Job</button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -2125,7 +1923,6 @@
                 if (backdrop && backdrop.parentNode) {
                     backdrop.parentNode.removeChild(backdrop);
                 }
-                this.eventDetailsDialog = null;
             };
 
             // Cancel button
@@ -2145,22 +1942,6 @@
                 });
             }
 
-            // Print WO button
-            const printWoBtn = dialog.querySelector('.print-wo-btn');
-            if (printWoBtn) {
-                printWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
-                });
-            }
-
-            // Print Customer Copy WO button
-            const printCustomerCopyWoBtn = dialog.querySelector('.print-customer-copy-wo-btn');
-            if (printCustomerCopyWoBtn) {
-                printCustomerCopyWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
-                });
-            }
-
             // Backdrop click
             backdrop.addEventListener('click', (e) => {
                 if (e.target === backdrop) {
@@ -2178,64 +1959,6 @@
             document.addEventListener('keydown', handleEscape);
         }
 
-        /**
-         * Setup new job dialog event listeners
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - Mock event object
-         * @param {Object} props - Mock props for new job
-         */
-        setupNewJobDialogListeners(backdrop, dialog, event, props) {
-            const closeDialog = () => {
-                if (backdrop && backdrop.parentNode) {
-                    backdrop.parentNode.removeChild(backdrop);
-                }
-                this.eventDetailsDialog = null;
-            };
-
-            // Cancel button
-            const cancelBtn = dialog.querySelector('.cancel-btn');
-            if (cancelBtn) {
-                cancelBtn.addEventListener('click', closeDialog);
-            }
-
-            // Create button
-            const createBtn = dialog.querySelector('.create-btn');
-            if (createBtn) {
-                createBtn.addEventListener('click', () => {
-                    this.createNewJob(backdrop, dialog, event, props);
-                });
-            }
-
-            // Backdrop click
-            backdrop.addEventListener('click', (e) => {
-                if (e.target === backdrop) {
-                    closeDialog();
-                }
-            });
-            
-            // Setup repeat type dropdown change handler
-            const repeatTypeSelect = dialog.querySelector('#repeat_type');
-            const repeatMonthsContainer = dialog.querySelector('#repeat_months_container');
-            if (repeatTypeSelect && repeatMonthsContainer) {
-                repeatTypeSelect.addEventListener('change', (e) => {
-                    if (e.target.value === 'monthly') {
-                        repeatMonthsContainer.style.display = 'block';
-                    } else {
-                        repeatMonthsContainer.style.display = 'none';
-                    }
-                });
-            }
-
-            // Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeDialog();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
-        }
 
         /**
          * Switch back to detail mode
@@ -2357,78 +2080,6 @@
         }
 
         /**
-         * Create new job
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - Mock event object
-         * @param {Object} props - Mock props for new job
-         */
-        createNewJob(backdrop, dialog, event, props) {
-            try {
-                console.log('JobCalendar: Creating new job');
-                
-                const form = dialog.querySelector('#new-job-form');
-                const formData = new FormData(form);
-                
-                // Convert FormData to object
-                const data = {};
-                for (let [key, value] of formData.entries()) {
-                    data[key] = value;
-                }
-                
-                console.log('JobCalendar: Creating job with data', data);
-                
-                // Get CSRF token
-                const csrfToken = this.getCSRFToken();
-                console.log('JobCalendar: CSRF Token:', csrfToken);
-                
-                // Send create request
-                fetch('/api/jobs/create/', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken,
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: JSON.stringify(data)
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.text().then(text => {
-                            console.error('JobCalendar: Create failed', response.status, text);
-                            throw new Error(`HTTP ${response.status}: ${text}`);
-                        });
-                    }
-                    return response.json();
-                })
-                .then(result => {
-                    console.log('JobCalendar: Job created successfully', result);
-                    
-                    // Close the dialog
-                    if (backdrop && backdrop.parentNode) {
-                        backdrop.parentNode.removeChild(backdrop);
-                    }
-                    this.eventDetailsDialog = null;
-                    
-                    // Refresh the calendar to show the new job
-                    this.calendar.refetchEvents();
-                    
-                    // Show success message
-                    this.showSuccess('Job created successfully!');
-                })
-                .catch(error => {
-                    console.error('JobCalendar: Error creating job', error);
-                    this.showError(`Error creating job: ${error.message}`);
-                });
-                
-            } catch (error) {
-                console.error('JobCalendar: Error creating new job', error);
-                this.showError('Unable to create job. Please try again.');
-            }
-        }
-
-        /**
          * Get CSRF token for API requests
          * @returns {string} CSRF token
          */
@@ -2472,11 +2123,6 @@
          * Cleanup method for removing event listeners and resetting state
          */
         destroy() {
-            // Close event details dialog if open
-            if (this.eventDetailsDialog && this.eventDetailsDialog.parentNode) {
-                this.eventDetailsDialog.parentNode.removeChild(this.eventDetailsDialog);
-                this.eventDetailsDialog = null;
-            }
 
             if (this.calendar) {
                 this.calendar.destroy();

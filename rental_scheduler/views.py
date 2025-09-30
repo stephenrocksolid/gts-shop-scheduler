@@ -502,13 +502,14 @@ def get_job_calendar_data(request):
             event = {
                 'id': f"job-{job.id}",
                 'title': f"{job.trailer_details or 'Unknown'} Trailer - {display_name}{phone_display}",
-                'start': job.start_dt.isoformat(),
-                'end': job.end_dt.isoformat(),
+                'start': job.start_dt.astimezone().isoformat(),
+                'end': job.end_dt.astimezone().isoformat(),
                 'backgroundColor': STATUS_COLORS.get(job.status, '#6B7280'),
                 'borderColor': STATUS_COLORS.get(job.status, '#6B7280'),
                 'allDay': job.all_day,
                 'extendedProps': {
                     'type': 'job',
+                    'job_id': job.id,
                     'status': job.status,
                     'business_name': job.business_name,
                     'contact_name': job.contact_name,
@@ -841,16 +842,24 @@ def job_create_api(request):
         # Handle dates
         if data.get('start_dt'):
             from datetime import datetime
+            from django.utils import timezone
             try:
-                # Parse datetime-local format (YYYY-MM-DDTHH:MM)
-                job.start_dt = datetime.fromisoformat(data['start_dt'])
+                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
+                naive_dt = datetime.fromisoformat(data['start_dt'])
+                # Make it timezone-aware in local timezone, then convert to UTC for storage
+                local_dt = timezone.make_aware(naive_dt)
+                job.start_dt = local_dt
             except ValueError:
                 return JsonResponse({'error': 'Invalid start date format'}, status=400)
         if data.get('end_dt'):
             from datetime import datetime
+            from django.utils import timezone
             try:
-                # Parse datetime-local format (YYYY-MM-DDTHH:MM)
-                job.end_dt = datetime.fromisoformat(data['end_dt'])
+                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
+                naive_dt = datetime.fromisoformat(data['end_dt'])
+                # Make it timezone-aware in local timezone, then convert to UTC for storage
+                local_dt = timezone.make_aware(naive_dt)
+                job.end_dt = local_dt
             except ValueError:
                 return JsonResponse({'error': 'Invalid end date format'}, status=400)
         
@@ -873,8 +882,8 @@ def job_create_api(request):
             'trailer_color': job.trailer_color,
             'trailer_serial': job.trailer_serial,
             'trailer_details': job.trailer_details,
-            'start_dt': job.start_dt.isoformat() if job.start_dt else None,
-            'end_dt': job.end_dt.isoformat() if job.end_dt else None,
+            'start_dt': job.start_dt.astimezone().isoformat() if job.start_dt else None,
+            'end_dt': job.end_dt.astimezone().isoformat() if job.end_dt else None,
             'all_day': job.all_day,
             'status': job.status,
             'notes': job.notes,
@@ -913,14 +922,61 @@ def job_update_api(request, pk):
         
         # Handle dates
         if data.get('start_dt'):
-            job.start_dt = data['start_dt']
+            from datetime import datetime
+            from django.utils import timezone
+            try:
+                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
+                naive_dt = datetime.fromisoformat(data['start_dt'])
+                # Make it timezone-aware in local timezone, then convert to UTC for storage
+                local_dt = timezone.make_aware(naive_dt)
+                job.start_dt = local_dt
+            except ValueError:
+                return JsonResponse({'error': 'Invalid start date format'}, status=400)
         if data.get('end_dt'):
-            job.end_dt = data['end_dt']
+            from datetime import datetime
+            from django.utils import timezone
+            try:
+                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
+                naive_dt = datetime.fromisoformat(data['end_dt'])
+                # Make it timezone-aware in local timezone, then convert to UTC for storage
+                local_dt = timezone.make_aware(naive_dt)
+                job.end_dt = local_dt
+            except ValueError:
+                return JsonResponse({'error': 'Invalid end date format'}, status=400)
         
         # Save the job
         job.save()
         
         # Return updated job data
+        return JsonResponse({
+            'id': job.id,
+            'business_name': job.business_name,
+            'contact_name': job.contact_name,
+            'phone': job.phone,
+            'trailer_color': job.trailer_color,
+            'trailer_serial': job.trailer_serial,
+            'trailer_details': job.trailer_details,
+            'start_dt': job.start_dt.astimezone().isoformat() if job.start_dt else None,
+            'end_dt': job.end_dt.astimezone().isoformat() if job.end_dt else None,
+            'all_day': job.all_day,
+            'status': job.status,
+            'notes': job.notes,
+            'repair_notes': job.repair_notes,
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["GET"])
+def job_detail_api(request, pk):
+    """API endpoint to get job details"""
+    try:
+        job = get_object_or_404(Job, pk=pk)
+        
+        # Return job data
         return JsonResponse({
             'id': job.id,
             'business_name': job.business_name,
@@ -935,10 +991,9 @@ def job_update_api(request, pk):
             'status': job.status,
             'notes': job.notes,
             'repair_notes': job.repair_notes,
+            'display_name': job.display_name,
         })
         
-    except json.JSONDecodeError:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
