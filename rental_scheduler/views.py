@@ -54,6 +54,10 @@ class CalendarView(TemplateView):
         import json
         context['calendars_json'] = json.dumps(context['calendars'])
         
+        # Add timestamp for cache busting
+        import time
+        context['timestamp'] = int(time.time())
+        
         return context
 
 # Calendar CRUD Views
@@ -295,13 +299,34 @@ class JobForm(forms.ModelForm):
                 self.fields[name].initial = getattr(self.instance, name).strftime(DATETIME_LOCAL_FMT)
     
     def clean(self):
-        """Custom validation to ensure end date is after start date"""
+        """Custom validation to ensure end date is after start date and handle all-day normalization"""
+        from datetime import datetime, time, timedelta
+        
         cleaned_data = super().clean()
+        all_day = cleaned_data.get("all_day") or False
         start_dt = cleaned_data.get("start_dt")
         end_dt = cleaned_data.get("end_dt")
         
-        if start_dt and end_dt and end_dt < start_dt:
-            self.add_error("end_dt", "End date must be after start date.")
+        if not start_dt or not end_dt:
+            raise forms.ValidationError("Please select both start and end dates.")
+        
+        if all_day:
+            # Normalize to day bounds (exclusive end - next day at midnight)
+            start_normalized = datetime.combine(start_dt.date(), time.min)
+            end_normalized = datetime.combine(end_dt.date(), time.min) + timedelta(days=1)
+            
+            # Make timezone-aware if using timezone support
+            from django.utils import timezone
+            if timezone.is_aware(start_dt):
+                start_normalized = timezone.make_aware(start_normalized)
+                end_normalized = timezone.make_aware(end_normalized)
+            
+            cleaned_data['start_dt'] = start_normalized
+            cleaned_data['end_dt'] = end_normalized
+        else:
+            # Keep times as provided, just validate order
+            if end_dt <= start_dt:
+                self.add_error("end_dt", "End date/time must be after start date/time.")
         
         return cleaned_data
 
@@ -444,6 +469,27 @@ class JobPrintInvoiceView(DetailView):
 
 
 # Calendar API Views
+def lighten_color(hex_color, factor):
+    """
+    Lighten a hex color by a given factor (0-1).
+    Factor of 0.3 means 30% lighter.
+    """
+    # Remove # if present
+    hex_color = hex_color.lstrip('#')
+    
+    # Convert to RGB
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    
+    # Lighten by mixing with white
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+    
+    # Convert back to hex
+    return f"#{r:02x}{g:02x}{b:02x}"
+
 def get_job_calendar_data(request):
     """API endpoint to get job data for calendar display"""
     try:
@@ -490,27 +536,53 @@ def get_job_calendar_data(request):
         # Convert to calendar events
         events = []
         
-        STATUS_COLORS = {
-            'uncompleted': '#F59E0B',  # Yellow
-            'completed': '#059669',   # Green
-        }
-        
         for job in jobs:
-            display_name = job.get_display_name()
-            phone_display = f"\n📞 {job.get_phone()}" if job.get_phone() else ""
+            # Format phone number with dashes
+            phone_formatted = ""
+            if job.get_phone():
+                phone_str = str(int(job.get_phone()))
+                if len(phone_str) == 10:
+                    phone_formatted = f"{phone_str[:3]}-{phone_str[3:6]}-{phone_str[6:]}"
+                else:
+                    phone_formatted = phone_str
+            
+            # Build the event title in format: Business Name (Contact Name) - Phone Number
+            business_name = job.business_name or ""
+            contact_name = job.contact_name or ""
+            
+            if business_name and contact_name:
+                title = f"{business_name} ({contact_name})"
+            elif business_name:
+                title = business_name
+            elif contact_name:
+                title = contact_name
+            else:
+                title = "No Name Provided"
+            
+            if phone_formatted:
+                title += f" - {phone_formatted}"
+            
+            # Get calendar color and apply lighter shade for completed jobs
+            calendar_color = job.calendar.color if job.calendar.color else '#3B82F6'
+            if job.status == 'completed':
+                # Create a lighter shade for completed events
+                calendar_color = lighten_color(calendar_color, 0.3)
             
             event = {
                 'id': f"job-{job.id}",
-                'title': f"{job.trailer_details or 'Unknown'} Trailer - {display_name}{phone_display}",
+                'title': title,
                 'start': job.start_dt.astimezone().isoformat(),
                 'end': job.end_dt.astimezone().isoformat(),
-                'backgroundColor': STATUS_COLORS.get(job.status, '#6B7280'),
-                'borderColor': STATUS_COLORS.get(job.status, '#6B7280'),
+                'backgroundColor': calendar_color,
+                'borderColor': calendar_color,
                 'allDay': job.all_day,
                 'extendedProps': {
                     'type': 'job',
                     'job_id': job.id,
                     'status': job.status,
+                    'calendar_id': job.calendar.id,
+                    'calendar_name': job.calendar.name,
+                    'calendar_color': job.calendar.color,
                     'business_name': job.business_name,
                     'contact_name': job.contact_name,
                     'phone': job.get_phone(),
@@ -521,7 +593,16 @@ def get_job_calendar_data(request):
                     'repair_notes': job.repair_notes,
                 }
             }
+            
+            # Debug: Log the event colors being set
+            print(f"API: Setting colors for job-{job.id}: backgroundColor={calendar_color}, calendar={job.calendar.name}")
+            
             events.append(event)
+        
+        # Debug: Log the number of events and first event
+        print(f"API: Returning {len(events)} events")
+        if events:
+            print(f"API: First event: {events[0]}")
         
         return JsonResponse({
             'status': 'success',
@@ -561,6 +642,29 @@ def update_job_status(request, job_id):
         
     except Exception as e:
         logger.error(f"Error updating job status: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def delete_job_api(request, job_id):
+    """API endpoint to delete a job with CSRF protection"""
+    try:
+        job = get_object_or_404(Job, id=job_id)
+        job_name = job.get_display_name()
+        
+        # Soft delete by setting is_deleted flag
+        job.is_deleted = True
+        job.save()
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'Job for {job_name} deleted successfully.',
+            'job_id': job_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting job: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
 
 
@@ -813,6 +917,147 @@ def job_edit_modal(request, pk):
             "job": job, 
             "form": form
         })
+
+
+def job_detail_panel(request, pk):
+    """Return the read-only job details panel partial"""
+    job = get_object_or_404(Job, pk=pk)
+    return render(request, "rental_scheduler/jobs/_job_panel_detail.html", {"job": job})
+
+
+def job_edit_panel(request, pk):
+    """Return the editable job panel partial or handle form submission"""
+    job = get_object_or_404(Job, pk=pk)
+    
+    if request.method == "POST":
+        form = JobForm(request.POST, instance=job)
+        if form.is_valid():
+            job = form.save()
+            # Return the updated read-only panel with status 200
+            return render(request, "rental_scheduler/jobs/_job_panel_detail.html", {"job": job})
+        else:
+            # Return the edit panel with errors and status 400 so HTMX swaps it and shows errors
+            return render(request, "rental_scheduler/jobs/_job_panel_edit.html", {
+                "job": job, 
+                "form": form
+            }, status=400)
+    else:
+        # GET request - show edit form
+        form = JobForm(instance=job)
+        return render(request, "rental_scheduler/jobs/_job_panel_edit.html", {
+            "job": job,
+            "form": form
+        })
+
+
+def job_create_panel(request):
+    """Return the job creation panel partial or handle form submission"""
+    if request.method == "POST":
+        form = JobForm(request.POST)
+        if form.is_valid():
+            job = form.save()
+            # Return success message and close panel
+            return render(request, "rental_scheduler/jobs/_job_panel_detail.html", {"job": job})
+        else:
+            # Return the create panel with errors and status 400 so HTMX swaps it and shows errors
+            return render(request, "rental_scheduler/jobs/_job_panel_create.html", {
+                "form": form
+            }, status=400)
+    else:
+        # GET request - show create form
+        form = JobForm()
+        
+        # Pre-fill date if provided in query params
+        if 'date' in request.GET:
+            try:
+                from datetime import datetime
+                date_str = request.GET['date']
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+                # Set initial values for the form
+                form.fields['start_dt'].initial = date_obj.strftime('%Y-%m-%dT09:00')
+                form.fields['end_dt'].initial = date_obj.strftime('%Y-%m-%dT17:00')
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        return render(request, "rental_scheduler/jobs/_job_panel_create.html", {
+            "form": form
+        })
+
+
+def job_create_partial(request):
+    """Return job creation form partial for panel"""
+    # Check if editing existing job
+    if 'edit' in request.GET:
+        try:
+            job_id = int(request.GET['edit'])
+            job = get_object_or_404(Job, pk=job_id)
+            form = JobForm(instance=job)
+        except (ValueError, TypeError):
+            form = JobForm()
+    else:
+        # New job creation
+        initial = {}
+        if 'date' in request.GET:
+            try:
+                from datetime import datetime
+                date_str = request.GET['date']
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+                # Set initial values for the form
+                initial['start_dt'] = date_obj.strftime('%Y-%m-%dT09:00')
+                initial['end_dt'] = date_obj.strftime('%Y-%m-%dT17:00')
+            except ValueError:
+                pass  # Invalid date format, ignore
+        
+        # Pre-select calendar based on current filter
+        if 'calendar' in request.GET:
+            try:
+                calendar_id = int(request.GET['calendar'])
+                calendar = Calendar.objects.filter(pk=calendar_id, is_active=True).first()
+                if calendar:
+                    initial['calendar'] = calendar
+            except (ValueError, TypeError):
+                pass  # Invalid calendar ID, ignore
+        
+        form = JobForm(initial=initial)
+    
+    return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {'form': form})
+
+
+def job_detail_partial(request, pk):
+    """Return job details partial for panel"""
+    job = get_object_or_404(Job, pk=pk)
+    return render(request, 'rental_scheduler/jobs/_job_detail_partial.html', {'job': job})
+
+
+@require_http_methods(["POST"])
+def job_create_submit(request):
+    """Handle job creation/update form submission"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"job_create_submit called with POST data: {request.POST}")
+    
+    # Check if this is an update (job ID in form data)
+    job_id = request.POST.get('job_id')
+    if job_id:
+        try:
+            job = get_object_or_404(Job, pk=job_id)
+            form = JobForm(request.POST, instance=job)
+            logger.info(f"Updating existing job {job_id}")
+        except (ValueError, TypeError):
+            form = JobForm(request.POST)
+            logger.info("Creating new job (invalid job_id)")
+    else:
+        form = JobForm(request.POST)
+        logger.info("Creating new job")
+    
+    if form.is_valid():
+        job = form.save()
+        logger.info(f"Job saved successfully: {job.id}")
+        return render(request, 'rental_scheduler/jobs/_job_detail_partial.html', {'job': job})
+    else:
+        logger.error(f"Form validation errors: {form.errors}")
+        return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {'form': form}, status=400)
 
 # API Views for Job Updates
 @require_http_methods(["POST"])

@@ -186,6 +186,27 @@
     color: #374151;
 }
 
+.today-panel-title-btn {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #374151;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    text-align: left;
+    transition: color 0.2s ease;
+}
+
+.today-panel-title-btn:hover {
+    color: #1f2937;
+}
+
+.today-panel-title-btn:active {
+    color: #111827;
+}
+
 #todayDateLabel {
     font-size: 0.875rem;
     color: #6b7280;
@@ -240,6 +261,67 @@
     padding: 8px 0;
     text-align: center;
     font-style: italic;
+}
+
+/* Date picker controls styling */
+.today-date-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.today-nav-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #374151;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+}
+
+.today-nav-btn:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+    color: #1f2937;
+}
+
+.today-nav-btn:active {
+    background: #e5e7eb;
+    transform: translateY(1px);
+}
+
+.today-date-picker {
+    flex: 1;
+    height: 32px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 0 8px;
+    font-size: 0.875rem;
+    color: #374151;
+    background: #ffffff;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+}
+
+.today-date-picker:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.today-date-picker:hover {
+    border-color: #9ca3af;
 }
 
 /* Responsive design */
@@ -309,9 +391,28 @@
         
         <aside id="todaySidebar" class="today-sidebar">
             <header>
-                <h3>Today</h3>
+                <button id="todayPanelTitle" class="today-panel-title-btn">Today</button>
                 <div id="todayDateLabel"></div>
             </header>
+            <div class="today-date-controls">
+                <button id="prevDayBtn" class="today-nav-btn" title="Previous day">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15,18 9,12 15,6"></polyline>
+                    </svg>
+                </button>
+                <input type="date" id="todayDatePicker" class="today-date-picker">
+                <button id="nextDayBtn" class="today-nav-btn" title="Next day">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9,18 15,12 9,6"></polyline>
+                    </svg>
+                </button>
+                <button id="todayBtn" class="today-nav-btn" title="Go to today">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12,6 12,12 16,14"></polyline>
+                    </svg>
+                </button>
+            </div>
             <div id="todayList" class="today-list"></div>
         </aside>
     </div>
@@ -358,6 +459,5 @@ document.addEventListener('DOMContentLoaded', function() {
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'rental_scheduler/js/job_dialog.js' %}"></script>
-<script src="{% static 'rental_scheduler/js/job_calendar.js' %}"></script>
+<script src="{% static 'rental_scheduler/js/job_calendar.js' %}?v={{ timestamp|default:'1' }}"></script>
 {% endblock %}

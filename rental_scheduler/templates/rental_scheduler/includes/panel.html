@@ -1,0 +1,198 @@
+{% comment %} reusable floating panel {% endcomment %}
+<div id="job-panel"
+     class="fixed z-50 hidden"
+     role="dialog" aria-modal="false" aria-labelledby="job-panel-title"
+     style="top: 0; left: 0;">
+
+  <style>
+    #job-panel { 
+      width: 600px; 
+      max-width: 95vw;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    
+    #job-panel .panel-frame {
+      background: #ffffff; 
+      border: 1px solid #e5e7eb; 
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+      overflow: hidden;
+      transition: box-shadow 0.2s ease;
+    }
+    
+    #job-panel .panel-frame:hover {
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+    }
+    
+    #job-panel .panel-header {
+      display: flex; 
+      align-items: center; 
+      justify-content: space-between;
+      padding: 20px 24px; 
+      background: #ffffff;
+      border-bottom: 1px solid #e5e7eb;
+      cursor: move; 
+      user-select: none;
+    }
+    
+    #job-panel .panel-header:active {
+      cursor: grabbing;
+    }
+    
+    #job-panel #job-panel-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #111827;
+      margin: 0;
+    }
+    
+    #job-panel .panel-body { 
+      max-height: calc(90vh - 200px); 
+      overflow-y: auto;
+      padding: 32px;
+      background: #ffffff;
+    }
+    
+    #job-panel .panel-body::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    #job-panel .panel-body::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    
+    #job-panel .panel-body::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    
+    #job-panel .panel-body::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    
+    #job-panel .btn { 
+      font-size: 14px; 
+      font-weight: 500;
+      padding: 8px 16px; 
+      border: 1px solid #d1d5db;
+      border-radius: 8px; 
+      background: #ffffff;
+      color: #374151;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    
+    #job-panel .btn:hover { 
+      background: #f9fafb;
+    }
+    
+    #job-panel .btn:active {
+      background: #f3f4f6;
+    }
+    
+    #job-panel .btn-delete {
+      background: #ef4444;
+      color: #ffffff;
+      border-color: #dc2626;
+    }
+    
+    #job-panel .btn-delete:hover {
+      background: #dc2626;
+    }
+    
+    #job-panel .btn-delete:active {
+      background: #b91c1c;
+    }
+    
+    /* Section cards styling to match dialog */
+    #job-panel .panel-body > div:not(.flex) {
+      background: #f8fafc;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    
+    /* Section headers */
+    #job-panel .panel-body h3 {
+      background: #e2e8f0;
+      padding: 6px 12px;
+      border-bottom: 1px solid #cbd5e1;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      margin: 0;
+      display: flex;
+      align-items: center;
+    }
+    
+    /* Section content */
+    #job-panel .panel-body > div > div:last-child {
+      padding: 24px;
+    }
+    
+    /* Form styling within panel */
+    #job-panel .panel-body input,
+    #job-panel .panel-body select,
+    #job-panel .panel-body textarea {
+      font-size: 14px;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+      background: #ffffff;
+    }
+    
+    #job-panel .panel-body input:focus,
+    #job-panel .panel-body select:focus,
+    #job-panel .panel-body textarea:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    #job-panel .panel-body label {
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 4px;
+      display: block;
+      font-size: 14px;
+    }
+    
+    #job-panel .panel-body p {
+      color: #6b7280;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    
+    /* Loading state styling */
+    #job-panel .panel-body .text-gray-500 {
+      color: #6b7280;
+      text-align: center;
+      padding: 40px 20px;
+      font-size: 14px;
+    }
+  </style>
+
+  <div class="panel-frame">
+    <div class="panel-header">
+      <h2 id="job-panel-title" class="font-semibold text-gray-800">Job</h2>
+      <div class="space-x-2">
+        <button class="btn btn-delete" id="panel-delete-btn" style="display: none;">Delete</button>
+        <button class="btn btn-close">✕</button>
+      </div>
+    </div>
+    <div class="panel-body p-3">
+      <!-- HTMX will swap content here -->
+      <div class="text-sm text-gray-500">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('htmx:load', () => {
+    document.querySelectorAll('#job-panel .panel-body').forEach(el => {
+      el.addEventListener('refresh', () => { htmx.ajax('GET', el.getAttribute('hx-get'), { target: el }); });
+    });
+  });
+</script>

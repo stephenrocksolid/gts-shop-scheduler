@@ -1,0 +1,324 @@
+{% load static %}
+<form hx-post="{% url 'rental_scheduler:job_create_submit' %}"
+      hx-target="#job-panel .panel-body"
+      hx-swap="innerHTML"
+      hx-on::after-swap="if(event.detail.successful) { if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
+      style="display: flex; flex-direction: column; gap: 24px;">
+  {% csrf_token %}
+  {% if form.instance.pk %}
+    <input type="hidden" name="job_id" value="{{ form.instance.pk }}">
+  {% endif %}
+  
+  {% if form.non_field_errors %}
+    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; color: #dc2626;">
+      {{ form.non_field_errors }}
+    </div>
+  {% endif %}
+  
+  <!-- Calendar Selection (Top) -->
+  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+    <div style="padding: 16px 20px;">
+      <label for="{{ form.calendar.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 8px; display: block; font-size: 14px;">Calendar *</label>
+      {{ form.calendar }}
+    </div>
+  </div>
+  
+  <!-- Customer Information Section -->
+  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+    <div style="background: #e2e8f0; padding: 6px 12px; border-bottom: 1px solid #cbd5e1;">
+      <h3 style="font-size: 13px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
+        <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
+        </svg>
+        Customer Information
+      </h3>
+    </div>
+    <div style="padding: 24px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div>
+          <label for="{{ form.business_name.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Business Name *</label>
+          {{ form.business_name }}
+          {% if form.business_name.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.business_name.errors.0 }}</p>{% endif %}
+        </div>
+        <div>
+          <label for="{{ form.contact_name.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Contact Name</label>
+          {{ form.contact_name }}
+          {% if form.contact_name.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.contact_name.errors.0 }}</p>{% endif %}
+        </div>
+        <div>
+          <label for="{{ form.phone.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Phone</label>
+          {{ form.phone }}
+          {% if form.phone.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.phone.errors.0 }}</p>{% endif %}
+        </div>
+        <div>
+          <label for="{{ form.date_call_received.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Date Call Received</label>
+          <input type="date" id="{{ form.date_call_received.id_for_label }}" name="{{ form.date_call_received.html_name }}" value="{{ form.date_call_received.value|date:'Y-m-d'|default:'' }}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+          {% if form.date_call_received.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.date_call_received.errors.0 }}</p>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schedule Information Section -->
+  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+    <div style="background: #e2e8f0; padding: 6px 12px; border-bottom: 1px solid #cbd5e1;">
+      <h3 style="font-size: 13px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
+        <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+        </svg>
+        Schedule Information
+      </h3>
+    </div>
+    <div style="padding: 24px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div style="grid-column: 1 / -1;">
+          <label style="font-weight: 600; color: #374151; display: flex; align-items: center; font-size: 14px;">
+            {{ form.all_day }}
+            <span style="margin-left: 8px;">All Day Event</span>
+          </label>
+        </div>
+        <div>
+          <label for="{{ form.start_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Start Date & Time *</label>
+          {{ form.start_dt }}
+        </div>
+        <div>
+          <label for="{{ form.end_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">End Date & Time *</label>
+          {{ form.end_dt }}
+        </div>
+        <div>
+          <label for="{{ form.repeat_type.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repeat</label>
+          {{ form.repeat_type }}
+        </div>
+        <div id="repeat-months-field" style="display: none;">
+          <label for="id_repeat_months" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Number of Months</label>
+          <input type="number" id="id_repeat_months" name="repeat_months" min="1" max="12" value="1" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">General Notes</label>
+          {{ form.notes }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trailer Information Section -->
+  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+    <div style="background: #e2e8f0; padding: 6px 12px; border-bottom: 1px solid #cbd5e1;">
+      <h3 style="font-size: 13px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
+        <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"></path>
+          <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"></path>
+        </svg>
+        Trailer Information
+      </h3>
+    </div>
+    <div style="padding: 24px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div>
+          <label for="{{ form.trailer_color.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Color</label>
+          {{ form.trailer_color }}
+        </div>
+        <div>
+          <label for="{{ form.trailer_serial.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Serial Number</label>
+          {{ form.trailer_serial }}
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Details</label>
+          {{ form.trailer_details }}
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label for="{{ form.repair_notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repair Notes</label>
+          {{ form.repair_notes }}
+        </div>
+        <div>
+          <label for="{{ form.quote.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Quote Amount</label>
+          {{ form.quote }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
+  <div style="display: flex; justify-content: space-between; gap: 12px; padding-top: 8px;">
+    <div style="display: flex; gap: 12px;">
+      <button type="button" onclick="window.open('/jobs/' + {{ form.instance.pk|default:'0' }} + '/print/wo/', '_blank')" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'" {% if not form.instance.pk %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+        Print WO
+      </button>
+      <button type="button" onclick="window.open('/jobs/' + {{ form.instance.pk|default:'0' }} + '/print/wo-customer/', '_blank')" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'" {% if not form.instance.pk %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+        Print Customer Copy WO
+      </button>
+      <button type="button" onclick="window.open('/jobs/' + {{ form.instance.pk|default:'0' }} + '/print/invoice/', '_blank')" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'" {% if not form.instance.pk %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+        Print Invoice
+      </button>
+    </div>
+    <div style="display: flex; gap: 12px;">
+      <button type="button" onclick="JobPanel.close()" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
+        Cancel
+      </button>
+      {% if form.instance.pk and form.instance.status == 'uncompleted' %}
+        <button type="button" onclick="updateJobStatus({{ form.instance.pk }}, 'completed')" style="padding: 12px 24px; border: none; border-radius: 8px; background: #16a34a; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#15803d'" onmouseout="this.style.backgroundColor='#16a34a'">
+          Mark as Complete
+        </button>
+      {% endif %}
+      {% if form.instance.pk %}
+        <button type="button" onclick="deleteJob({{ form.instance.pk }})" style="padding: 12px 24px; border: none; border-radius: 8px; background: #dc2626; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#b91c1c'" onmouseout="this.style.backgroundColor='#dc2626'">
+          Delete
+        </button>
+      {% endif %}
+      <button type="submit" style="padding: 12px 24px; border: none; border-radius: 8px; background: #3b82f6; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
+        Save Job
+      </button>
+    </div>
+  </div>
+</form>
+
+<script src="{% static 'rental_scheduler/js/all_day_toggle.js' %}"></script>
+<script>
+  (function() {
+    setTimeout(() => {
+      // Try Tempus Dominus first
+      if (window.wireAllDayToggle && window.tempusDominus) {
+        console.log('Using Tempus Dominus all-day toggle');
+        wireAllDayToggle({
+          allDaySel: 'input[name="all_day"]',
+          startSel: 'input[name="start_dt"]',
+          endSel: 'input[name="end_dt"]',
+          exclusiveEnd: true
+        });
+      } else {
+        // Fallback to native browser inputs
+        console.log('Using native browser input all-day toggle');
+        const allDayCheckbox = document.querySelector('input[name="all_day"]');
+        const startDtInput = document.querySelector('input[name="start_dt"]');
+        const endDtInput = document.querySelector('input[name="end_dt"]');
+        const startLabel = startDtInput?.previousElementSibling;
+        const endLabel = endDtInput?.previousElementSibling;
+        
+        if (!allDayCheckbox || !startDtInput || !endDtInput) return;
+        
+        function toggleDateTimeInputs() {
+          if (allDayCheckbox.checked) {
+            // All Day = true → Use date-only inputs
+            const startVal = startDtInput.value.split('T')[0] || '';
+            const endVal = endDtInput.value.split('T')[0] || '';
+            
+            startDtInput.type = 'date';
+            endDtInput.type = 'date';
+            
+            startDtInput.value = startVal;
+            endDtInput.value = endVal;
+            
+            if (startLabel) startLabel.textContent = 'Start Date *';
+            if (endLabel) endLabel.textContent = 'End Date *';
+          } else {
+            // All Day = false → Use datetime-local inputs
+            const startVal = startDtInput.value;
+            const endVal = endDtInput.value;
+            
+            startDtInput.type = 'datetime-local';
+            endDtInput.type = 'datetime-local';
+            
+            // Add default times if we only have dates
+            if (startVal && startVal.length === 10) {
+              startDtInput.value = startVal + 'T09:00';
+            }
+            if (endVal && endVal.length === 10) {
+              endDtInput.value = endVal + 'T17:00';
+            }
+            
+            if (startLabel) startLabel.textContent = 'Start Date & Time *';
+            if (endLabel) endLabel.textContent = 'End Date & Time *';
+          }
+        }
+        
+        allDayCheckbox.addEventListener('change', toggleDateTimeInputs);
+        toggleDateTimeInputs();
+      }
+    }, 150);
+  })();
+
+  // Job status update function for panel
+  function updateJobStatus(jobId, status) {
+      // Get CSRF token from cookie
+      function getCookie(name) {
+          const value = `; ${document.cookie}`;
+          const parts = value.split(`; ${name}=`);
+          if (parts.length === 2) return parts.pop().split(';').shift();
+      }
+      
+      fetch(`/api/jobs/${jobId}/update-status/`, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCookie('csrftoken'),
+          },
+          body: JSON.stringify({
+              status: status
+          })
+      })
+      .then(response => response.json())
+      .then(data => {
+          if (data.success) {
+              // Close panel and refresh calendar
+              if (window.JobPanel) {
+                  window.JobPanel.close();
+              }
+              // Refresh the calendar if it exists
+              if (typeof window.refreshCalendar === 'function') {
+                  window.refreshCalendar();
+              } else if (window.calendar && window.calendar.refetchEvents) {
+                  window.calendar.refetchEvents();
+              } else if (window.jobCalendar && window.jobCalendar.calendar) {
+                  window.jobCalendar.calendar.refetchEvents();
+              }
+          } else {
+              console.error('Failed to update job status:', data.error);
+          }
+      })
+      .catch(error => {
+          console.error('Error updating job status:', error);
+      });
+  }
+
+  // Job delete function for panel
+  function deleteJob(jobId) {
+      if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
+          // Get CSRF token from cookie
+          function getCookie(name) {
+              const value = `; ${document.cookie}`;
+              const parts = value.split(`; ${name}=`);
+              if (parts.length === 2) return parts.pop().split(';').shift();
+          }
+          
+          fetch(`/api/jobs/${jobId}/delete/`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'X-CSRFToken': getCookie('csrftoken'),
+              }
+          })
+          .then(response => response.json())
+          .then(data => {
+              if (data.success) {
+                  // Close panel and refresh calendar
+                  if (window.JobPanel) {
+                      window.JobPanel.close();
+                  }
+                  // Refresh the calendar if it exists
+                  if (typeof window.refreshCalendar === 'function') {
+                      window.refreshCalendar();
+                  } else if (window.calendar && window.calendar.refetchEvents) {
+                      window.calendar.refetchEvents();
+                  } else if (window.jobCalendar && window.jobCalendar.calendar) {
+                      window.jobCalendar.calendar.refetchEvents();
+                  }
+              } else {
+                  console.error('Failed to delete job:', data.error);
+              }
+          })
+          .catch(error => {
+              console.error('Error deleting job:', error);
+          });
+      }
+  }
+</script>

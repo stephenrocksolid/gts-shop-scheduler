@@ -59,8 +59,6 @@
             initializeConfig() {
                 // API Endpoints
                 this.api = {
-                    calculateRentalQuote: '/api/calculate-rental-quote/',
-                    calculationConstants: '/api/calculation-constants/',
                     calculateDuration: '/api/calculate-duration/',
                     getAvailableTrailers: '/api/contracts/get-available-trailers/',
                     sendErrorReport: '/api/send-error-report/',

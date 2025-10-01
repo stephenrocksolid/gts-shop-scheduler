@@ -122,9 +122,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [
-    BASE_DIR / 'rental_scheduler' / 'static',
-]
+# STATICFILES_DIRS not needed - AppDirectoriesFinder automatically finds app static files
+STATICFILES_DIRS = []
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 #IMPORTANT: This is to make that the static files get collected with a hashed filename!!!!!

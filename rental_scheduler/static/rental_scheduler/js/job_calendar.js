@@ -1,10 +1,16 @@
 /**
  * Job Calendar - Manages job calendar display with HTMX integration
  * Handles calendar rendering, filtering, and job status updates
+ * VERSION: 2.0 - Calendar Color Coding Update
  */
 
 (function () {
     'use strict';
+    
+    // Debug: Confirm this version is loaded
+    console.log('🚀 JobCalendar: Loading version 3.0 with calendar color coding - TIMESTAMP: ' + new Date().toISOString());
+    console.log('🎨 This version includes CALENDAR-BASED COLOR CODING!');
+    console.log('🔥 NEW FILE: calendar_main.js - Cache busting complete!');
 
     class JobCalendar {
         constructor() {
@@ -14,7 +20,6 @@
             this.statusFilter = null;
             this.searchFilter = null;
             this.loadingEl = null;
-            this.jobDialog = null;
             
             // Click tracking for double-click detection
             this.clickTimer = null;
@@ -70,11 +75,10 @@
                 initialView: 'monthSlidingWeek',
                 initialDate: this.getSavedDate() || '2025-09-01',
                 headerToolbar: {
-                    left: 'calendarFilterButton statusFilterButton searchButton addJobButton',
+                    left: '',
                     center: 'prev title next',
-                    right: 'jobsButton settingsButton'
+                    right: 'searchButton jobsButton settingsButton'
                 },
-                headerToolbarHeight: 'auto',
                 buttonText: {
                     today: 'Today'
                 },
@@ -98,16 +102,6 @@
                             // TODO: Implement search functionality
                             console.log('Search clicked');
                         }
-                    },
-                    addJobButton: {
-                        text: '+ Job',
-                        click: function() {
-                            // Use the unified JobDialog for new job creation
-                            if (!this.jobDialog) {
-                                this.jobDialog = new JobDialog();
-                            }
-                            this.jobDialog.openNewJobDialog();
-                        }.bind(this)
                     },
                     jobsButton: {
                         text: 'Jobs',
@@ -140,7 +134,6 @@
                 events: this.fetchEvents.bind(this),
                 dateClick: this.handleDateClick.bind(this),
                 eventClick: this.handleEventClick.bind(this),
-                eventDoubleClick: this.handleEventDoubleClick.bind(this),
                 eventDidMount: this.handleEventMount.bind(this),
                 datesSet: this.handleDatesSet.bind(this),
                 eventTimeFormat: {
@@ -151,9 +144,6 @@
                 dayMaxEvents: true,
                 moreLinkClick: 'popover',
                 eventDisplay: 'block',
-                eventColor: '#3B82F6',
-                eventTextColor: '#ffffff',
-                eventBorderColor: '#3B82F6',
                 eventClassNames: this.getEventClassNames.bind(this),
                 eventContent: this.renderEventContent.bind(this),
                 // Hook calendar events to update Today panel and save position
@@ -197,7 +187,10 @@
                 });
             }
             
-            // Make calendar instance globally available for JobDialog
+            // Initialize date picker controls
+            this.initializeDatePickerControls();
+            
+            // Make calendar instance globally available
             window.jobCalendar = this;
         }
 
@@ -274,6 +267,16 @@
             return d;
         }
 
+        /**
+         * Format date as YYYY-MM-DD in local timezone (not UTC)
+         */
+        formatDateForInput(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
         endOfDay(date) {
             const d = new Date(date);
             d.setHours(23, 59, 59, 999);
@@ -312,20 +315,38 @@
         }
 
         /**
-         * Render the Today panel with events for the current day
+         * Render the Today panel with events for the selected day
          */
-        renderTodayPanel() {
+        renderTodayPanel(selectedDate = null) {
             const listEl = document.getElementById('todayList');
             const labelEl = document.getElementById('todayDateLabel');
-            if (!listEl || !labelEl) return;
+            const titleEl = document.getElementById('todayPanelTitle');
+            const datePicker = document.getElementById('todayDatePicker');
+            
+            if (!listEl || !labelEl || !titleEl) return;
 
-            const today = new Date(); // local today
-            labelEl.textContent = this.calendar.formatDate(today, {
+            const targetDate = selectedDate || new Date(); // Use provided date or today
+            const today = new Date();
+            const isToday = targetDate.toDateString() === today.toDateString();
+            
+            // Update title
+            titleEl.textContent = isToday ? 'Today' : 'Events';
+            
+            // Update date label
+            labelEl.textContent = this.calendar.formatDate(targetDate, {
                 weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
             });
 
+            // Update date picker value only if it's different
+            if (datePicker) {
+                const dateStr = this.formatDateForInput(targetDate);
+                if (datePicker.value !== dateStr) {
+                    datePicker.value = dateStr;
+                }
+            }
+
             // Pull the current client-side set (after fetch)
-            const events = this.calendar.getEvents().filter(ev => this.eventOverlapsDay(ev, today));
+            const events = this.calendar.getEvents().filter(ev => this.eventOverlapsDay(ev, targetDate));
 
             // Sort: all-day first, then by start time
             events.sort((a, b) => {
@@ -336,7 +357,8 @@
 
             listEl.innerHTML = '';
             if (!events.length) {
-                listEl.innerHTML = '<div class="today-empty">No events today.</div>';
+                const emptyText = isToday ? 'No events today.' : 'No events for this day.';
+                listEl.innerHTML = `<div class="today-empty">${emptyText}</div>`;
                 return;
             }
 
@@ -345,13 +367,9 @@
                     ? 'All day'
                     : `${this.calendar.formatDate(ev.start, { hour: 'numeric', minute: '2-digit' })}–${this.calendar.formatDate(ev.end || ev.start, { hour: 'numeric', minute: '2-digit' })}`;
 
-                // Get status color from extendedProps or use default
-                const status = ev.extendedProps?.status || 'uncompleted';
-                const statusColors = {
-                    'uncompleted': '#F59E0B',  // Yellow
-                    'completed': '#059669',   // Green
-                };
-                const backgroundColor = statusColors[status] || '#6B7280'; // Default gray
+                // Get calendar color from extendedProps or use default
+                const calendarColor = ev.extendedProps?.calendar_color || '#3B82F6';
+                const backgroundColor = ev.backgroundColor || calendarColor;
 
                 const item = document.createElement('div');
                 item.className = 'today-item';
@@ -373,6 +391,72 @@
                 });
                 listEl.appendChild(item);
             }
+        }
+
+        /**
+         * Initialize date picker controls for the Today panel
+         */
+        initializeDatePickerControls() {
+            const prevDayBtn = document.getElementById('prevDayBtn');
+            const nextDayBtn = document.getElementById('nextDayBtn');
+            const todayBtn = document.getElementById('todayBtn');
+            const datePicker = document.getElementById('todayDatePicker');
+            const titleBtn = document.getElementById('todayPanelTitle');
+            
+            if (!prevDayBtn || !nextDayBtn || !todayBtn || !datePicker || !titleBtn) {
+                console.warn('Date picker controls not found');
+                return;
+            }
+
+            // Set initial date to today
+            const today = new Date();
+            datePicker.value = this.formatDateForInput(today);
+            
+            // Initial render with today's date
+            this.renderTodayPanel(today);
+
+            // Previous day button
+            prevDayBtn.addEventListener('click', () => {
+                const [year, month, day] = datePicker.value.split('-').map(Number);
+                const currentDate = new Date(year, month - 1, day);
+                currentDate.setDate(currentDate.getDate() - 1);
+                datePicker.value = this.formatDateForInput(currentDate);
+                // Trigger change event to update the panel
+                datePicker.dispatchEvent(new Event('change'));
+            });
+
+            // Next day button
+            nextDayBtn.addEventListener('click', () => {
+                const [year, month, day] = datePicker.value.split('-').map(Number);
+                const currentDate = new Date(year, month - 1, day);
+                currentDate.setDate(currentDate.getDate() + 1);
+                datePicker.value = this.formatDateForInput(currentDate);
+                // Trigger change event to update the panel
+                datePicker.dispatchEvent(new Event('change'));
+            });
+
+            // Today button
+            todayBtn.addEventListener('click', () => {
+                const today = new Date();
+                datePicker.value = this.formatDateForInput(today);
+                // Trigger change event to update the panel
+                datePicker.dispatchEvent(new Event('change'));
+            });
+
+            // Date picker change
+            datePicker.addEventListener('change', () => {
+                const [year, month, day] = datePicker.value.split('-').map(Number);
+                const selectedDate = new Date(year, month - 1, day);
+                this.renderTodayPanel(selectedDate);
+            });
+
+            // Title button click - go to today
+            titleBtn.addEventListener('click', () => {
+                const today = new Date();
+                datePicker.value = this.formatDateForInput(today);
+                // Trigger change event to update the panel
+                datePicker.dispatchEvent(new Event('change'));
+            });
         }
 
         /**
@@ -438,41 +522,315 @@
                 // Adjust Sunday column width
                 this.adjustSundayColumnWidth();
                 
-                // Replace calendar filter button with dropdown
+                // Hide the original calendar filter button since we moved it
                 const calendarFilterBtn = document.querySelector('.fc-calendarFilterButton-button');
                 if (calendarFilterBtn) {
-                    // Create dropdown element
-                    const dropdown = document.createElement('select');
-                    dropdown.id = 'calendar-filter';
-                    
-                    // Build options
-                    let options = '<option value="">All Calendars</option>';
+                    calendarFilterBtn.style.display = 'none';
+                }
+                
+                // Hide the original status filter button since we moved it
+                const statusFilterBtn = document.querySelector('.fc-statusFilterButton-button');
+                if (statusFilterBtn) {
+                    statusFilterBtn.style.display = 'none';
+                }
+                
+                // Add Jump to Date control
+                this.addJumpToDateControl();
+            }, 100);
+        }
+
+        /**
+         * Add Jump to Date, Calendar, and Status controls to the calendar toolbar
+         */
+        addJumpToDateControl() {
+            // Find the calendar toolbar
+            const toolbar = document.querySelector('.fc-header-toolbar');
+            if (!toolbar) return;
+
+            // Create the controls container
+            const controlsContainer = document.createElement('div');
+            controlsContainer.className = 'fc-unified-controls';
+            controlsContainer.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-right: 16px;
+            `;
+
+            // Create Jump to Date section
+            const jumpToDateSection = document.createElement('div');
+            jumpToDateSection.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            `;
+
+            // Create Jump to Date label
+            const dateLabel = document.createElement('label');
+            dateLabel.setAttribute('for', 'jump-to-date');
+            dateLabel.textContent = 'Jump to date';
+            dateLabel.style.cssText = `
+                font-size: 14px;
+                color: #666;
+                white-space: nowrap;
+                cursor: pointer;
+            `;
+
+            // Create Jump to Date input
+            const dateInput = document.createElement('input');
+            dateInput.id = 'jump-to-date';
+            dateInput.name = 'jump_to_date';
+            dateInput.type = 'text';
+            dateInput.placeholder = 'YYYY-MM-DD';
+            dateInput.autocomplete = 'off';
+            dateInput.style.cssText = `
+                height: 36px;
+                width: 176px;
+                border-radius: 6px;
+                border: 1px solid #d1d5db;
+                padding: 0 12px;
+                font-size: 14px;
+                color: #374151;
+                background: #ffffff;
+                transition: border-color 0.2s ease;
+            `;
+
+            // Add hover and focus styles for date input
+            dateInput.addEventListener('mouseenter', () => {
+                dateInput.style.borderColor = '#9ca3af';
+            });
+            dateInput.addEventListener('mouseleave', () => {
+                if (document.activeElement !== dateInput) {
+                    dateInput.style.borderColor = '#d1d5db';
+                }
+            });
+            dateInput.addEventListener('focus', () => {
+                dateInput.style.borderColor = '#3b82f6';
+                dateInput.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+            });
+            dateInput.addEventListener('blur', () => {
+                dateInput.style.borderColor = '#d1d5db';
+                dateInput.style.boxShadow = 'none';
+            });
+
+            // Create Calendar dropdown section
+            const calendarSection = document.createElement('div');
+            calendarSection.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            `;
+
+            // Create Calendar label
+            const calendarLabel = document.createElement('label');
+            calendarLabel.setAttribute('for', 'calendar-filter-moved');
+            calendarLabel.textContent = 'Calendar';
+            calendarLabel.style.cssText = `
+                font-size: 14px;
+                color: #666;
+                white-space: nowrap;
+                cursor: pointer;
+            `;
+
+            // Create Calendar dropdown
+            const calendarDropdown = document.createElement('select');
+            calendarDropdown.id = 'calendar-filter-moved';
+            calendarDropdown.style.cssText = `
+                height: 36px;
+                min-width: 140px;
+                border-radius: 6px;
+                border: 1px solid #d1d5db;
+                padding: 0 12px;
+                font-size: 14px;
+                color: #374151;
+                background: #ffffff;
+                cursor: pointer;
+                transition: border-color 0.2s ease;
+            `;
+
+            // Build calendar options
+            let calendarOptions = '<option value="">All Calendars</option>';
                     if (window.calendarConfig?.calendars && Array.isArray(window.calendarConfig.calendars)) {
-                        options += window.calendarConfig.calendars.map(cal => 
+                calendarOptions += window.calendarConfig.calendars.map(cal => 
                             `<option value="${cal.id}">${cal.name}</option>`
                         ).join('');
                     }
-                    dropdown.innerHTML = options;
-                    
-                    // Style the dropdown
-                    dropdown.style.cssText = `
-                        background: transparent;
-                        border: 1px solid #ccc;
-                        border-radius: 4px;
-                        padding: 4px 8px;
+            calendarDropdown.innerHTML = calendarOptions;
+
+            // Add hover and focus styles for calendar dropdown
+            calendarDropdown.addEventListener('mouseenter', () => {
+                calendarDropdown.style.borderColor = '#9ca3af';
+            });
+            calendarDropdown.addEventListener('mouseleave', () => {
+                if (document.activeElement !== calendarDropdown) {
+                    calendarDropdown.style.borderColor = '#d1d5db';
+                }
+            });
+            calendarDropdown.addEventListener('focus', () => {
+                calendarDropdown.style.borderColor = '#3b82f6';
+                calendarDropdown.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+            });
+            calendarDropdown.addEventListener('blur', () => {
+                calendarDropdown.style.borderColor = '#d1d5db';
+                calendarDropdown.style.boxShadow = 'none';
+            });
+
+            // Create Status dropdown section
+            const statusSection = document.createElement('div');
+            statusSection.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            `;
+
+            // Create Status label
+            const statusLabel = document.createElement('label');
+            statusLabel.setAttribute('for', 'status-filter-moved');
+            statusLabel.textContent = 'Status';
+            statusLabel.style.cssText = `
                         font-size: 14px;
-                        color: #333;
+                color: #666;
+                white-space: nowrap;
                         cursor: pointer;
+            `;
+
+            // Create Status dropdown
+            const statusDropdown = document.createElement('select');
+            statusDropdown.id = 'status-filter-moved';
+            statusDropdown.style.cssText = `
+                height: 36px;
                         min-width: 120px;
-                    `;
-                    
-                    // Replace button content with dropdown
-                    calendarFilterBtn.innerHTML = '';
-                    calendarFilterBtn.appendChild(dropdown);
-                    calendarFilterBtn.style.padding = '0';
-                    calendarFilterBtn.style.border = 'none';
-                    calendarFilterBtn.style.background = 'transparent';
-                    
+                border-radius: 6px;
+                border: 1px solid #d1d5db;
+                padding: 0 12px;
+                font-size: 14px;
+                color: #374151;
+                background: #ffffff;
+                cursor: pointer;
+                transition: border-color 0.2s ease;
+            `;
+
+            // Build status options
+            statusDropdown.innerHTML = `
+                <option value="">All Status</option>
+                <option value="uncompleted">Uncompleted</option>
+                <option value="completed">Completed</option>
+            `;
+
+            // Add hover and focus styles for status dropdown
+            statusDropdown.addEventListener('mouseenter', () => {
+                statusDropdown.style.borderColor = '#9ca3af';
+            });
+            statusDropdown.addEventListener('mouseleave', () => {
+                if (document.activeElement !== statusDropdown) {
+                    statusDropdown.style.borderColor = '#d1d5db';
+                }
+            });
+            statusDropdown.addEventListener('focus', () => {
+                statusDropdown.style.borderColor = '#3b82f6';
+                statusDropdown.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+            });
+            statusDropdown.addEventListener('blur', () => {
+                statusDropdown.style.borderColor = '#d1d5db';
+                statusDropdown.style.boxShadow = 'none';
+            });
+
+            // Assemble the sections
+            jumpToDateSection.appendChild(dateLabel);
+            jumpToDateSection.appendChild(dateInput);
+            calendarSection.appendChild(calendarLabel);
+            calendarSection.appendChild(calendarDropdown);
+            statusSection.appendChild(statusLabel);
+            statusSection.appendChild(statusDropdown);
+            
+            controlsContainer.appendChild(jumpToDateSection);
+            controlsContainer.appendChild(calendarSection);
+            controlsContainer.appendChild(statusSection);
+            toolbar.insertBefore(controlsContainer, toolbar.firstChild);
+
+            // Initialize the jump to date functionality
+            this.initializeJumpToDate(dateInput);
+
+            // Initialize the calendar dropdown functionality
+            this.initializeMovedCalendarDropdown(calendarDropdown);
+
+            // Initialize the status dropdown functionality
+            this.initializeMovedStatusDropdown(statusDropdown);
+        }
+
+        /**
+         * Initialize Jump to Date functionality
+         */
+        initializeJumpToDate(input) {
+            // Helper: format Date -> YYYY-MM-DD (local)
+            const fmt = (d) => {
+                const pad = (n) => String(n).padStart(2, '0');
+                return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+            };
+
+            // Pick initial date from URL (?date=YYYY-MM-DD) or today
+            const params = new URLSearchParams(window.location.search);
+            const urlDate = params.get('date');
+            const initialDate = urlDate ? new Date(urlDate) : new Date();
+
+            // Set input value (works for both flatpickr + native date)
+            input.value = fmt(initialDate);
+
+            // If a date was provided via URL, navigate calendar there
+            if (urlDate) {
+                try { 
+                    this.calendar.gotoDate(initialDate); 
+                } catch (e) {
+                    console.warn('Failed to navigate to URL date:', e);
+                }
+            }
+
+            // If Flatpickr is available, use it; else fall back to native date
+            if (window.flatpickr) {
+                flatpickr(input, {
+                    dateFormat: 'Y-m-d',
+                    allowInput: true,
+                    defaultDate: input.value,
+                    onChange: function (selectedDates) {
+                        const d = selectedDates?.[0];
+                        if (!d) return;
+                        this.calendar.gotoDate(d);
+
+                        // update URL param without reloading
+                        const sp = new URLSearchParams(window.location.search);
+                        sp.set('date', fmt(d));
+                        history.replaceState({}, '', `${location.pathname}?${sp.toString()}`);
+                    }.bind(this)
+                });
+            } else {
+                // Native <input type="date"> fallback
+                input.type = 'date';
+                input.addEventListener('change', (e) => {
+                    const val = e.target.value; // YYYY-MM-DD
+                    if (!val) return;
+                    const d = new Date(val);
+                    this.calendar.gotoDate(d);
+
+                    const sp = new URLSearchParams(window.location.search);
+                    sp.set('date', val);
+                    history.replaceState({}, '', `${location.pathname}?${sp.toString()}`);
+                });
+            }
+
+            // Keep picker synced when navigating via calendar arrows
+            // (listen to FullCalendar's datesSet)
+            this.calendar.on('datesSet', (info) => {
+                // Use the current date in view (center)
+                const center = info.view.currentStart; // for month view: first visible day
+                // Use activeDate if you track it; otherwise use currentStart
+                input.value = fmt(center);
+            });
+        }
+
+        /**
+         * Initialize the moved calendar dropdown functionality
+         */
+        initializeMovedCalendarDropdown(dropdown) {
                     // Store reference for event handling
                     this.calendarFilter = dropdown;
                     dropdown.addEventListener('change', this.handleFilterChange.bind(this));
@@ -483,37 +841,10 @@
                     }
                 }
                 
-                // Replace status filter button with dropdown
-                const statusFilterBtn = document.querySelector('.fc-statusFilterButton-button');
-                if (statusFilterBtn) {
-                    // Create dropdown element
-                    const dropdown = document.createElement('select');
-                    dropdown.id = 'status-filter';
-                    dropdown.innerHTML = `
-                        <option value="">All Status</option>
-                        <option value="uncompleted">Uncompleted</option>
-                        <option value="completed">Completed</option>
-                    `;
-                    
-                    // Style the dropdown
-                    dropdown.style.cssText = `
-                        background: transparent;
-                        border: 1px solid #ccc;
-                        border-radius: 4px;
-                        padding: 4px 8px;
-                        font-size: 14px;
-                        color: #333;
-                        cursor: pointer;
-                        min-width: 120px;
-                    `;
-                    
-                    // Replace button content with dropdown
-                    statusFilterBtn.innerHTML = '';
-                    statusFilterBtn.appendChild(dropdown);
-                    statusFilterBtn.style.padding = '0';
-                    statusFilterBtn.style.border = 'none';
-                    statusFilterBtn.style.background = 'transparent';
-                    
+        /**
+         * Initialize the moved status dropdown functionality
+         */
+        initializeMovedStatusDropdown(dropdown) {
                     // Store reference for event handling
                     this.statusFilter = dropdown;
                     dropdown.addEventListener('change', this.handleFilterChange.bind(this));
@@ -522,8 +853,6 @@
                     if (this.currentFilters.status) {
                         dropdown.value = this.currentFilters.status;
                     }
-                }
-            }, 100);
         }
 
         /**
@@ -556,10 +885,34 @@
             // Use the correct API endpoint from calendarConfig
             const apiUrl = window.calendarConfig?.eventsUrl || '/api/job-calendar-data/';
             
-            fetch(`${apiUrl}?${params}`)
-                .then(response => response.json())
+            // Add cache-busting parameter
+            params.append('_t', Date.now());
+            
+            const fullUrl = `${apiUrl}?${params}`;
+            console.log('JobCalendar: Fetching from URL:', fullUrl);
+            
+            fetch(fullUrl)
+                .then(response => {
+                    console.log('JobCalendar: Response status:', response.status);
+                    console.log('JobCalendar: Response headers:', response.headers);
+                    return response.text();
+                })
+                .then(text => {
+                    console.log('JobCalendar: Raw response text (first 500 chars):', text.substring(0, 500));
+                    return JSON.parse(text);
+                })
                 .then(data => {
+                    console.log('JobCalendar: Full API response:', data);
                     if (data.status === 'success') {
+                        // Debug: Log the first few events to see their colors
+                        console.log('JobCalendar: Raw events data:', data.events.slice(0, 3));
+                        console.log('JobCalendar: Fetched events with colors:', data.events.slice(0, 3).map(ev => ({
+                            id: ev.id,
+                            title: ev.title,
+                            backgroundColor: ev.backgroundColor,
+                            calendar: ev.extendedProps?.calendar_name,
+                            calendarColor: ev.extendedProps?.calendar_color
+                        })));
                         successCallback(data.events);
                     } else {
                         console.error('JobCalendar: Error fetching events', data.error);
@@ -724,52 +1077,20 @@
                     extendedProps: info.event.extendedProps
                 });
                 
-                // Initialize job dialog if not already done
-                if (!this.jobDialog) {
-                    if (typeof JobDialog === 'undefined') {
-                        console.error('JobCalendar: JobDialog class not available');
-                        this.showError('Job dialog functionality not available. Please refresh the page.');
-                        return;
-                    }
-                    this.jobDialog = new JobDialog();
-                }
-                
-                // Create job data from calendar event with defensive programming
+                // Use the floating panel for job details
                 const extendedProps = info.event.extendedProps || {};
-                const jobData = {
-                    job_id: extendedProps.job_id,
-                    business_name: extendedProps.business_name || '',
-                    contact_name: extendedProps.contact_name || '',
-                    phone: extendedProps.phone || '',
-                    trailer_color: extendedProps.trailer_color || '',
-                    trailer_serial: extendedProps.trailer_serial || '',
-                    trailer_details: extendedProps.trailer_details || '',
-                    status: extendedProps.status || 'uncompleted',
-                    notes: extendedProps.notes || '',
-                    repair_notes: extendedProps.repair_notes || '',
-                    start_dt: info.event.start ? info.event.start.toISOString() : new Date().toISOString(),
-                    end_dt: info.event.end ? info.event.end.toISOString() : null,
-                    all_day: info.event.allDay || false,
-                    display_name: info.event.title || 'Job'
-                };
+                const jobId = extendedProps.job_id;
                 
-                console.log('JobCalendar: About to open dialog with job data:', jobData);
-                this.jobDialog.openJobDetailsDialog(jobData);
+                if (jobId && window.JobPanel) {
+                    window.JobPanel.setTitle('Job Details');
+                    window.JobPanel.load(`/jobs/${jobId}/partial/`);
+                } else {
+                    console.error('JobPanel not available or job ID missing');
+                    this.showError('Unable to open event details. Please try again.');
+                }
             } catch (error) {
                 console.error('JobCalendar: Error handling single click', error);
                 this.showError('Unable to open event details. Please try again.');
-            }
-        }
-
-        /**
-         * Handle event double click for editing
-         */
-        handleEventDoubleClick(info) {
-            const event = info.event;
-            const jobId = event.extendedProps.job_id;
-            
-            if (jobId) {
-                window.location.href = `/rental_scheduler/jobs/${jobId}/edit/`;
             }
         }
 
@@ -780,6 +1101,8 @@
             try {
                 const currentTime = Date.now();
                 const currentDate = info.date.getTime();
+                
+                console.log('Date clicked:', info.date, 'Current time:', currentTime, 'Last click time:', this.lastClickTime);
                 
                 // Check if this is a double-click (same date within 500ms)
                 if (this.lastClickDate === currentDate && 
@@ -792,16 +1115,22 @@
                         this.clickTimer = null;
                     }
                     
-                    // Use the unified JobDialog for new job creation
-                    if (!this.jobDialog) {
-                        if (typeof JobDialog === 'undefined') {
-                            console.error('JobCalendar: JobDialog class not available');
-                            this.showError('Job dialog functionality not available. Please refresh the page.');
-                            return;
+                    // Use the floating panel for new job creation with pre-filled date
+                    console.log('Double-click detected, attempting to open panel...');
+                    if (window.JobPanel) {
+                        const dateStr = info.date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+                        // Include calendar filter if one is selected
+                        let url = `/jobs/new/partial/?date=${dateStr}`;
+                        if (this.currentFilters.calendar) {
+                            url += `&calendar=${this.currentFilters.calendar}`;
                         }
-                        this.jobDialog = new JobDialog();
+                        console.log('JobPanel available, loading URL:', url);
+                        window.JobPanel.setTitle('New Job');
+                        window.JobPanel.load(url);
+                    } else {
+                        console.error('JobPanel not available');
+                        this.showError('Job panel functionality not available. Please refresh the page.');
                     }
-                    this.jobDialog.openNewJobDialog(info.date);
                     
                     // Reset tracking
                     this.lastClickDate = null;
@@ -839,6 +1168,53 @@
             const event = info.event;
             const props = event.extendedProps;
             
+            // Debug: Log event colors
+            console.log('Event mounted:', {
+                id: event.id,
+                title: event.title,
+                backgroundColor: event.backgroundColor,
+                borderColor: event.borderColor,
+                calendar: props?.calendar_name,
+                calendarColor: props?.calendar_color,
+                status: props?.status,
+                allExtendedProps: props
+            });
+            
+            // Force apply calendar colors if they exist
+            if (props?.calendar_color) {
+                const calendarColor = props.calendar_color;
+                const isCompleted = props.status === 'completed';
+                
+                // Apply lighter shade for completed events
+                let finalColor = calendarColor;
+                if (isCompleted) {
+                    finalColor = this.lightenColor(calendarColor, 0.3);
+                }
+                
+                console.log(`Forcing color for ${event.id}: ${finalColor} (original: ${calendarColor}, completed: ${isCompleted})`);
+                
+                // Force set the colors
+                event.setProp('backgroundColor', finalColor);
+                event.setProp('borderColor', finalColor);
+                
+                // Also set on the DOM element directly
+                if (info.el) {
+                    info.el.style.backgroundColor = finalColor;
+                    info.el.style.borderColor = finalColor;
+                }
+                
+                // Use setTimeout to ensure colors are applied after FullCalendar finishes
+                setTimeout(() => {
+                    if (info.el) {
+                        info.el.style.backgroundColor = finalColor;
+                        info.el.style.borderColor = finalColor;
+                        console.log(`Applied delayed color to ${event.id}: ${finalColor}`);
+                    }
+                }, 100);
+            } else {
+                console.log(`No calendar_color found for ${event.id}, props:`, props);
+            }
+            
             // Apply completion styling
             if (props.is_completed) {
                 event.setProp('textDecoration', 'line-through');
@@ -850,6 +1226,27 @@
                 event.setProp('textDecoration', 'line-through');
                 event.setProp('opacity', '0.5');
             }
+        }
+
+        /**
+         * Lighten a hex color by a given factor (0-1)
+         */
+        lightenColor(hexColor, factor) {
+            // Remove # if present
+            hexColor = hexColor.replace('#', '');
+            
+            // Convert to RGB
+            const r = parseInt(hexColor.substr(0, 2), 16);
+            const g = parseInt(hexColor.substr(2, 2), 16);
+            const b = parseInt(hexColor.substr(4, 2), 16);
+            
+            // Lighten by mixing with white
+            const newR = Math.round(r + (255 - r) * factor);
+            const newG = Math.round(g + (255 - g) * factor);
+            const newB = Math.round(b + (255 - b) * factor);
+            
+            // Convert back to hex
+            return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
         }
 
         /**
@@ -1159,82 +1556,6 @@
             }
         }
 
-        /**
-         * Open new job creation dialog
-         * @param {Object} event - Mock event object with clicked date/time
-         * @param {Object} props - Mock props for new job
-         */
-        openNewJobDialog(event, props) {
-            try {
-                console.log('JobCalendar: Opening new job dialog', { event, props });
-
-                // Create dialog backdrop
-                const backdrop = document.createElement('div');
-                backdrop.className = 'event-details-backdrop';
-                backdrop.style.cssText = `
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background-color: rgba(0, 0, 0, 0.5);
-                    z-index: 1000;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                `;
-
-                // Create dialog container
-                const dialog = document.createElement('div');
-                dialog.className = 'card card-elevated';
-                dialog.style.cssText = `
-                    max-width: 800px;
-                    width: 100%;
-                    max-height: 90vh;
-                    overflow: hidden;
-                    position: relative;
-                    background-color: #ffffff;
-                    border-radius: 16px;
-                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-                    margin: 20px;
-                `;
-                
-                // Add responsive styles
-                const style = document.createElement('style');
-                style.textContent = `
-                    @media (max-width: 768px) {
-                        .event-details-dialog {
-                            margin: 10px !important;
-                            max-width: calc(100vw - 20px) !important;
-                            max-height: calc(100vh - 20px) !important;
-                        }
-                        .event-details-dialog .grid-responsive {
-                            grid-template-columns: 1fr !important;
-                        }
-                    }
-                `;
-                document.head.appendChild(style);
-
-                // Build new job form content
-                const content = this.buildNewJobFormContent(event, props);
-                dialog.innerHTML = content;
-
-                // Add to DOM
-                backdrop.appendChild(dialog);
-                document.body.appendChild(backdrop);
-
-                // Setup event listeners
-                this.setupNewJobDialogListeners(backdrop, dialog, event, props);
-
-                // Store reference for cleanup
-                this.eventDetailsDialog = backdrop;
-
-            } catch (error) {
-                console.error('JobCalendar: Error opening new job dialog', error);
-                this.showError('Unable to open new job form. Please try again.');
-            }
-        }
 
         /**
          * Build content for job events
@@ -2178,64 +2499,6 @@
             document.addEventListener('keydown', handleEscape);
         }
 
-        /**
-         * Setup new job dialog event listeners
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - Mock event object
-         * @param {Object} props - Mock props for new job
-         */
-        setupNewJobDialogListeners(backdrop, dialog, event, props) {
-            const closeDialog = () => {
-                if (backdrop && backdrop.parentNode) {
-                    backdrop.parentNode.removeChild(backdrop);
-                }
-                this.eventDetailsDialog = null;
-            };
-
-            // Cancel button
-            const cancelBtn = dialog.querySelector('.cancel-btn');
-            if (cancelBtn) {
-                cancelBtn.addEventListener('click', closeDialog);
-            }
-
-            // Create button
-            const createBtn = dialog.querySelector('.create-btn');
-            if (createBtn) {
-                createBtn.addEventListener('click', () => {
-                    this.createNewJob(backdrop, dialog, event, props);
-                });
-            }
-
-            // Backdrop click
-            backdrop.addEventListener('click', (e) => {
-                if (e.target === backdrop) {
-                    closeDialog();
-                }
-            });
-            
-            // Setup repeat type dropdown change handler
-            const repeatTypeSelect = dialog.querySelector('#repeat_type');
-            const repeatMonthsContainer = dialog.querySelector('#repeat_months_container');
-            if (repeatTypeSelect && repeatMonthsContainer) {
-                repeatTypeSelect.addEventListener('change', (e) => {
-                    if (e.target.value === 'monthly') {
-                        repeatMonthsContainer.style.display = 'block';
-                    } else {
-                        repeatMonthsContainer.style.display = 'none';
-                    }
-                });
-            }
-
-            // Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeDialog();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
-        }
 
         /**
          * Switch back to detail mode

@@ -207,10 +207,10 @@
     {% else %}
         <div class="text-center py-12">
             <div class="text-gray-500 text-lg mb-4">No jobs found</div>
-            <button onclick="openNewJobDialog()" 
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+            <a href="{% url 'rental_scheduler:job_create' %}" 
+               class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
                 + Job
-            </button>
+            </a>
         </div>
     {% endif %}
 </div>

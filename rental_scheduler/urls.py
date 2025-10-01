@@ -4,6 +4,7 @@ from .views import (
     CalendarView,
     get_job_calendar_data,
     update_job_status,
+    delete_job_api,
     CalendarListView,
     CalendarCreateView,
     CalendarUpdateView,
@@ -27,6 +28,12 @@ from .views import (
     InvoiceDetailView,
     job_detail_modal,
     job_edit_modal,
+    job_detail_panel,
+    job_edit_panel,
+    job_create_panel,
+    job_create_partial,
+    job_detail_partial,
+    job_create_submit,
     job_create_api,
     job_update_api,
     job_detail_api,
@@ -45,6 +52,7 @@ urlpatterns = [
     path('api/job-calendar-data/', get_job_calendar_data, name='job_calendar_data'),
     path('api/jobs/create/', job_create_api, name='job_create_api'),
     path('api/jobs/<int:job_id>/update-status/', update_job_status, name='update_job_status'),
+    path('api/jobs/<int:job_id>/delete/', delete_job_api, name='delete_job_api'),
     path('api/jobs/<int:pk>/update/', job_update_api, name='job_update_api'),
     path('api/jobs/<int:pk>/detail/', job_detail_api, name='job_detail_api'),
     
@@ -67,6 +75,16 @@ urlpatterns = [
     # Job Modal URLs
     path('jobs/<int:pk>/detail/', job_detail_modal, name='job_detail_modal'),
     path('jobs/<int:pk>/edit-modal/', job_edit_modal, name='job_edit_modal'),
+    
+    # Job Panel URLs
+    path('jobs/<int:pk>/detail-panel/', job_detail_panel, name='job_detail_panel'),
+    path('jobs/<int:pk>/edit-panel/', job_edit_panel, name='job_edit_panel'),
+    path('jobs/create-panel/', job_create_panel, name='job_create_panel'),
+    
+    # Job Partial URLs
+    path('jobs/new/partial/', job_create_partial, name='job_create_partial'),
+    path('jobs/<int:pk>/partial/', job_detail_partial, name='job_detail_partial'),
+    path('jobs/new/submit/', job_create_submit, name='job_create_submit'),
     
     # Work Order URLs
     path('workorders/', WorkOrderListView.as_view(), name='workorder_list'),
