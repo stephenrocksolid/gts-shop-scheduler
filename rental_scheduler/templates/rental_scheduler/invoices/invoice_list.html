@@ -60,10 +60,7 @@
                                     {{ invoice.bill_to_display_name }}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                    <a href="{% url 'rental_scheduler:job_detail' invoice.job.pk %}" 
-                                       class="text-indigo-600 hover:text-indigo-900">
-                                        {{ invoice.job.display_name }}
-                                    </a>
+                                    {{ invoice.job.display_name }}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                     {% if invoice.work_order %}

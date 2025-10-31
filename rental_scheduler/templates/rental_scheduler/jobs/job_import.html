@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_js %}
+{% if results %}
+<script>
+    // Scroll to top when results are shown
+    window.scrollTo(0, 0);
+</script>
+{% endif %}
+<script>
+    // Debug form submission
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.querySelector('form[enctype="multipart/form-data"]');
+        if (form) {
+            console.log('[DEBUG] Import form found:', form);
+            
+            form.addEventListener('submit', function(e) {
+                console.log('[DEBUG] Form submit event triggered');
+                console.log('[DEBUG] Form action:', form.action);
+                console.log('[DEBUG] Form method:', form.method);
+                console.log('[DEBUG] Form enctype:', form.enctype);
+                
+                const fileInput = form.querySelector('input[type="file"]');
+                const calendarSelect = form.querySelector('select[name="calendar"]');
+                
+                console.log('[DEBUG] File input:', fileInput);
+                console.log('[DEBUG] File selected:', fileInput?.files[0]?.name);
+                console.log('[DEBUG] Calendar selected:', calendarSelect?.value);
+                
+                if (!fileInput?.files[0]) {
+                    console.error('[DEBUG] ERROR: No file selected!');
+                }
+                if (!calendarSelect?.value) {
+                    console.error('[DEBUG] ERROR: No calendar selected!');
+                }
+                
+                // Don't prevent default - let form submit naturally
+                console.log('[DEBUG] Allowing form to submit...');
+            });
+        } else {
+            console.error('[DEBUG] Import form NOT found!');
+        }
+    });
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-4xl">
+    <!-- Header -->
+    <div class="mb-8 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Import Calendar Events from ICS</h1>
+            <p class="text-gray-600">Upload a .ics calendar file from Mozilla Thunderbird or other calendar applications.</p>
+        </div>
+        <div class="flex gap-3">
+            <a href="{% url 'rental_scheduler:job_import_json' %}" 
+               class="inline-flex items-center px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition shadow-md">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+                Import from JSON
+            </a>
+            <a href="{% url 'rental_scheduler:import_history' %}" 
+               class="inline-flex items-center px-4 py-2 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition shadow-md">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Import History
+            </a>
+        </div>
+    </div>
+
+    <!-- Import Form -->
+    {% if form %}
+    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <form method="post" enctype="multipart/form-data" class="space-y-6">
+            {% csrf_token %}
+            
+            <!-- Non-field errors -->
+            {% if form.non_field_errors %}
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div class="flex items-start">
+                    <svg class="w-5 h-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    <div>
+                        {% for error in form.non_field_errors %}
+                        <p class="text-sm text-red-700">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Calendar Selection -->
+            <div>
+                <label for="{{ form.calendar.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                    {{ form.calendar.label }}
+                </label>
+                {{ form.calendar }}
+                {% if form.calendar.help_text %}
+                <p class="mt-1 text-sm text-gray-500">{{ form.calendar.help_text }}</p>
+                {% endif %}
+                {% if form.calendar.errors %}
+                <div class="mt-1 text-sm text-red-600">
+                    {{ form.calendar.errors }}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- File Upload -->
+            <div>
+                <label for="{{ form.ics_file.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                    {{ form.ics_file.label }}
+                </label>
+                {{ form.ics_file }}
+                {% if form.ics_file.help_text %}
+                <p class="mt-1 text-sm text-gray-500">{{ form.ics_file.help_text }}</p>
+                {% endif %}
+                {% if form.ics_file.errors %}
+                <div class="mt-1 text-sm text-red-600">
+                    {{ form.ics_file.errors }}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- AI Parsing Toggle -->
+            <div class="flex items-start">
+                <div class="flex items-center h-5">
+                    {{ form.use_ai_parsing }}
+                </div>
+                <div class="ml-3">
+                    <label for="{{ form.use_ai_parsing.id_for_label }}" class="font-medium text-gray-700">
+                        {{ form.use_ai_parsing.label }}
+                    </label>
+                    {% if form.use_ai_parsing.help_text %}
+                    <p class="text-sm text-gray-500">{{ form.use_ai_parsing.help_text }}</p>
+                    {% endif %}
+                    {% if form.use_ai_parsing.errors %}
+                    <div class="text-sm text-red-600">
+                        {{ form.use_ai_parsing.errors }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Field Mapping Info -->
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 class="text-sm font-semibold text-blue-800 mb-2">Field Mapping</h3>
+                <ul class="text-sm text-blue-700 space-y-1">
+                    <li><strong>Event Title</strong> → Business Name (phone extracted if present)</li>
+                    <li><strong>Description</strong> → AI extracts: Trailer Color, Serial, Details, Repair Notes, Quote (if enabled)</li>
+                    <li><strong>Created Date</strong> → Date Call Received</li>
+                    <li><strong>Start/End Dates</strong> → Job start and end times</li>
+                    <li><strong>Recurring Rules</strong> → Preserved for recurring jobs</li>
+                    <li><strong>Status</strong> → Cancelled events → "Completed", others → "Uncompleted"</li>
+                </ul>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="flex gap-4">
+                <button type="submit" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 transition">
+                    <svg class="inline-block w-5 h-5 mr-2 -mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                    Import Events
+                </button>
+                <a href="{% url 'rental_scheduler:job_list' %}" class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">
+                    Cancel
+                </a>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+

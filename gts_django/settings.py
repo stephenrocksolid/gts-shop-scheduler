@@ -293,3 +293,9 @@ CSRF_COOKIE_SAMESITE = 'Lax'  # Default value, good for development
 
 # Session cookie settings
 SESSION_COOKIE_SAMESITE = 'Lax'  # Default value
+
+# OpenAI API Configuration
+# For calendar import AI parsing - extracts trailer details from descriptions
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_MODEL = 'gpt-4o-mini'  # Cost-effective model for text extraction
+AI_PARSING_ENABLED = True  # Can be toggled on/off

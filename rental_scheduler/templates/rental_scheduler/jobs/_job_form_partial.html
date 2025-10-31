@@ -1,8 +1,7 @@
 {% load static %}
 <form hx-post="{% url 'rental_scheduler:job_create_submit' %}"
-      hx-target="#job-panel .panel-body"
-      hx-swap="innerHTML"
-      hx-on::after-swap="if(event.detail.successful) { if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
+      hx-swap="none"
+      hx-on::after-request="if(event.detail.successful) { if(window.JobPanel) { if(window.JobPanel.clearUnsavedChanges) { window.JobPanel.clearUnsavedChanges(); } window.JobPanel.close(true); } if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
       style="display: flex; flex-direction: column; gap: 24px;">
   {% csrf_token %}
   {% if form.instance.pk %}
@@ -73,25 +72,110 @@
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
         <div style="grid-column: 1 / -1;">
           <label style="font-weight: 600; color: #374151; display: flex; align-items: center; font-size: 14px;">
-            {{ form.all_day }}
+            <input type="checkbox" name="all_day" id="{{ form.all_day.id_for_label }}" 
+                   class="h-4 w-4 rounded border-gray-300 mr-2"
+                   {% if not form.instance.pk or form.instance.all_day %}checked{% endif %}>
             <span style="margin-left: 8px;">All Day Event</span>
           </label>
         </div>
         <div>
-          <label for="{{ form.start_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Start Date & Time *</label>
-          {{ form.start_dt }}
+          <label for="{{ form.start_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">
+            {% if not form.instance.pk or form.instance.all_day %}Start Date *{% else %}Start Date & Time *{% endif %}
+          </label>
+          <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
+                 name="start_dt" 
+                 id="{{ form.start_dt.id_for_label }}"
+                 value="{% if form.data.start_dt %}{{ form.data.start_dt }}{% elif form.instance.pk and form.instance.start_dt %}{{ form.instance.start_dt|date:'Y-m-d' }}{% else %}{{ form.initial.start_dt }}{% endif %}"
+                 required
+                 class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none">
+          {% if form.start_dt.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.start_dt.errors.0 }}</p>{% endif %}
         </div>
         <div>
-          <label for="{{ form.end_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">End Date & Time *</label>
-          {{ form.end_dt }}
+          <label for="{{ form.end_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">
+            {% if not form.instance.pk or form.instance.all_day %}End Date *{% else %}End Date & Time *{% endif %}
+          </label>
+          <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
+                 name="end_dt" 
+                 id="{{ form.end_dt.id_for_label }}"
+                 value="{% if form.data.end_dt %}{{ form.data.end_dt }}{% elif form.instance.pk and form.instance.end_dt %}{{ form.instance.end_dt|date:'Y-m-d' }}{% else %}{{ form.initial.end_dt }}{% endif %}"
+                 required
+                 class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none">
+          {% if form.end_dt.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.end_dt.errors.0 }}</p>{% endif %}
         </div>
-        <div>
-          <label for="{{ form.repeat_type.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repeat</label>
-          {{ form.repeat_type }}
+        <!-- Call Reminder Section -->
+        <div style="grid-column: 1 / -1; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; margin-bottom: 12px; cursor: pointer;">
+            <input type="checkbox" id="call-reminder-enabled" name="has_call_reminder" style="width: 18px; height: 18px; accent-color: #f59e0b;" {% if form.instance.has_call_reminder %}checked{% endif %}>
+            <svg style="width: 18px; height: 18px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
+            </svg>
+            Set a call reminder for this job
+          </label>
+          
+          <div id="call-reminder-options" class="{% if form.instance.has_call_reminder %}call-reminder-visible{% else %}call-reminder-hidden{% endif %}" style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label for="call-reminder-weeks" style="font-weight: 600; color: #374151; font-size: 14px;">Reminder:</label>
+              <select id="call-reminder-weeks" name="call_reminder_weeks_prior" style="padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; flex: 1;">
+                <option value="2" {% if form.instance.call_reminder_weeks_prior == 2 or not form.instance.call_reminder_weeks_prior %}selected{% endif %}>1 week prior</option>
+                <option value="3" {% if form.instance.call_reminder_weeks_prior == 3 %}selected{% endif %}>2 weeks prior</option>
+              </select>
+            </div>
+            
+            <div>
+              <label for="call-reminder-notes" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Call Reminder Notes</label>
+              <textarea id="call-reminder-notes" name="call_reminder_notes" rows="3" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical; font-family: inherit;" placeholder="Notes for this call reminder...">{{ call_reminder_notes }}</textarea>
+            </div>
+            
+            {% if form.instance.pk and form.instance.has_call_reminder %}
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background-color: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
+              <input type="checkbox" id="call-reminder-completed" name="call_reminder_completed" style="width: 16px; height: 16px; accent-color: #10b981;" {% if form.instance.call_reminder_completed %}checked{% endif %}>
+              <span style="font-size: 14px; color: #374151;">
+                <svg style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 4px; color: #10b981;" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                </svg>
+                Call reminder completed
+              </span>
+            </label>
+            {% endif %}
+          </div>
         </div>
-        <div id="repeat-months-field" style="display: none;">
-          <label for="id_repeat_months" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Number of Months</label>
-          <input type="number" id="id_repeat_months" name="repeat_months" min="1" max="12" value="1" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+        
+        <!-- Recurring Event Section -->
+        <div style="grid-column: 1 / -1; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; margin-bottom: 12px; cursor: pointer;">
+            <input type="checkbox" id="recurrence-enabled" name="recurrence_enabled" style="width: 18px; height: 18px; accent-color: #3b82f6;" {% if form.instance.recurrence_rule %}checked{% endif %}>
+            <svg style="width: 18px; height: 18px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+            </svg>
+            Make this a recurring event
+          </label>
+          
+          <div id="recurrence-options" class="{% if form.instance.recurrence_rule %}recurrence-visible{% else %}recurrence-hidden{% endif %}" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label for="recurrence-type" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repeats</label>
+              <select id="recurrence-type" name="recurrence_type" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
+                <option value="monthly" {% if form.instance.recurrence_rule.type == 'monthly' %}selected{% endif %}>Monthly</option>
+                <option value="yearly" {% if form.instance.recurrence_rule.type == 'yearly' or not form.instance.recurrence_rule %}selected{% endif %}>Yearly</option>
+                <option value="weekly" {% if form.instance.recurrence_rule.type == 'weekly' %}selected{% endif %}>Weekly</option>
+                <option value="daily" {% if form.instance.recurrence_rule.type == 'daily' %}selected{% endif %}>Daily</option>
+              </select>
+            </div>
+            
+            <div>
+              <label for="recurrence-interval" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Every</label>
+              <input type="number" id="recurrence-interval" name="recurrence_interval" min="1" max="12" value="{{ form.instance.recurrence_rule.interval|default:'1' }}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
+            </div>
+            
+            <div>
+              <label for="recurrence-count" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Number of occurrences</label>
+              <input type="number" id="recurrence-count" name="recurrence_count" min="1" max="500" value="{{ form.instance.recurrence_rule.count|default:'50' }}" placeholder="50" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
+            </div>
+            
+            <div>
+              <label for="recurrence-until" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Or end by date</label>
+              <input type="date" id="recurrence-until" name="recurrence_until" value="{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
+            </div>
+          </div>
         </div>
         <div style="grid-column: 1 / -1;">
           <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">General Notes</label>
@@ -114,6 +198,10 @@
     </div>
     <div style="padding: 24px;">
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div style="grid-column: 1 / -1;">
+          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Trailer</label>
+          {{ form.trailer_details }}
+        </div>
         <div>
           <label for="{{ form.trailer_color.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Color</label>
           {{ form.trailer_color }}
@@ -121,10 +209,6 @@
         <div>
           <label for="{{ form.trailer_serial.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Serial Number</label>
           {{ form.trailer_serial }}
-        </div>
-        <div style="grid-column: 1 / -1;">
-          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Details</label>
-          {{ form.trailer_details }}
         </div>
         <div style="grid-column: 1 / -1;">
           <label for="{{ form.repair_notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repair Notes</label>
@@ -139,29 +223,35 @@
   </div>
 
   <!-- Action Buttons -->
-  <div style="display: flex; justify-content: space-between; gap: 12px; padding-top: 8px;">
+  <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 8px;">
+    <!-- First row: Print buttons -->
     <div style="display: flex; gap: 12px;">
-      <button type="button" onclick="window.open('/jobs/' + {{ form.instance.pk|default:'0' }} + '/print/wo/', '_blank')" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'" {% if not form.instance.pk %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
         Print WO
       </button>
-      <button type="button" onclick="window.open('/jobs/' + {{ form.instance.pk|default:'0' }} + '/print/wo-customer/', '_blank')" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'" {% if not form.instance.pk %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo-customer" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
         Print Customer Copy WO
       </button>
-      <button type="button" onclick="window.open('/jobs/' + {{ form.instance.pk|default:'0' }} + '/print/invoice/', '_blank')" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'" {% if not form.instance.pk %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="invoice" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
         Print Invoice
       </button>
     </div>
-    <div style="display: flex; gap: 12px;">
+    <!-- Second row: Action buttons -->
+    <div style="display: flex; gap: 12px; justify-content: flex-end;">
       <button type="button" onclick="JobPanel.close()" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
         Cancel
       </button>
-      {% if form.instance.pk and form.instance.status == 'uncompleted' %}
-        <button type="button" onclick="updateJobStatus({{ form.instance.pk }}, 'completed')" style="padding: 12px 24px; border: none; border-radius: 8px; background: #16a34a; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#15803d'" onmouseout="this.style.backgroundColor='#16a34a'">
+      {% if form.instance.pk and form.instance.status == 'completed' %}
+        <button type="button" class="uncomplete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 12px 24px; border: none; border-radius: 8px; background: #f59e0b; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#d97706'" onmouseout="this.style.backgroundColor='#f59e0b'">
+          Mark as Uncompleted
+        </button>
+      {% elif form.instance.pk and form.instance.status == 'uncompleted' %}
+        <button type="button" class="complete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 12px 24px; border: none; border-radius: 8px; background: #16a34a; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#15803d'" onmouseout="this.style.backgroundColor='#16a34a'">
           Mark as Complete
         </button>
       {% endif %}
       {% if form.instance.pk %}
-        <button type="button" onclick="deleteJob({{ form.instance.pk }})" style="padding: 12px 24px; border: none; border-radius: 8px; background: #dc2626; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#b91c1c'" onmouseout="this.style.backgroundColor='#dc2626'">
+        <button type="button" class="delete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 12px 24px; border: none; border-radius: 8px; background: #dc2626; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#b91c1c'" onmouseout="this.style.backgroundColor='#dc2626'">
           Delete
         </button>
       {% endif %}
@@ -172,10 +262,30 @@
   </div>
 </form>
 
+<style>
+  .recurrence-visible {
+    display: grid !important;
+  }
+  .recurrence-hidden {
+    display: none !important;
+  }
+  .call-reminder-visible {
+    display: flex !important;
+  }
+  .call-reminder-hidden {
+    display: none !important;
+  }
+  .btn-disabled {
+    opacity: 0.5;
+    cursor: not-allowed !important;
+  }
+</style>
+
 <script src="{% static 'rental_scheduler/js/all_day_toggle.js' %}"></script>
 <script>
   (function() {
-    setTimeout(() => {
+    // Function to initialize all toggles
+    function initializeFormToggles() {
       // Try Tempus Dominus first
       if (window.wireAllDayToggle && window.tempusDominus) {
         console.log('Using Tempus Dominus all-day toggle');
@@ -199,53 +309,183 @@
         function toggleDateTimeInputs() {
           if (allDayCheckbox.checked) {
             // All Day = true → Use date-only inputs
-            const startVal = startDtInput.value.split('T')[0] || '';
-            const endVal = endDtInput.value.split('T')[0] || '';
-            
-            startDtInput.type = 'date';
-            endDtInput.type = 'date';
-            
-            startDtInput.value = startVal;
-            endDtInput.value = endVal;
-            
-            if (startLabel) startLabel.textContent = 'Start Date *';
-            if (endLabel) endLabel.textContent = 'End Date *';
+            // Only change if not already date type
+            if (startDtInput.type !== 'date') {
+              const startVal = startDtInput.value.split('T')[0] || '';
+              const endVal = endDtInput.value.split('T')[0] || '';
+              
+              startDtInput.type = 'date';
+              endDtInput.type = 'date';
+              
+              startDtInput.value = startVal;
+              endDtInput.value = endVal;
+              
+              if (startLabel) startLabel.textContent = 'Start Date *';
+              if (endLabel) endLabel.textContent = 'End Date *';
+            }
           } else {
             // All Day = false → Use datetime-local inputs
-            const startVal = startDtInput.value;
-            const endVal = endDtInput.value;
-            
-            startDtInput.type = 'datetime-local';
-            endDtInput.type = 'datetime-local';
-            
-            // Add default times if we only have dates
-            if (startVal && startVal.length === 10) {
-              startDtInput.value = startVal + 'T09:00';
+            // Only change if not already datetime-local type
+            if (startDtInput.type !== 'datetime-local') {
+              const startVal = startDtInput.value;
+              const endVal = endDtInput.value;
+              
+              startDtInput.type = 'datetime-local';
+              endDtInput.type = 'datetime-local';
+              
+              // Add default times if we only have dates
+              if (startVal && startVal.length === 10) {
+                startDtInput.value = startVal + 'T09:00';
+              }
+              if (endVal && endVal.length === 10) {
+                endDtInput.value = endVal + 'T17:00';
+              }
+              
+              if (startLabel) startLabel.textContent = 'Start Date & Time *';
+              if (endLabel) endLabel.textContent = 'End Date & Time *';
             }
-            if (endVal && endVal.length === 10) {
-              endDtInput.value = endVal + 'T17:00';
-            }
-            
-            if (startLabel) startLabel.textContent = 'Start Date & Time *';
-            if (endLabel) endLabel.textContent = 'End Date & Time *';
           }
         }
         
-        allDayCheckbox.addEventListener('change', toggleDateTimeInputs);
-        toggleDateTimeInputs();
+        // Prevent duplicate listeners
+        if (!allDayCheckbox._hasAllDayListener) {
+          allDayCheckbox._hasAllDayListener = true;
+          allDayCheckbox.addEventListener('change', toggleDateTimeInputs);
+        }
+        // Don't call toggleDateTimeInputs() on initial load - inputs are already correctly configured by template
+        // Only call it on checkbox change events
       }
-    }, 150);
+    }
+    
+    // Set up call reminder toggle
+    function setupCallReminderToggle() {
+      const callReminderEnabled = document.getElementById('call-reminder-enabled');
+      const callReminderOptions = document.getElementById('call-reminder-options');
+      
+      if (callReminderEnabled && callReminderOptions) {
+        function toggleCallReminderOptions() {
+          if (callReminderEnabled.checked) {
+            callReminderOptions.classList.remove('call-reminder-hidden');
+            callReminderOptions.classList.add('call-reminder-visible');
+          } else {
+            callReminderOptions.classList.remove('call-reminder-visible');
+            callReminderOptions.classList.add('call-reminder-hidden');
+          }
+        }
+        
+        // Set initial state
+        toggleCallReminderOptions();
+        
+        // Prevent duplicate listeners
+        if (callReminderEnabled._hasCallReminderListener) return;
+        callReminderEnabled._hasCallReminderListener = true;
+        
+        // Add change listener
+        callReminderEnabled.addEventListener('change', toggleCallReminderOptions);
+      }
+    }
+    
+    // Set up recurring event toggle
+    function setupRecurrenceToggle() {
+      const recurrenceEnabled = document.getElementById('recurrence-enabled');
+      const recurrenceOptions = document.getElementById('recurrence-options');
+      
+      if (recurrenceEnabled && recurrenceOptions) {
+        function toggleRecurrenceOptions() {
+          if (recurrenceEnabled.checked) {
+            recurrenceOptions.classList.remove('recurrence-hidden');
+            recurrenceOptions.classList.add('recurrence-visible');
+          } else {
+            recurrenceOptions.classList.remove('recurrence-visible');
+            recurrenceOptions.classList.add('recurrence-hidden');
+          }
+        }
+        
+        // Set initial state
+        toggleRecurrenceOptions();
+        
+        // Prevent duplicate listeners
+        if (recurrenceEnabled._hasToggleListener) return;
+        recurrenceEnabled._hasToggleListener = true;
+        
+        // Add change listener
+        recurrenceEnabled.addEventListener('change', toggleRecurrenceOptions);
+      }
+    }
+    
+    // Function to initialize all form event handlers
+    function initializeAllFormHandlers() {
+      initializeFormToggles();
+      setupCallReminderToggle();
+      setupRecurrenceToggle();
+    }
+    
+    // Initial setup with delay
+    setTimeout(initializeAllFormHandlers, 150);
+    
+    // Re-initialize after HTMX content swaps (only attach these once)
+    if (!window._formHandlersInitialized) {
+      window._formHandlersInitialized = true;
+      
+      document.body.addEventListener('htmx:afterSwap', function() {
+        setTimeout(initializeAllFormHandlers, 150);
+      });
+      
+      document.body.addEventListener('htmx:load', function() {
+        setTimeout(initializeAllFormHandlers, 150);
+      });
+    }
   })();
+
+  // Get CSRF token from cookie (shared helper)
+  function getCookie(name) {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(';').shift();
+  }
 
   // Job status update function for panel
   function updateJobStatus(jobId, status) {
-      // Get CSRF token from cookie
-      function getCookie(name) {
-          const value = `; ${document.cookie}`;
-          const parts = value.split(`; ${name}=`);
-          if (parts.length === 2) return parts.pop().split(';').shift();
-      }
+      // Check if there's a form with unsaved changes
+      const form = document.querySelector('#job-panel form');
+      const hasUnsavedChanges = window.JobPanel && window.JobPanel.hasUnsavedChanges 
+          ? (typeof window.JobPanel.hasUnsavedChanges === 'function' 
+              ? window.JobPanel.hasUnsavedChanges() 
+              : false)
+          : false;
       
+      // If there are unsaved changes and we have a form, save first
+      if (hasUnsavedChanges && form) {
+          console.log('Saving form before updating job status...');
+          
+          // Create a one-time listener for the save success
+          const handleAfterRequest = function(event) {
+              if (event.detail.successful) {
+                  console.log('Form saved, now updating job status...');
+                  document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
+                  
+                  // Clear unsaved changes tracking
+                  if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
+                      window.JobPanel.clearUnsavedChanges();
+                  }
+                  
+                  // Now update the status
+                  performStatusUpdate(jobId, status);
+              }
+          };
+          
+          document.body.addEventListener('htmx:afterRequest', handleAfterRequest);
+          
+          // Trigger form submission
+          htmx.trigger(form, 'submit');
+      } else {
+          // No unsaved changes, proceed directly
+          performStatusUpdate(jobId, status);
+      }
+  }
+  
+  // Helper function to perform the actual status update
+  function performStatusUpdate(jobId, status) {
       fetch(`/api/jobs/${jobId}/update-status/`, {
           method: 'POST',
           headers: {
@@ -259,9 +499,9 @@
       .then(response => response.json())
       .then(data => {
           if (data.success) {
-              // Close panel and refresh calendar
+              // Close panel without unsaved check (since we just saved)
               if (window.JobPanel) {
-                  window.JobPanel.close();
+                  window.JobPanel.close(true); // true = skip unsaved check
               }
               // Refresh the calendar if it exists
               if (typeof window.refreshCalendar === 'function') {
@@ -283,13 +523,6 @@
   // Job delete function for panel
   function deleteJob(jobId) {
       if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
-          // Get CSRF token from cookie
-          function getCookie(name) {
-              const value = `; ${document.cookie}`;
-              const parts = value.split(`; ${name}=`);
-              if (parts.length === 2) return parts.pop().split(';').shift();
-          }
-          
           fetch(`/api/jobs/${jobId}/delete/`, {
               method: 'POST',
               headers: {
@@ -321,4 +554,343 @@
           });
       }
   }
+
+  // Print button handlers using event delegation and hidden iframe
+  (function() {
+    // Only set up once globally
+    if (window._printHandlerInitialized) {
+      console.log('Print handler already initialized, skipping');
+      return;
+    }
+    window._printHandlerInitialized = true;
+    console.log('Initializing print handler');
+    // Function to handle printing via iframe
+    function printViaIframe(url) {
+      console.log('Print via iframe:', url);
+      
+      // Close the Job Panel before printing
+      if (window.JobPanel) {
+        window.JobPanel.close();
+      }
+      
+      // Remove any existing iframe
+      let oldFrame = document.getElementById('printFrame');
+      if (oldFrame) {
+        oldFrame.remove();
+      }
+      
+      // Create a fresh iframe for each print job
+      const printFrame = document.createElement('iframe');
+      printFrame.id = 'printFrame';
+      printFrame.style.cssText = 'position:absolute;width:0;height:0;border:none;';
+      document.body.appendChild(printFrame);
+      
+      // Add cache-busting parameter
+      const fullUrl = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
+      
+      console.log('Loading URL:', fullUrl);
+      
+      // Use a different approach - set up onload then load the URL
+      let loadAttempted = false;
+      printFrame.onload = function() {
+        // Prevent multiple calls
+        if (loadAttempted) return;
+        loadAttempted = true;
+        
+        console.log('Iframe loaded, attempting to print...');
+        
+        // Wait a bit for the content to fully render
+        setTimeout(function() {
+          try {
+            const iframeWindow = printFrame.contentWindow || printFrame.contentDocument.defaultView;
+            if (iframeWindow) {
+              iframeWindow.focus();
+              iframeWindow.print();
+              console.log('Print dialog triggered');
+            } else {
+              throw new Error('Could not access iframe window');
+            }
+          } catch (error) {
+            console.error('Error printing:', error);
+            alert('Unable to print directly. Opening in new window...');
+            window.open(url, '_blank');
+          }
+        }, 500);
+      };
+      
+      // Small delay before loading to ensure iframe is ready
+      setTimeout(function() {
+        printFrame.src = fullUrl;
+      }, 50);
+    }
+    
+    // Function to save job form and then print
+    function saveJobThenPrint(form, jobId, printType) {
+      console.log('Saving job form before printing...');
+      
+      // Show loading state on the print button
+      const printBtn = document.querySelector(`[data-print-type="${printType}"]`);
+      const originalText = printBtn ? printBtn.textContent : '';
+      if (printBtn) {
+        printBtn.textContent = 'Saving...';
+        printBtn.disabled = true;
+      }
+      
+      // Get the form action URL
+      const hxPost = form.getAttribute('hx-post');
+      
+      if (hxPost) {
+        // Define the success handler
+        const handleSuccess = function(event) {
+          console.log('Job saved successfully, now printing...');
+          // Get the job ID from the response or use the existing one
+          let actualJobId = jobId;
+          
+          // Try to get job ID from the form after save
+          const jobIdInput = form.querySelector('input[name="job_id"]');
+          if (jobIdInput && jobIdInput.value) {
+            actualJobId = jobIdInput.value;
+          }
+          
+          // Clear unsaved changes tracking since we just saved
+          if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
+            window.JobPanel.clearUnsavedChanges();
+          }
+          
+          // Remove the event listener to avoid memory leaks
+          document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
+          
+          const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
+          printViaIframe(url);
+        };
+        
+        const handleFailure = function(event) {
+          console.error('Failed to save job:', event.detail);
+          
+          // Try to extract error message from response
+          let errorMsg = 'Failed to save job. Please check all required fields and try again.';
+          if (event.detail.xhr && event.detail.xhr.responseText) {
+            // Log the full error for debugging
+            console.error('Server response:', event.detail.xhr.responseText);
+          }
+          
+          alert(errorMsg);
+          if (printBtn) {
+            printBtn.textContent = originalText;
+            printBtn.disabled = false;
+          }
+          // Remove the event listener
+          document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
+        };
+        
+        // Combined handler to route to success or failure
+        const handleAfterRequest = function(event) {
+          if (event.detail.successful) {
+            handleSuccess(event);
+          } else {
+            handleFailure(event);
+          }
+        };
+        
+        // Add event listener
+        document.body.addEventListener('htmx:afterRequest', handleAfterRequest);
+        
+        // Trigger the form submission using HTMX's trigger
+        htmx.trigger(form, 'submit');
+        
+      } else {
+        // Fallback: try to submit using fetch
+        const formData = new FormData(form);
+        
+        fetch(form.action || window.location.href, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+          }
+        })
+        .then(response => {
+          if (response.ok) {
+            console.log('Job saved successfully, now printing...');
+            // Try to get the job ID from the response
+            let actualJobId = jobId;
+            if (response.headers.get('content-type')?.includes('application/json')) {
+              return response.json().then(data => {
+                if (data.id) {
+                  actualJobId = data.id;
+                }
+                const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
+                printViaIframe(url);
+              });
+            } else {
+              const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
+              printViaIframe(url);
+            }
+          } else {
+            throw new Error('Save failed - status ' + response.status);
+          }
+        })
+        .catch(error => {
+          console.error('Failed to save job:', error);
+          alert('Failed to save job. Please check all required fields and try again.');
+          if (printBtn) {
+            printBtn.textContent = originalText;
+            printBtn.disabled = false;
+          }
+        });
+      }
+    }
+    
+    // Use event delegation - attach to document body so it works for all future buttons
+    document.body.addEventListener('click', function(e) {
+      // Check if clicked element is a print button
+      const btn = e.target.closest('.print-btn');
+      if (btn && !btn.disabled) {
+        e.preventDefault();
+        e.stopPropagation();
+        const jobId = btn.getAttribute('data-job-id');
+        const printType = btn.getAttribute('data-print-type');
+        
+        // Check if we're in a job form and need to save first
+        const form = btn.closest('form');
+        if (form && form.querySelector('input[name="business_name"]')) {
+          // We're in a job form - save first, then print
+          console.log('Print button clicked in job form - saving first...');
+          saveJobThenPrint(form, jobId, printType);
+        } else if (jobId && jobId !== '0') {
+          // Not in a form but have a valid job ID - print directly
+          const url = '/jobs/' + jobId + '/print/' + printType + '/';
+          console.log('Print button clicked! JobId:', jobId, 'Type:', printType);
+          printViaIframe(url);
+        } else {
+          // No job ID or job ID is 0 - can't print
+          alert('Please save the job first before printing.');
+        }
+      }
+    });
+    
+    // Hover effects using event delegation
+    document.body.addEventListener('mouseover', function(e) {
+      const btn = e.target.closest('.print-btn');
+      if (btn && !btn.disabled) {
+        btn.style.backgroundColor = '#f9fafb';
+      }
+    });
+    
+    document.body.addEventListener('mouseout', function(e) {
+      const btn = e.target.closest('.print-btn');
+      if (btn && !btn.disabled) {
+        btn.style.backgroundColor = '#ffffff';
+      }
+    });
+  })();
+  
+  // Complete button handler (with duplicate prevention)
+  (function() {
+    const completeBtn = document.querySelector('.complete-btn');
+    if (completeBtn && !completeBtn._hasCompleteListener) {
+      completeBtn._hasCompleteListener = true;
+      completeBtn.addEventListener('click', function() {
+        const jobId = this.getAttribute('data-job-id');
+        updateJobStatus(jobId, 'completed');
+      });
+    }
+  })();
+  
+  // Uncomplete button handler (with duplicate prevention)
+  (function() {
+    const uncompleteBtn = document.querySelector('.uncomplete-btn');
+    if (uncompleteBtn && !uncompleteBtn._hasUncompleteListener) {
+      uncompleteBtn._hasUncompleteListener = true;
+      uncompleteBtn.addEventListener('click', function() {
+        const jobId = this.getAttribute('data-job-id');
+        updateJobStatus(jobId, 'uncompleted');
+      });
+    }
+  })();
+  
+  // Delete button handler (with duplicate prevention)
+  (function() {
+    const deleteBtn = document.querySelector('.delete-btn');
+    if (deleteBtn && !deleteBtn._hasDeleteListener) {
+      deleteBtn._hasDeleteListener = true;
+      deleteBtn.addEventListener('click', function() {
+        const jobId = this.getAttribute('data-job-id');
+        deleteJob(jobId);
+      });
+    }
+  })();
+
+  // Phone number formatting
+  (function() {
+    const phoneInput = document.querySelector('input[name="phone"]');
+    
+    if (phoneInput) {
+      phoneInput.addEventListener('input', function(e) {
+        // Get only the digits
+        let value = e.target.value.replace(/\D/g, '');
+        
+        // Limit to 10 digits
+        if (value.length > 10) {
+          value = value.slice(0, 10);
+        }
+        
+        // Format the phone number
+        let formattedValue = '';
+        if (value.length > 0) {
+          formattedValue = '(' + value.substring(0, 3);
+          if (value.length >= 3) {
+            formattedValue += ') ' + value.substring(3, 6);
+          }
+          if (value.length >= 6) {
+            formattedValue += '-' + value.substring(6, 10);
+          }
+        }
+        
+        // Update the input value
+        e.target.value = formattedValue;
+      });
+      
+      // Prevent non-numeric characters on keydown
+      phoneInput.addEventListener('keydown', function(e) {
+        // Allow: backspace, delete, tab, escape, enter
+        if ([8, 9, 27, 13, 46].indexOf(e.keyCode) !== -1 ||
+            // Allow: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
+            (e.keyCode === 65 && e.ctrlKey === true) ||
+            (e.keyCode === 67 && e.ctrlKey === true) ||
+            (e.keyCode === 86 && e.ctrlKey === true) ||
+            (e.keyCode === 88 && e.ctrlKey === true) ||
+            // Allow: home, end, left, right
+            (e.keyCode >= 35 && e.keyCode <= 39)) {
+          return;
+        }
+        // Ensure that it is a number and stop the keypress if not
+        if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
+          e.preventDefault();
+        }
+      });
+    }
+  })();
+  
+  // Track form changes for unsaved changes warning
+  (function() {
+    // Initialize form change tracking when the form loads
+    function initializeFormChangeTracking() {
+      if (window.JobPanel && window.JobPanel.trackFormChanges) {
+        window.JobPanel.trackFormChanges();
+      }
+    }
+    
+    // Initialize immediately and after HTMX content swaps
+    initializeFormChangeTracking();
+    
+    // Re-initialize after HTMX content swaps
+    document.body.addEventListener('htmx:afterSwap', function() {
+      setTimeout(initializeFormChangeTracking, 100);
+    });
+    
+    document.body.addEventListener('htmx:load', function() {
+      setTimeout(initializeFormChangeTracking, 100);
+    });
+  })();
 </script>

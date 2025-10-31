@@ -75,6 +75,9 @@
 </div>
 
 <script>
-window.print();
+// Only auto-print if not loaded in an iframe (for backwards compatibility)
+if (window.self === window.top) {
+    window.print();
+}
 </script>
 {% endblock %}

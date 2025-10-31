@@ -7,22 +7,29 @@ from django.db.models import ProtectedError
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.clickjacking import xframe_options_exempt
+from django.utils.decorators import method_decorator
 from django.utils import timezone
 from .models import Calendar, Job, WorkOrder, WorkOrderLine, Invoice, InvoiceLine, StatusChange
-from .forms import JobForm, WorkOrderForm, WorkOrderLineForm
+from .forms import JobForm, WorkOrderForm, WorkOrderLineForm, CalendarImportForm
 import os
 from django.http import HttpResponse
 import json
 from django.db import models, transaction
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from decimal import Decimal
 from django import forms
+import re
 
 # HTML5 datetime-local format constant
 DATETIME_LOCAL_FMT = "%Y-%m-%dT%H:%M"
+# HTML5 date-only format (used when All Day is checked)
+DATE_ONLY_FMT = "%Y-%m-%d"
 import logging
 from django.template.loader import render_to_string
 from rental_scheduler.utils.datetime import format_local, to_local
+from rental_scheduler.utils.events import normalize_event_datetimes, event_to_calendar_json, get_call_reminder_sunday
+from rental_scheduler.utils.ai_parser import parse_description_with_ai
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +84,7 @@ class CalendarCreateView(CreateView):
     """Create a new calendar"""
     model = Calendar
     template_name = 'rental_scheduler/calendars/calendar_form.html'
-    fields = ['name', 'color', 'is_active']
+    fields = ['name', 'color', 'call_reminder_color', 'is_active']
     success_url = reverse_lazy('rental_scheduler:calendar_list')
     
     def get_context_data(self, **kwargs):
@@ -93,7 +100,7 @@ class CalendarUpdateView(UpdateView):
     """Update an existing calendar"""
     model = Calendar
     template_name = 'rental_scheduler/calendars/calendar_form.html'
-    fields = ['name', 'color', 'is_active']
+    fields = ['name', 'color', 'call_reminder_color', 'is_active']
     success_url = reverse_lazy('rental_scheduler:calendar_list')
     
     def get_context_data(self, **kwargs):
@@ -212,7 +219,7 @@ class JobForm(forms.ModelForm):
     # Override datetime fields to use proper widgets
     start_dt = forms.DateTimeField(
         required=True,
-        input_formats=[DATETIME_LOCAL_FMT],
+        input_formats=[DATETIME_LOCAL_FMT, DATE_ONLY_FMT],
         widget=forms.DateTimeInput(attrs={
             'type': 'datetime-local',
             'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
@@ -223,7 +230,7 @@ class JobForm(forms.ModelForm):
     
     end_dt = forms.DateTimeField(
         required=True,
-        input_formats=[DATETIME_LOCAL_FMT],
+        input_formats=[DATETIME_LOCAL_FMT, DATE_ONLY_FMT],
         widget=forms.DateTimeInput(attrs={
             'type': 'datetime-local',
             'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
@@ -234,7 +241,7 @@ class JobForm(forms.ModelForm):
     
     date_call_received = forms.DateTimeField(
         required=False,
-        input_formats=[DATETIME_LOCAL_FMT],
+        input_formats=[DATETIME_LOCAL_FMT, DATE_ONLY_FMT],
         widget=forms.DateTimeInput(attrs={
             'type': 'datetime-local',
             'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'
@@ -288,7 +295,7 @@ class JobForm(forms.ModelForm):
             'trailer_serial': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
             'trailer_details': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
             'repair_notes': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none h-32 resize-none', 'rows': 5}),
-            'quote': forms.NumberInput(attrs={'class': 'w-full rounded-md border border-gray-300 pl-7 pr-3 py-2 text-sm focus:border-gray-400 focus:outline-none', 'step': '0.01', 'min': '0'}),
+            'quote': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 pl-7 pr-3 py-2 text-sm focus:border-gray-400 focus:outline-none', 'placeholder': 'e.g., 500.00 or TBD'}),
         }
     
     def __init__(self, *args, **kwargs):
@@ -311,9 +318,9 @@ class JobForm(forms.ModelForm):
             raise forms.ValidationError("Please select both start and end dates.")
         
         if all_day:
-            # Normalize to day bounds (exclusive end - next day at midnight)
-            start_normalized = datetime.combine(start_dt.date(), time.min)
-            end_normalized = datetime.combine(end_dt.date(), time.min) + timedelta(days=1)
+            # Normalize to noon to avoid timezone shift issues
+            start_normalized = datetime.combine(start_dt.date(), time(12, 0, 0))
+            end_normalized = datetime.combine(end_dt.date(), time(12, 0, 0))
             
             # Make timezone-aware if using timezone support
             from django.utils import timezone
@@ -321,97 +328,19 @@ class JobForm(forms.ModelForm):
                 start_normalized = timezone.make_aware(start_normalized)
                 end_normalized = timezone.make_aware(end_normalized)
             
+            # For all-day events, allow same day (equal dates) but not end before start
+            if start_normalized > end_normalized:
+                self.add_error("end_dt", "End date cannot be before start date.")
+            
             cleaned_data['start_dt'] = start_normalized
             cleaned_data['end_dt'] = end_normalized
         else:
             # Keep times as provided, just validate order
+            # For timed events, end must be strictly after start
             if end_dt <= start_dt:
                 self.add_error("end_dt", "End date/time must be after start date/time.")
         
         return cleaned_data
-
-
-def job_create(request):
-    """Create a new job - function-based view for better form handling"""
-    if request.method == "POST":
-        form = JobForm(request.POST)
-        if form.is_valid():
-            job = form.save()
-            messages.success(request, "Job created successfully.")
-            return redirect("rental_scheduler:job_detail", pk=job.pk)
-        else:
-            # TEMP debug – keep for now, remove later
-            print("FORM ERRORS:", form.errors.as_json())
-    else:
-        # Set initial values for new form
-        initial = {}
-        
-        # Set default calendar to first active calendar
-        first_calendar = Calendar.objects.filter(is_active=True).first()
-        if first_calendar:
-            initial['calendar'] = first_calendar
-        
-        # Set default status
-        initial['status'] = 'uncompleted'
-        
-        form = JobForm(initial=initial)
-
-    context = {
-        'form': form,
-        'title': 'Create Job',
-        'calendars': Calendar.objects.filter(is_active=True)
-    }
-    return render(request, "rental_scheduler/jobs/job_form.html", context)
-
-
-class JobUpdateView(UpdateView):
-    """Update an existing job"""
-    model = Job
-    form_class = JobForm
-    template_name = 'rental_scheduler/jobs/job_form.html'
-    success_url = reverse_lazy('rental_scheduler:job_list')
-    
-    def get_queryset(self):
-        return Job.objects.select_related('calendar')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = f'Edit Job: {self.object.get_display_name()}'
-        context['calendars'] = Calendar.objects.filter(is_active=True)
-        context['is_create'] = False
-        return context
-    
-    def form_valid(self, form):
-        """Process form submission and update job"""
-        try:
-            # Set the user who updated this job
-            if self.request.user.is_authenticated:
-                form.instance.updated_by = self.request.user
-            
-            response = super().form_valid(form)
-            messages.success(self.request, f'Job for {form.instance.get_display_name()} updated successfully.')
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error updating job: {str(e)}")
-            messages.error(self.request, f"Error updating job: {str(e)}")
-            return self.form_invalid(form)
-
-
-class JobDetailView(DetailView):
-    """View job details"""
-    model = Job
-    template_name = 'rental_scheduler/jobs/job_detail_simple.html'
-    context_object_name = 'job'
-    
-    def get_queryset(self):
-        return Job.objects.select_related('calendar')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = f'Job Details: {self.object.get_display_name()}'
-        return context
 
 
 class JobDeleteView(DeleteView):
@@ -432,6 +361,7 @@ class JobDeleteView(DeleteView):
 
 
 # Print Views
+@method_decorator(xframe_options_exempt, name='dispatch')
 class JobPrintWOView(DetailView):
     """Print work order view"""
     model = Job
@@ -444,6 +374,7 @@ class JobPrintWOView(DetailView):
         return context
 
 
+@method_decorator(xframe_options_exempt, name='dispatch')
 class JobPrintWOCustomerView(DetailView):
     """Print customer copy work order view"""
     model = Job
@@ -456,6 +387,7 @@ class JobPrintWOCustomerView(DetailView):
         return context
 
 
+@method_decorator(xframe_options_exempt, name='dispatch')
 class JobPrintInvoiceView(DetailView):
     """Print invoice view"""
     model = Job
@@ -516,9 +448,16 @@ def get_job_calendar_data(request):
         if status_filter:
             jobs = jobs.filter(status=status_filter)
         
-        # Apply calendar filter
+        # Apply calendar filter (supports multiple calendar IDs as comma-separated string)
         if calendar_filter:
-            jobs = jobs.filter(calendar_id=calendar_filter)
+            # Check if it's a comma-separated list of IDs
+            if ',' in calendar_filter:
+                calendar_ids = [int(cid.strip()) for cid in calendar_filter.split(',') if cid.strip().isdigit()]
+                if calendar_ids:
+                    jobs = jobs.filter(calendar_id__in=calendar_ids)
+            else:
+                # Single calendar ID
+                jobs = jobs.filter(calendar_id=calendar_filter)
         
         # Apply search filter
         if search_filter:
@@ -537,14 +476,19 @@ def get_job_calendar_data(request):
         events = []
         
         for job in jobs:
-            # Format phone number with dashes
+            # Format phone number to match dialog format: (123) 456-5875
             phone_formatted = ""
             if job.get_phone():
-                phone_str = str(int(job.get_phone()))
-                if len(phone_str) == 10:
-                    phone_formatted = f"{phone_str[:3]}-{phone_str[3:6]}-{phone_str[6:]}"
+                # Strip all non-digit characters first
+                phone_digits = ''.join(filter(str.isdigit, job.get_phone()))
+                if phone_digits:
+                    if len(phone_digits) == 10:
+                        phone_formatted = f"({phone_digits[:3]}) {phone_digits[3:6]}-{phone_digits[6:]}"
+                    else:
+                        phone_formatted = phone_digits
                 else:
-                    phone_formatted = phone_str
+                    # If no digits found, use the original value
+                    phone_formatted = job.get_phone()
             
             # Build the event title in format: Business Name (Contact Name) - Phone Number
             business_name = job.business_name or ""
@@ -568,15 +512,13 @@ def get_job_calendar_data(request):
                 # Create a lighter shade for completed events
                 calendar_color = lighten_color(calendar_color, 0.3)
             
-            event = {
-                'id': f"job-{job.id}",
-                'title': title,
-                'start': job.start_dt.astimezone().isoformat(),
-                'end': job.end_dt.astimezone().isoformat(),
-                'backgroundColor': calendar_color,
-                'borderColor': calendar_color,
-                'allDay': job.all_day,
-                'extendedProps': {
+            # Use the helper function to serialize the event with proper all-day handling
+            event = event_to_calendar_json(
+                job,
+                title=title,
+                backgroundColor=calendar_color,
+                borderColor=calendar_color,
+                extendedProps={
                     'type': 'job',
                     'job_id': job.id,
                     'status': job.status,
@@ -591,18 +533,164 @@ def get_job_calendar_data(request):
                     'trailer_details': job.trailer_details,
                     'notes': job.notes,
                     'repair_notes': job.repair_notes,
+                    # Recurring event info
+                    'is_recurring_parent': job.is_recurring_parent,
+                    'is_recurring_instance': job.is_recurring_instance,
+                    'recurrence_parent_id': job.recurrence_parent_id,
+                    'recurrence_rule': job.recurrence_rule,
+                    'repeat_type': job.repeat_type,
+                    'repeat_n_months': job.repeat_n_months,
                 }
-            }
+            )
             
-            # Debug: Log the event colors being set
-            print(f"API: Setting colors for job-{job.id}: backgroundColor={calendar_color}, calendar={job.calendar.name}")
+            # Override the id to use the "job-{id}" format
+            event['id'] = f"job-{job.id}"
             
             events.append(event)
+            
+            # Create call reminder event if enabled and not completed
+            if job.has_call_reminder and job.call_reminder_weeks_prior and not job.call_reminder_completed:
+                try:
+                    reminder_dt = get_call_reminder_sunday(job.start_dt, job.call_reminder_weeks_prior)
+                    reminder_end_dt = reminder_dt + timedelta(days=1)  # All-day event (exclusive end)
+                    
+                    # Get the call reminder color from the calendar
+                    reminder_color = job.calendar.call_reminder_color or '#F59E0B'
+                    
+                    # Format the reminder title
+                    reminder_title = f"📞 {title}"
+                    
+                    # Get the CallReminder notes if it exists (separate from job notes)
+                    from .models import CallReminder
+                    reminder_notes = ''
+                    try:
+                        call_reminder = CallReminder.objects.filter(job=job).first()
+                        if call_reminder:
+                            reminder_notes = call_reminder.notes or ''
+                    except Exception:
+                        pass
+                    
+                    reminder_event = {
+                        'id': f"reminder-{job.id}",
+                        'title': reminder_title,
+                        'start': reminder_dt.date().isoformat(),
+                        'end': reminder_end_dt.date().isoformat(),  # Exclusive end
+                        'backgroundColor': reminder_color,
+                        'borderColor': reminder_color,
+                        'allDay': True,
+                        'extendedProps': {
+                            'type': 'call_reminder',
+                            'job_id': job.id,
+                            'status': job.status,
+                            'calendar_id': job.calendar.id,
+                            'calendar_name': job.calendar.name,
+                            'business_name': job.business_name,
+                            'contact_name': job.contact_name,
+                            'phone': job.get_phone(),
+                            'weeks_prior': job.call_reminder_weeks_prior,
+                            'job_date': timezone.localtime(job.start_dt).date().isoformat(),
+                            'call_reminder_completed': job.call_reminder_completed,
+                            'notes': reminder_notes,
+                        }
+                    }
+                    
+                    events.append(reminder_event)
+                except Exception as reminder_error:
+                    logger.error(f"Error creating call reminder for job {job.id}: {str(reminder_error)}")
         
-        # Debug: Log the number of events and first event
-        print(f"API: Returning {len(events)} events")
-        if events:
-            print(f"API: First event: {events[0]}")
+        # Fetch standalone CallReminder records (not linked to jobs)
+        try:
+            from .models import CallReminder
+            from datetime import datetime
+            
+            # Parse start_date and end_date to date objects for DateField filtering
+            # They come as ISO datetime strings like "2025-10-05T00:00:00-06:00"
+            try:
+                start_date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00')).date()
+                end_date_obj = datetime.fromisoformat(end_date.replace('Z', '+00:00')).date()
+            except (ValueError, AttributeError):
+                # If parsing fails, try just taking the date part
+                start_date_obj = start_date.split('T')[0] if 'T' in start_date else start_date
+                end_date_obj = end_date.split('T')[0] if 'T' in end_date else end_date
+            
+            # Get the list of calendar IDs from the filter
+            calendar_ids = []
+            if calendar_filter:
+                if ',' in calendar_filter:
+                    calendar_ids = [int(cid.strip()) for cid in calendar_filter.split(',') if cid.strip().isdigit()]
+                else:
+                    try:
+                        calendar_ids = [int(calendar_filter)]
+                    except ValueError:
+                        pass
+            
+            # Fetch standalone reminders
+            if calendar_ids:
+                call_reminders = CallReminder.objects.filter(
+                    calendar_id__in=calendar_ids,
+                    reminder_date__range=[start_date_obj, end_date_obj],
+                    job__isnull=True,  # Only standalone reminders
+                    completed=False  # Only show uncompleted reminders
+                ).select_related('calendar')
+            else:
+                # No filter, get all active calendars
+                call_reminders = CallReminder.objects.filter(
+                    reminder_date__range=[start_date_obj, end_date_obj],
+                    job__isnull=True,
+                    completed=False,
+                    calendar__is_active=True
+                ).select_related('calendar')
+            
+            # Add standalone call reminders to events
+            for reminder in call_reminders:
+                try:
+                    # Ensure reminder_date is a date object, not datetime
+                    from datetime import datetime as dt, date
+                    reminder_date = reminder.reminder_date
+                    if isinstance(reminder_date, dt):
+                        # Convert datetime to date if needed (shouldn't happen, but defensive)
+                        reminder_date = reminder_date.date()
+                        # Fix in database
+                        reminder.reminder_date = reminder_date
+                        reminder.save(update_fields=['reminder_date'])
+                        logger.warning(f"Fixed reminder {reminder.id}: converted datetime to date")
+                    
+                    reminder_color = reminder.calendar.call_reminder_color or '#F59E0B'
+                    reminder_end_dt = reminder_date + timedelta(days=1)
+                    
+                    # Build title with notes if available
+                    reminder_title = "📞 Call Reminder"
+                    if reminder.notes:
+                        # Truncate notes if too long for display
+                        notes_preview = reminder.notes[:50] + '...' if len(reminder.notes) > 50 else reminder.notes
+                        reminder_title = f"📞 {notes_preview}"
+                    
+                    reminder_event = {
+                        'id': f"call-reminder-{reminder.id}",
+                        'title': reminder_title,
+                        'start': reminder_date.isoformat(),
+                        'end': reminder_end_dt.isoformat(),  # Exclusive end for all-day event
+                        'backgroundColor': reminder_color,
+                        'borderColor': reminder_color,
+                        'allDay': True,
+                        'extendedProps': {
+                            'type': 'standalone_call_reminder',
+                            'reminder_id': reminder.id,
+                            'calendar_id': reminder.calendar.id,
+                            'calendar_name': reminder.calendar.name,
+                            'notes': reminder.notes,
+                            'completed': reminder.completed,
+                            'reminder_date': reminder_date.isoformat(),
+                        }
+                    }
+                    
+                    events.append(reminder_event)
+                except Exception as single_reminder_error:
+                    logger.error(f"Error processing call reminder {reminder.id}: {str(single_reminder_error)}")
+                    # Skip this reminder and continue with others
+        except Exception as reminder_fetch_error:
+            logger.error(f"Error fetching standalone call reminders: {str(reminder_fetch_error)}")
+            # Continue without standalone reminders if there's an error
         
         return JsonResponse({
             'status': 'success',
@@ -642,6 +730,210 @@ def update_job_status(request, job_id):
         
     except Exception as e:
         logger.error(f"Error updating job status: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def mark_call_reminder_complete(request, job_id):
+    """API endpoint to mark a call reminder as complete"""
+    try:
+        job = get_object_or_404(Job, id=job_id)
+        job.call_reminder_completed = True
+        job.save()
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Call reminder marked as complete'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error marking call reminder complete: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def call_reminder_create_partial(request):
+    """Return call reminder creation form partial for panel"""
+    from .forms import CallReminderForm
+    from datetime import datetime
+    
+    # Get date from query params and pre-fill form
+    date_str = request.GET.get('date')
+    calendar_id = request.GET.get('calendar')
+    
+    initial = {}
+    if date_str:
+        try:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            initial['reminder_date'] = date_obj
+        except ValueError:
+            pass
+    
+    if calendar_id:
+        try:
+            initial['calendar'] = int(calendar_id)
+        except (ValueError, TypeError):
+            pass
+    
+    form = CallReminderForm(initial=initial)
+    
+    return render(request, 'rental_scheduler/call_reminders/_call_reminder_form_partial.html', {
+        'form': form,
+        'title': 'New Call Reminder'
+    })
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def call_reminder_create_submit(request):
+    """Handle call reminder creation form submission"""
+    from .forms import CallReminderForm
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("="*80)
+    logger.info(f"Call reminder create request received")
+    logger.info(f"POST data: {dict(request.POST)}")
+    logger.info("="*80)
+    
+    form = CallReminderForm(request.POST)
+    
+    if form.is_valid():
+        try:
+            reminder = form.save()
+            logger.info(f"Call reminder created successfully: ID={reminder.id}")
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Call reminder created successfully',
+                'reminder_id': reminder.id
+            })
+        except Exception as e:
+            logger.error(f"Error saving call reminder: {str(e)}")
+            return JsonResponse({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    else:
+        logger.error(f"Form validation failed!")
+        logger.error(f"Form errors: {form.errors}")
+        
+        return JsonResponse({
+            'success': False,
+            'errors': dict(form.errors)
+        }, status=400)
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def call_reminder_update(request, pk):
+    """API endpoint to update call reminder notes and completion status"""
+    import json
+    from .models import CallReminder
+    
+    try:
+        reminder = get_object_or_404(CallReminder, id=pk)
+        
+        # Parse JSON body
+        data = json.loads(request.body)
+        
+        # Update notes if provided
+        if 'notes' in data:
+            reminder.notes = data['notes']
+        
+        # Update completed status if provided
+        if 'completed' in data:
+            completed = data['completed']
+            if isinstance(completed, str):
+                completed = completed.lower() in ('true', '1', 'yes', 'on')
+            reminder.completed = bool(completed)
+        
+        reminder.save()
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Call reminder updated successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating call reminder: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def call_reminder_delete(request, pk):
+    """API endpoint to delete a call reminder"""
+    from .models import CallReminder
+    
+    try:
+        reminder = get_object_or_404(CallReminder, id=pk)
+        reminder.delete()
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Call reminder deleted successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting call reminder: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def job_call_reminder_update(request, job_id):
+    """API endpoint to get or create and update CallReminder for a job"""
+    import json
+    from .models import CallReminder, Job
+    from .utils.events import get_call_reminder_sunday
+    
+    try:
+        job = get_object_or_404(Job, id=job_id)
+        
+        # Parse JSON body
+        data = json.loads(request.body)
+        
+        # Calculate the reminder date based on job's settings
+        if job.has_call_reminder and job.call_reminder_weeks_prior:
+            reminder_date = get_call_reminder_sunday(job.start_dt, job.call_reminder_weeks_prior).date()
+        else:
+            return JsonResponse({'error': 'Job does not have call reminder enabled'}, status=400)
+        
+        # Get or create CallReminder for this job
+        reminder, created = CallReminder.objects.get_or_create(
+            job=job,
+            calendar=job.calendar,
+            defaults={'reminder_date': reminder_date, 'notes': ''}
+        )
+        
+        # Update the reminder_date in case job date changed
+        reminder.reminder_date = reminder_date
+        
+        # Update notes if provided
+        if 'notes' in data:
+            reminder.notes = data['notes']
+        
+        # Update completed status if provided
+        if 'completed' in data:
+            completed = data['completed']
+            if isinstance(completed, str):
+                completed = completed.lower() in ('true', '1', 'yes', 'on')
+            reminder.completed = bool(completed)
+            # Also update the job's call_reminder_completed flag
+            job.call_reminder_completed = reminder.completed
+            job.save(update_fields=['call_reminder_completed'])
+        
+        reminder.save()
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Call reminder updated successfully',
+            'reminder_id': reminder.id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating job call reminder: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
 
 
@@ -888,125 +1180,45 @@ class InvoiceDetailView(DetailView):
 
 
 # Job Modal Views
-def job_detail_modal(request, pk):
-    """Return the read-only job details modal partial"""
-    job = get_object_or_404(Job, pk=pk)
-    return render(request, "rental_scheduler/jobs/_job_modal_detail.html", {"job": job})
-
-
-def job_edit_modal(request, pk):
-    """Return the editable job modal partial or handle form submission"""
-    job = get_object_or_404(Job, pk=pk)
-    
-    if request.method == "POST":
-        form = JobForm(request.POST, instance=job)
-        if form.is_valid():
-            job = form.save()
-            # Return the updated read-only modal with status 200
-            return render(request, "rental_scheduler/jobs/_job_modal_detail.html", {"job": job})
-        else:
-            # Return the edit modal with errors and status 400 so HTMX swaps it and shows errors
-            return render(request, "rental_scheduler/jobs/_job_modal_edit.html", {
-                "job": job, 
-                "form": form
-            }, status=400)
-    else:
-        # GET request - show edit form
-        form = JobForm(instance=job)
-        return render(request, "rental_scheduler/jobs/_job_modal_edit.html", {
-            "job": job, 
-            "form": form
-        })
-
-
-def job_detail_panel(request, pk):
-    """Return the read-only job details panel partial"""
-    job = get_object_or_404(Job, pk=pk)
-    return render(request, "rental_scheduler/jobs/_job_panel_detail.html", {"job": job})
-
-
-def job_edit_panel(request, pk):
-    """Return the editable job panel partial or handle form submission"""
-    job = get_object_or_404(Job, pk=pk)
-    
-    if request.method == "POST":
-        form = JobForm(request.POST, instance=job)
-        if form.is_valid():
-            job = form.save()
-            # Return the updated read-only panel with status 200
-            return render(request, "rental_scheduler/jobs/_job_panel_detail.html", {"job": job})
-        else:
-            # Return the edit panel with errors and status 400 so HTMX swaps it and shows errors
-            return render(request, "rental_scheduler/jobs/_job_panel_edit.html", {
-                "job": job, 
-                "form": form
-            }, status=400)
-    else:
-        # GET request - show edit form
-        form = JobForm(instance=job)
-        return render(request, "rental_scheduler/jobs/_job_panel_edit.html", {
-            "job": job,
-            "form": form
-        })
-
-
-def job_create_panel(request):
-    """Return the job creation panel partial or handle form submission"""
-    if request.method == "POST":
-        form = JobForm(request.POST)
-        if form.is_valid():
-            job = form.save()
-            # Return success message and close panel
-            return render(request, "rental_scheduler/jobs/_job_panel_detail.html", {"job": job})
-        else:
-            # Return the create panel with errors and status 400 so HTMX swaps it and shows errors
-            return render(request, "rental_scheduler/jobs/_job_panel_create.html", {
-                "form": form
-            }, status=400)
-    else:
-        # GET request - show create form
-        form = JobForm()
-        
-        # Pre-fill date if provided in query params
-        if 'date' in request.GET:
-            try:
-                from datetime import datetime
-                date_str = request.GET['date']
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-                # Set initial values for the form
-                form.fields['start_dt'].initial = date_obj.strftime('%Y-%m-%dT09:00')
-                form.fields['end_dt'].initial = date_obj.strftime('%Y-%m-%dT17:00')
-            except ValueError:
-                pass  # Invalid date format, ignore
-        
-        return render(request, "rental_scheduler/jobs/_job_panel_create.html", {
-            "form": form
-        })
-
-
 def job_create_partial(request):
     """Return job creation form partial for panel"""
+    call_reminder_notes = ''
+    
     # Check if editing existing job
     if 'edit' in request.GET:
         try:
             job_id = int(request.GET['edit'])
             job = get_object_or_404(Job, pk=job_id)
             form = JobForm(instance=job)
+            
+            # Load call reminder notes if job has a call reminder
+            if job.has_call_reminder:
+                from .models import CallReminder
+                call_reminder = CallReminder.objects.filter(job=job).first()
+                if call_reminder:
+                    call_reminder_notes = call_reminder.notes or ''
         except (ValueError, TypeError):
             form = JobForm()
     else:
         # New job creation
-        initial = {}
+        initial = {'all_day': True}
         if 'date' in request.GET:
             try:
                 from datetime import datetime
                 date_str = request.GET['date']
                 date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-                # Set initial values for the form
-                initial['start_dt'] = date_obj.strftime('%Y-%m-%dT09:00')
-                initial['end_dt'] = date_obj.strftime('%Y-%m-%dT17:00')
+                # Use date-only format since all_day is True by default
+                initial['start_dt'] = date_obj.strftime(DATE_ONLY_FMT)
+                initial['end_dt'] = date_obj.strftime(DATE_ONLY_FMT)
             except ValueError:
                 pass  # Invalid date format, ignore
+        else:
+            # No date provided - default to today
+            from datetime import date as _date
+            today = _date.today()
+            # Use date-only format since all_day is True by default
+            initial['start_dt'] = today.strftime(DATE_ONLY_FMT)
+            initial['end_dt'] = today.strftime(DATE_ONLY_FMT)
         
         # Pre-select calendar based on current filter
         if 'calendar' in request.GET:
@@ -1020,7 +1232,10 @@ def job_create_partial(request):
         
         form = JobForm(initial=initial)
     
-    return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {'form': form})
+    return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {
+        'form': form,
+        'call_reminder_notes': call_reminder_notes
+    })
 
 
 def job_detail_partial(request, pk):
@@ -1035,7 +1250,12 @@ def job_create_submit(request):
     import logging
     logger = logging.getLogger(__name__)
     
-    logger.info(f"job_create_submit called with POST data: {request.POST}")
+    logger.info("="*80)
+    logger.info(f"job_create_submit called with POST data: {dict(request.POST)}")
+    logger.info(f"all_day value: {request.POST.get('all_day')}")
+    logger.info(f"start_dt value: {request.POST.get('start_dt')}")
+    logger.info(f"end_dt value: {request.POST.get('end_dt')}")
+    logger.info("="*80)
     
     # Check if this is an update (job ID in form data)
     job_id = request.POST.get('job_id')
@@ -1051,10 +1271,89 @@ def job_create_submit(request):
         form = JobForm(request.POST)
         logger.info("Creating new job")
     
+    logger.info(f"Form is_valid: {form.is_valid()}")
+    if not form.is_valid():
+        logger.error(f"Form validation FAILED!")
+        logger.error(f"Form errors: {form.errors}")
+        logger.error(f"Form errors as dict: {dict(form.errors)}")
+        for field, errors in form.errors.items():
+            logger.error(f"  Field '{field}': {errors}")
+    
     if form.is_valid():
-        job = form.save()
+        job = form.save(commit=False)
+        
+        # Explicitly handle checkbox fields (unchecked checkboxes don't send data)
+        has_call_reminder = request.POST.get('has_call_reminder') == 'on'
+        call_reminder_weeks = request.POST.get('call_reminder_weeks_prior')
+        call_reminder_completed = request.POST.get('call_reminder_completed') == 'on'
+        
+        logger.info(f"Call reminder checkbox: {has_call_reminder}, weeks: {call_reminder_weeks}, completed: {call_reminder_completed}")
+        
+        job.has_call_reminder = has_call_reminder
+        job.call_reminder_completed = call_reminder_completed
+        if job.has_call_reminder and call_reminder_weeks:
+            try:
+                job.call_reminder_weeks_prior = int(call_reminder_weeks)
+            except (ValueError, TypeError):
+                job.call_reminder_weeks_prior = None
+        else:
+            job.call_reminder_weeks_prior = None
+        
+        job.save()
+        
+        # Handle call reminder notes - save to CallReminder object
+        call_reminder_notes = request.POST.get('call_reminder_notes', '').strip()
+        if job.has_call_reminder and job.call_reminder_weeks_prior:
+            from .models import CallReminder
+            from .utils.events import get_call_reminder_sunday
+            
+            # Calculate reminder date
+            reminder_date = get_call_reminder_sunday(job.start_dt, job.call_reminder_weeks_prior).date()
+            
+            # Get or create CallReminder for this job
+            call_reminder, created = CallReminder.objects.get_or_create(
+                job=job,
+                calendar=job.calendar,
+                defaults={'reminder_date': reminder_date, 'notes': call_reminder_notes}
+            )
+            
+            # Update if it already exists
+            if not created:
+                call_reminder.reminder_date = reminder_date
+                call_reminder.notes = call_reminder_notes
+                call_reminder.completed = job.call_reminder_completed
+                call_reminder.save()
+        
+        # Handle recurring event creation
+        recurrence_enabled = request.POST.get('recurrence_enabled') == 'on'
+        if recurrence_enabled and not job_id:  # Only on creation, not updates
+            recurrence_type = request.POST.get('recurrence_type', 'monthly')
+            recurrence_interval = int(request.POST.get('recurrence_interval', 1))
+            recurrence_count = request.POST.get('recurrence_count')
+            recurrence_until = request.POST.get('recurrence_until')
+            
+            # Convert count to int if provided and validate
+            count = int(recurrence_count) if recurrence_count else None
+            if count and count > 500:
+                messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+                return redirect('rental_scheduler:job_list')
+            until_date = recurrence_until if recurrence_until else None
+            
+            # Create recurrence rule
+            job.create_recurrence_rule(
+                recurrence_type=recurrence_type,
+                interval=recurrence_interval,
+                count=count,
+                until_date=until_date
+            )
+            
+            # Generate recurring instances
+            job.generate_recurring_instances()
+            logger.info(f"Created recurring job {job.id} with {recurrence_type} recurrence")
+        
         logger.info(f"Job saved successfully: {job.id}")
-        return render(request, 'rental_scheduler/jobs/_job_detail_partial.html', {'job': job})
+        # Return a simple success response that triggers the close action
+        return HttpResponse('<div hx-swap-oob="true" id="job-success">Job saved successfully!</div>', headers={'HX-Trigger': 'jobSaved'})
     else:
         logger.error(f"Form validation errors: {form.errors}")
         return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {'form': form}, status=400)
@@ -1082,31 +1381,36 @@ def job_create_api(request):
         job.notes = data.get('notes', '')
         job.repair_notes = data.get('repair_notes', '')
         job.status = data.get('status', 'uncompleted')
-        job.all_day = data.get('all_day') == 'on' or data.get('all_day') == True
         
-        # Handle dates
-        if data.get('start_dt'):
-            from datetime import datetime
-            from django.utils import timezone
+        # Handle repeat settings
+        job.repeat_type = data.get('repeat_type', 'none') or 'none'
+        if job.repeat_type == 'monthly':
+            job.repeat_n_months = int(data.get('repeat_n_months', data.get('repeat_months', 1)))
+        else:
+            job.repeat_n_months = None
+        
+        # Determine if this is an all-day event
+        all_day = data.get('allDay', data.get('all_day', False))
+        if isinstance(all_day, str):
+            all_day = all_day.lower() in ('true', '1', 'yes', 'on')
+        job.all_day = bool(all_day)
+        
+        # Handle dates with normalization for all-day events
+        start_value = data.get('start', data.get('start_dt'))
+        end_value = data.get('end', data.get('end_dt'))
+        
+        if start_value:
             try:
-                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
-                naive_dt = datetime.fromisoformat(data['start_dt'])
-                # Make it timezone-aware in local timezone, then convert to UTC for storage
-                local_dt = timezone.make_aware(naive_dt)
-                job.start_dt = local_dt
-            except ValueError:
-                return JsonResponse({'error': 'Invalid start date format'}, status=400)
-        if data.get('end_dt'):
-            from datetime import datetime
-            from django.utils import timezone
-            try:
-                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
-                naive_dt = datetime.fromisoformat(data['end_dt'])
-                # Make it timezone-aware in local timezone, then convert to UTC for storage
-                local_dt = timezone.make_aware(naive_dt)
-                job.end_dt = local_dt
-            except ValueError:
-                return JsonResponse({'error': 'Invalid end date format'}, status=400)
+                # Use normalization helper for proper timezone handling
+                start_dt_utc, end_dt_utc, _, _, _ = normalize_event_datetimes(
+                    start_value,
+                    end_value,
+                    job.all_day
+                )
+                job.start_dt = start_dt_utc
+                job.end_dt = end_dt_utc
+            except (ValueError, TypeError) as e:
+                return JsonResponse({'error': f'Invalid date format: {str(e)}'}, status=400)
         
         # Set default calendar to first active calendar
         first_calendar = Calendar.objects.filter(is_active=True).first()
@@ -1118,7 +1422,15 @@ def job_create_api(request):
         job.save()
         print(f"DEBUG: Job saved successfully with ID: {job.id}")  # Debug logging
         
-        # Return created job data
+        # Return created job data with proper formatting for FullCalendar
+        if job.all_day:
+            start_str = timezone.localtime(job.start_dt).date().isoformat()
+            end_str = timezone.localtime(job.end_dt).date().isoformat()
+        else:
+            # Use strftime to avoid timezone offset in ISO string
+            start_str = timezone.localtime(job.start_dt).strftime('%Y-%m-%dT%H:%M:%S')
+            end_str = timezone.localtime(job.end_dt).strftime('%Y-%m-%dT%H:%M:%S')
+        
         return JsonResponse({
             'id': job.id,
             'business_name': job.business_name,
@@ -1127,9 +1439,9 @@ def job_create_api(request):
             'trailer_color': job.trailer_color,
             'trailer_serial': job.trailer_serial,
             'trailer_details': job.trailer_details,
-            'start_dt': job.start_dt.astimezone().isoformat() if job.start_dt else None,
-            'end_dt': job.end_dt.astimezone().isoformat() if job.end_dt else None,
-            'all_day': job.all_day,
+            'start': start_str,
+            'end': end_str,
+            'allDay': job.all_day,
             'status': job.status,
             'notes': job.notes,
             'repair_notes': job.repair_notes,
@@ -1163,36 +1475,57 @@ def job_update_api(request, pk):
         job.notes = data.get('notes', job.notes)
         job.repair_notes = data.get('repair_notes', job.repair_notes)
         job.status = data.get('status', job.status)
-        job.all_day = data.get('all_day') == 'on' or data.get('all_day') == True
         
-        # Handle dates
-        if data.get('start_dt'):
-            from datetime import datetime
-            from django.utils import timezone
+        # Handle repeat settings
+        if 'repeat_type' in data:
+            job.repeat_type = data.get('repeat_type', 'none') or 'none'
+            if job.repeat_type == 'monthly':
+                job.repeat_n_months = int(data.get('repeat_n_months', data.get('repeat_months', 1)))
+            else:
+                job.repeat_n_months = None
+        
+        # Determine if this is an all-day event
+        if 'allDay' in data or 'all_day' in data:
+            all_day = data.get('allDay', data.get('all_day', job.all_day))
+            if isinstance(all_day, str):
+                all_day = all_day.lower() in ('true', '1', 'yes', 'on')
+            job.all_day = bool(all_day)
+        
+        # Handle dates with normalization for all-day events
+        start_value = data.get('start', data.get('start_dt'))
+        end_value = data.get('end', data.get('end_dt'))
+        
+        if start_value or end_value:
+            # Use current values as fallback if one is missing
+            if not start_value:
+                start_value = job.start_dt
+            if not end_value:
+                end_value = job.end_dt
+            
             try:
-                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
-                naive_dt = datetime.fromisoformat(data['start_dt'])
-                # Make it timezone-aware in local timezone, then convert to UTC for storage
-                local_dt = timezone.make_aware(naive_dt)
-                job.start_dt = local_dt
-            except ValueError:
-                return JsonResponse({'error': 'Invalid start date format'}, status=400)
-        if data.get('end_dt'):
-            from datetime import datetime
-            from django.utils import timezone
-            try:
-                # Parse datetime-local format (YYYY-MM-DDTHH:MM) as naive datetime
-                naive_dt = datetime.fromisoformat(data['end_dt'])
-                # Make it timezone-aware in local timezone, then convert to UTC for storage
-                local_dt = timezone.make_aware(naive_dt)
-                job.end_dt = local_dt
-            except ValueError:
-                return JsonResponse({'error': 'Invalid end date format'}, status=400)
+                # Use normalization helper for proper timezone handling
+                start_dt_utc, end_dt_utc, _, _, _ = normalize_event_datetimes(
+                    start_value,
+                    end_value,
+                    job.all_day
+                )
+                job.start_dt = start_dt_utc
+                job.end_dt = end_dt_utc
+            except (ValueError, TypeError) as e:
+                return JsonResponse({'error': f'Invalid date format: {str(e)}'}, status=400)
         
         # Save the job
         job.save()
         
-        # Return updated job data
+        # Return updated job data with proper formatting for FullCalendar
+        if job.all_day:
+            start_str = timezone.localtime(job.start_dt).date().isoformat()
+            end_str = timezone.localtime(job.end_dt).date().isoformat()
+        else:
+            # Use strftime to avoid timezone offset in ISO string
+            start_str = timezone.localtime(job.start_dt).strftime('%Y-%m-%dT%H:%M:%S')
+            end_str = timezone.localtime(job.end_dt).strftime('%Y-%m-%dT%H:%M:%S')
+        
         return JsonResponse({
             'id': job.id,
             'business_name': job.business_name,
@@ -1201,9 +1534,9 @@ def job_update_api(request, pk):
             'trailer_color': job.trailer_color,
             'trailer_serial': job.trailer_serial,
             'trailer_details': job.trailer_details,
-            'start_dt': job.start_dt.astimezone().isoformat() if job.start_dt else None,
-            'end_dt': job.end_dt.astimezone().isoformat() if job.end_dt else None,
-            'all_day': job.all_day,
+            'start': start_str,
+            'end': end_str,
+            'allDay': job.all_day,
             'status': job.status,
             'notes': job.notes,
             'repair_notes': job.repair_notes,
@@ -1283,3 +1616,598 @@ def workorder_add_line_api(request, pk):
             'status': 'error',
             'error': f'Failed to add line item: {str(e)}'
         }, status=500)
+
+
+def extract_phone_from_text(text):
+    """
+    Extract phone number from text using regex patterns.
+    Handles formats like: 740-501-9004, 231-6407, (330) 265-4243, etc.
+    """
+    if not text:
+        return None
+    
+    # Common phone patterns
+    patterns = [
+        r'\b\d{3}-\d{3}-\d{4}\b',  # 740-501-9004
+        r'\b\d{3}-\d{4}\b',        # 231-6407
+        r'\(\d{3}\)\s*\d{3}-\d{4}', # (330) 265-4243
+        r'\b\d{3}\s+\d{3}-\d{4}\b', # 330 265-4243
+        r'\b\d{10}\b',             # 7405019004
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(0)
+    
+    return None
+
+
+def parse_ics_datetime(dt_value, is_all_day=False):
+    """
+    Convert iCalendar datetime to timezone-aware datetime.
+    Handles both DATE and DATETIME formats.
+    """
+    if dt_value is None:
+        return None
+    
+    # If it's already a datetime object
+    if isinstance(dt_value, datetime):
+        # Make it timezone-aware if it isn't
+        if timezone.is_naive(dt_value):
+            return timezone.make_aware(dt_value)
+        return dt_value
+    
+    # If it's a date object (all-day event)
+    if isinstance(dt_value, date):
+        # Convert to datetime at midnight
+        dt = datetime.combine(dt_value, datetime.min.time())
+        return timezone.make_aware(dt)
+    
+    return None
+
+
+def convert_rrule_to_json(rrule_str):
+    """
+    Convert iCalendar RRULE string to our JSON format.
+    Example: "FREQ=YEARLY;UNTIL=20280128" -> {"type": "yearly", "interval": 1, "until_date": "2028-01-28"}
+    """
+    if not rrule_str:
+        return None
+    
+    try:
+        # Parse RRULE components
+        parts = {}
+        for part in rrule_str.split(';'):
+            if '=' in part:
+                key, value = part.split('=', 1)
+                parts[key] = value
+        
+        # Extract frequency
+        freq = parts.get('FREQ', '').lower()
+        if freq not in ['yearly', 'monthly', 'weekly', 'daily']:
+            return None
+        
+        # Build JSON rule
+        rule = {
+            'type': freq,
+            'interval': int(parts.get('INTERVAL', 1))
+        }
+        
+        # Add count if present
+        if 'COUNT' in parts:
+            rule['count'] = int(parts['COUNT'])
+        
+        # Add until date if present
+        if 'UNTIL' in parts:
+            until_str = parts['UNTIL']
+            # Parse UNTIL date (format: YYYYMMDD or YYYYMMDDTHHMMSSZ)
+            if 'T' in until_str:
+                until_str = until_str.split('T')[0]
+            # Format as YYYY-MM-DD
+            if len(until_str) >= 8:
+                rule['until_date'] = f"{until_str[:4]}-{until_str[4:6]}-{until_str[6:8]}"
+        
+        return rule
+    
+    except Exception as e:
+        logger.error(f"Error parsing RRULE: {rrule_str}, Error: {str(e)}")
+        return None
+
+
+@csrf_protect
+def calendar_import(request):
+    """
+    View for importing calendar events from .ics files.
+    Displays upload form and processes imported events.
+    """
+    results = None
+    
+    logger.info(f"[DEBUG] calendar_import called - Method: {request.method}")
+    
+    if request.method == 'POST':
+        logger.info(f"[DEBUG] POST data keys: {list(request.POST.keys())}")
+        logger.info(f"[DEBUG] FILES data keys: {list(request.FILES.keys())}")
+        logger.info(f"[DEBUG] Calendar value: {request.POST.get('calendar', 'NOT FOUND')}")
+        logger.info(f"[DEBUG] File in FILES: {'ics_file' in request.FILES}")
+        
+        form = CalendarImportForm(request.POST, request.FILES)
+        
+        logger.info(f"[DEBUG] Form is_valid: {form.is_valid()}")
+        if not form.is_valid():
+            logger.error(f"[DEBUG] Form errors: {form.errors}")
+            logger.error(f"[DEBUG] Form errors dict: {dict(form.errors)}")
+        
+        if form.is_valid():
+            try:
+                from icalendar import Calendar as ICalendar
+                import uuid
+                
+                # Get the uploaded file and selected calendar
+                ics_file = request.FILES['ics_file']
+                target_calendar = form.cleaned_data['calendar']
+                use_ai_parsing = form.cleaned_data.get('use_ai_parsing', True)
+                
+                # Generate unique batch ID for this import
+                batch_id = str(uuid.uuid4())
+                
+                logger.info(f"Starting calendar import - AI parsing: {use_ai_parsing}")
+                
+                # Read and parse the .ics file
+                ics_content = ics_file.read()
+                cal = ICalendar.from_ical(ics_content)
+                
+                # Track results
+                imported_count = 0
+                skipped_count = 0
+                error_count = 0
+                errors = []
+                
+                # Process each event
+                for component in cal.walk():
+                    if component.name == "VEVENT":
+                        try:
+                            # Extract fields
+                            summary = str(component.get('summary', ''))
+                            description = str(component.get('description', ''))
+                            dtstart = component.get('dtstart')
+                            dtend = component.get('dtend')
+                            created = component.get('created')
+                            rrule = component.get('rrule')
+                            status = component.get('status')
+                            uid = str(component.get('uid', ''))
+                            
+                            # Determine job status - map CANCELLED to completed
+                            job_status = 'uncompleted'  # Default
+                            if status:
+                                status_str = str(status).upper()
+                                if status_str == 'CANCELLED':
+                                    job_status = 'completed'
+                            
+                            # Skip if missing required fields
+                            if not dtstart or not dtend:
+                                skipped_count += 1
+                                errors.append(f"Event '{summary}' skipped: missing start or end date")
+                                continue
+                            
+                            # Get datetime values
+                            dtstart_val = dtstart.dt if hasattr(dtstart, 'dt') else dtstart
+                            dtend_val = dtend.dt if hasattr(dtend, 'dt') else dtend
+                            
+                            # Check if all-day event
+                            is_all_day = isinstance(dtstart_val, date) and not isinstance(dtstart_val, datetime)
+                            
+                            # Parse dates
+                            start_dt = parse_ics_datetime(dtstart_val, is_all_day)
+                            end_dt = parse_ics_datetime(dtend_val, is_all_day)
+                            
+                            if not start_dt or not end_dt:
+                                skipped_count += 1
+                                errors.append(f"Event '{summary}' skipped: invalid date format")
+                                continue
+                            
+                            # For all-day events, adjust end time
+                            if is_all_day:
+                                end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                            
+                            # Extract phone from summary
+                            phone = extract_phone_from_text(summary)
+                            
+                            # Remove phone from business_name if found
+                            business_name = summary
+                            if phone:
+                                business_name = re.sub(r'\s*' + re.escape(phone) + r'\s*', ' ', business_name).strip()
+                            
+                            # Parse date_call_received
+                            date_call_received = None
+                            if created:
+                                created_val = created.dt if hasattr(created, 'dt') else created
+                                date_call_received = parse_ics_datetime(created_val)
+                            
+                            # Convert RRULE if present
+                            recurrence_rule = None
+                            if rrule:
+                                rrule_str = str(rrule.to_ical().decode('utf-8'))
+                                recurrence_rule = convert_rrule_to_json(rrule_str)
+                            
+                            # Parse description with AI to extract structured fields (if enabled)
+                            if use_ai_parsing:
+                                parsed_description = parse_description_with_ai(description)
+                            else:
+                                # No AI parsing - use raw description in notes
+                                parsed_description = {
+                                    'trailer_color': '',
+                                    'trailer_serial': '',
+                                    'trailer_details': '',
+                                    'repair_notes': '',
+                                    'quote': None,
+                                    'unparsed_notes': description
+                                }
+                            
+                            # Create Job instance
+                            job = Job(
+                                calendar=target_calendar,
+                                status=job_status,
+                                business_name=business_name[:150] if business_name else '',  # Limit to field max_length
+                                phone=phone[:25] if phone else '',
+                                start_dt=start_dt,
+                                end_dt=end_dt,
+                                all_day=is_all_day,
+                                notes=parsed_description.get('unparsed_notes', description),
+                                repair_notes=parsed_description.get('repair_notes', ''),
+                                trailer_color=parsed_description.get('trailer_color', '')[:60],  # Limit to field max_length
+                                trailer_serial=parsed_description.get('trailer_serial', '')[:120],  # Limit to field max_length
+                                trailer_details=parsed_description.get('trailer_details', '')[:200],  # Limit to field max_length
+                                quote=parsed_description.get('quote'),
+                                date_call_received=date_call_received,
+                                recurrence_rule=recurrence_rule,
+                                import_batch_id=batch_id,  # Track import batch
+                                created_by=request.user if request.user.is_authenticated else None,
+                            )
+                            
+                            # Validate and save
+                            job.full_clean()
+                            job.save()
+                            
+                            imported_count += 1
+                            
+                        except Exception as e:
+                            error_count += 1
+                            event_name = summary if 'summary' in locals() else 'Unknown'
+                            error_msg = f"Event '{event_name}' error: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(f"Import error for UID {uid}: {str(e)}")
+                
+                # Prepare results
+                results = {
+                    'success': True,
+                    'imported': imported_count,
+                    'skipped': skipped_count,
+                    'errors_count': error_count,
+                    'error_details': errors[:20],  # Show first 20 errors
+                    'calendar_name': target_calendar.name
+                }
+                
+                # Debug logging
+                logger.info(f"Import complete: {imported_count} imported, {skipped_count} skipped, {error_count} errors")
+                
+                # Create comprehensive success message
+                message_parts = []
+                message_parts.append(f'✓ Import Complete: {imported_count} event(s) successfully imported to "{target_calendar.name}"')
+                
+                if skipped_count > 0:
+                    message_parts.append(f'{skipped_count} skipped')
+                if error_count > 0:
+                    message_parts.append(f'{error_count} had errors')
+                
+                messages.success(request, ' | '.join(message_parts))
+                
+                # Redirect to calendar to see imported events
+                return redirect('rental_scheduler:calendar')
+                
+            except Exception as e:
+                messages.error(request, f'Failed to import calendar: {str(e)}')
+                logger.error(f"Calendar import error: {str(e)}")
+                # Keep the form with data so user can see what they selected
+                # form already has the POST data from line 1370
+        else:
+            # Form validation failed - show errors to user
+            messages.error(request, 'Please correct the errors below.')
+    else:
+        form = CalendarImportForm()
+    
+    return render(request, 'rental_scheduler/jobs/job_import.html', {
+        'form': form,
+        'title': 'Import Calendar Events'
+    })
+
+
+def import_history(request):
+    """
+    View showing recent calendar imports with ability to revert them.
+    """
+    from django.db.models import Count, Min, Max
+    
+    # Get all import batches with aggregated info
+    imports = (Job.objects
+               .filter(import_batch_id__isnull=False)
+               .values('import_batch_id', 'calendar__name', 'calendar__id')
+               .annotate(
+                   count=Count('id'),
+                   first_date=Min('start_dt'),
+                   last_date=Max('start_dt'),
+                   imported_at=Min('created_at')
+               )
+               .order_by('-imported_at'))
+    
+    return render(request, 'rental_scheduler/jobs/import_history.html', {
+        'imports': imports,
+        'title': 'Import History'
+    })
+
+
+@csrf_protect
+@require_http_methods(["POST"])
+def revert_import(request, batch_id):
+    """
+    Delete all jobs from a specific import batch.
+    """
+    try:
+        # Get all jobs in this batch
+        jobs = Job.objects.filter(import_batch_id=batch_id)
+        count = jobs.count()
+        
+        if count == 0:
+            messages.warning(request, 'No jobs found for this import batch.')
+            return redirect('rental_scheduler:import_history')
+        
+        # Delete all jobs in the batch
+        jobs.delete()
+        
+        messages.success(request, f'Successfully reverted import: {count} job(s) deleted.')
+        logger.info(f"Reverted import batch {batch_id}: {count} jobs deleted")
+        
+    except Exception as e:
+        messages.error(request, f'Failed to revert import: {str(e)}')
+        logger.error(f"Error reverting import {batch_id}: {str(e)}")
+    
+    return redirect('rental_scheduler:import_history')
+
+
+# JSON Export/Import Views
+@require_http_methods(["GET"])
+def export_jobs(request, calendar_id=None):
+    """
+    Export jobs to JSON format for importing into another instance.
+    Optionally filter by calendar_id.
+    """
+    try:
+        # Get jobs to export
+        jobs_qs = Job.objects.filter(is_deleted=False).select_related('calendar')
+        
+        export_source = "all"
+        if calendar_id:
+            calendar = get_object_or_404(Calendar, pk=calendar_id)
+            jobs_qs = jobs_qs.filter(calendar=calendar)
+            export_source = calendar.name
+        
+        # Order by start_dt for consistent export
+        jobs_qs = jobs_qs.order_by('start_dt')
+        
+        # Build export data
+        jobs_data = []
+        parent_id_map = {}  # Map old parent IDs to temporary IDs for import
+        
+        for idx, job in enumerate(jobs_qs):
+            job_dict = {
+                # Basic info
+                'business_name': job.business_name,
+                'contact_name': job.contact_name,
+                'phone': job.phone,
+                
+                # Address
+                'address_line1': job.address_line1,
+                'address_line2': job.address_line2,
+                'city': job.city,
+                'state': job.state,
+                'postal_code': job.postal_code,
+                
+                # Timing
+                'date_call_received': job.date_call_received.isoformat() if job.date_call_received else None,
+                'start_dt': job.start_dt.isoformat(),
+                'end_dt': job.end_dt.isoformat(),
+                'all_day': job.all_day,
+                
+                # Call reminder
+                'has_call_reminder': job.has_call_reminder,
+                'call_reminder_weeks_prior': job.call_reminder_weeks_prior,
+                'call_reminder_completed': job.call_reminder_completed,
+                
+                # Legacy repeat
+                'repeat_type': job.repeat_type,
+                'repeat_n_months': job.repeat_n_months,
+                
+                # Recurring events
+                'recurrence_rule': job.recurrence_rule,
+                'recurrence_original_start': job.recurrence_original_start.isoformat() if job.recurrence_original_start else None,
+                'end_recurrence_date': job.end_recurrence_date.isoformat() if job.end_recurrence_date else None,
+                
+                # Job details
+                'notes': job.notes,
+                'repair_notes': job.repair_notes,
+                
+                # Trailer info
+                'trailer_color': job.trailer_color,
+                'trailer_serial': job.trailer_serial,
+                'trailer_details': job.trailer_details,
+                
+                # Quote
+                'quote': str(job.quote) if job.quote else None,
+                'trailer_color_overwrite': job.trailer_color_overwrite,
+                'quote_text': job.quote_text,
+                
+                # Status
+                'status': job.status,
+            }
+            
+            # Handle recurring parent relationships
+            if job.is_recurring_parent:
+                job_dict['_is_recurring_parent'] = True
+                job_dict['_temp_id'] = f"parent_{idx}"
+                parent_id_map[job.id] = f"parent_{idx}"
+            elif job.is_recurring_instance and job.recurrence_parent_id:
+                job_dict['_is_recurring_instance'] = True
+                # Will be resolved during import
+                if job.recurrence_parent_id in parent_id_map:
+                    job_dict['_parent_temp_id'] = parent_id_map[job.recurrence_parent_id]
+            
+            jobs_data.append(job_dict)
+        
+        # Build the export structure
+        export_data = {
+            'version': '1.0',
+            'exported_at': timezone.now().isoformat(),
+            'export_source': export_source,
+            'job_count': len(jobs_data),
+            'jobs': jobs_data
+        }
+        
+        # Generate filename
+        timestamp = timezone.now().strftime('%Y-%m-%d_%H%M%S')
+        if calendar_id:
+            filename = f"jobs_export_{export_source}_{timestamp}.json"
+        else:
+            filename = f"jobs_export_all_{timestamp}.json"
+        
+        # Create response
+        response = HttpResponse(
+            json.dumps(export_data, indent=2, ensure_ascii=False),
+            content_type='application/json'
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        logger.info(f"Exported {len(jobs_data)} jobs from '{export_source}'")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error exporting jobs: {str(e)}", exc_info=True)
+        messages.error(request, f"Error exporting jobs: {str(e)}")
+        return redirect('rental_scheduler:job_list')
+
+
+@csrf_protect
+def import_jobs_json(request):
+    """
+    Import jobs from JSON export file.
+    Allows user to select target calendar for all imported jobs.
+    """
+    from .forms import JobImportForm
+    
+    if request.method == 'POST':
+        form = JobImportForm(request.POST, request.FILES)
+        
+        if form.is_valid():
+            try:
+                json_file = form.cleaned_data['json_file']
+                target_calendar = form.cleaned_data['target_calendar']
+                
+                # Read and parse JSON
+                json_file.seek(0)
+                content = json_file.read()
+                data = json.loads(content)
+                
+                # Validate version
+                if data.get('version') != '1.0':
+                    messages.warning(request, f"Warning: Export version {data.get('version')} may not be fully compatible.")
+                
+                jobs_data = data.get('jobs', [])
+                if not jobs_data:
+                    messages.warning(request, "No jobs found in the export file.")
+                    return redirect('rental_scheduler:calendar_import')
+                
+                # Generate import batch ID for tracking
+                import uuid
+                batch_id = str(uuid.uuid4())
+                
+                # Import jobs within transaction
+                with transaction.atomic():
+                    imported_count = 0
+                    parent_map = {}  # Map temp IDs to new parent Job instances
+                    jobs_to_link = []  # Store (job, parent_temp_id) tuples for second pass
+                    
+                    # First pass: import all jobs
+                    for job_data in jobs_data:
+                        is_parent = job_data.pop('_is_recurring_parent', False)
+                        is_instance = job_data.pop('_is_recurring_instance', False)
+                        temp_id = job_data.pop('_temp_id', None)
+                        parent_temp_id = job_data.pop('_parent_temp_id', None)
+                        
+                        # Parse datetime fields
+                        if job_data.get('date_call_received'):
+                            job_data['date_call_received'] = datetime.fromisoformat(job_data['date_call_received'])
+                        if job_data.get('start_dt'):
+                            job_data['start_dt'] = datetime.fromisoformat(job_data['start_dt'])
+                        if job_data.get('end_dt'):
+                            job_data['end_dt'] = datetime.fromisoformat(job_data['end_dt'])
+                        if job_data.get('recurrence_original_start'):
+                            job_data['recurrence_original_start'] = datetime.fromisoformat(job_data['recurrence_original_start'])
+                        if job_data.get('end_recurrence_date'):
+                            job_data['end_recurrence_date'] = date.fromisoformat(job_data['end_recurrence_date'])
+                        
+                        # Quote is now a CharField, keep as string
+                        if job_data.get('quote'):
+                            job_data['quote'] = str(job_data['quote'])
+                        
+                        # Create the job
+                        job = Job(
+                            calendar=target_calendar,
+                            import_batch_id=batch_id,
+                            **job_data
+                        )
+                        
+                        # Bypass full_clean during import to avoid validation issues
+                        # Call the parent Model.save() directly instead of Job.save()
+                        models.Model.save(job, force_insert=True)
+                        
+                        imported_count += 1
+                        
+                        # Track parents for second pass
+                        if is_parent and temp_id:
+                            parent_map[temp_id] = job
+                        elif is_instance and parent_temp_id:
+                            # Store for second pass
+                            jobs_to_link.append((job, parent_temp_id))
+                    
+                    # Second pass: link recurring instances to parents
+                    for job, parent_temp_id in jobs_to_link:
+                        if parent_temp_id in parent_map:
+                            parent_job = parent_map[parent_temp_id]
+                            job.recurrence_parent = parent_job
+                            models.Model.save(job, update_fields=['recurrence_parent'])
+                
+                messages.success(
+                    request,
+                    f"Successfully imported {imported_count} job(s) into calendar '{target_calendar.name}'. "
+                    f"Import batch ID: {batch_id[:8]}..."
+                )
+                logger.info(f"Imported {imported_count} jobs from JSON export into calendar '{target_calendar.name}' (batch: {batch_id})")
+                
+                return redirect('rental_scheduler:job_list')
+                
+            except json.JSONDecodeError as e:
+                messages.error(request, f"Invalid JSON file: {str(e)}")
+            except KeyError as e:
+                messages.error(request, f"Missing required field in export data: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error importing jobs from JSON: {str(e)}", exc_info=True)
+                messages.error(request, f"Error importing jobs: {str(e)}")
+    else:
+        form = JobImportForm()
+    
+    context = {
+        'title': 'Import Jobs from JSON',
+        'form': form,
+        'import_type': 'json'
+    }
+    
+    return render(request, 'rental_scheduler/jobs/job_import_json.html', context)

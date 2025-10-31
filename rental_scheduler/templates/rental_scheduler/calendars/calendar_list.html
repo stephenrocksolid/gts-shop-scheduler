@@ -34,10 +34,22 @@
 <div class="container mx-auto px-4 py-8">
     <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
-        <a href="{% url 'rental_scheduler:calendar_create' %}" 
-           class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200">
-            <i class="fas fa-plus mr-2"></i>Add Calendar
-        </a>
+        <div class="flex gap-3">
+            <a href="{% url 'rental_scheduler:calendar' %}" 
+               class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200 flex items-center">
+                <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+                </svg>
+                View Calendar
+            </a>
+            <a href="{% url 'rental_scheduler:calendar_create' %}" 
+               class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200 flex items-center">
+                <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"></path>
+                </svg>
+                Add Calendar
+            </a>
+        </div>
     </div>
 
     {% if calendars %}
@@ -50,7 +62,10 @@
                                 Calendar
                             </th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Color
+                                Calendar Color
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Reminder Color
                             </th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Status
@@ -73,7 +88,16 @@
                                 </div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-gray-900">{{ calendar.color }}</div>
+                                <div class="flex items-center">
+                                    <span class="calendar-color" style="background-color: {{ calendar.color }};"></span>
+                                    <div class="text-sm text-gray-900">{{ calendar.color }}</div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="flex items-center">
+                                    <span class="calendar-color" style="background-color: {{ calendar.call_reminder_color }};"></span>
+                                    <div class="text-sm text-gray-900">{{ calendar.call_reminder_color }}</div>
+                                </div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 {% if calendar.is_active %}
@@ -86,15 +110,30 @@
                                 {{ calendar.created_at|date:"M j, Y" }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <div class="flex justify-end space-x-2">
+                                <div class="flex justify-end gap-2">
+                                    <a href="{% url 'rental_scheduler:job_export_calendar' calendar.pk %}" 
+                                       class="inline-flex items-center px-3 py-1.5 border border-purple-600 text-purple-600 rounded-lg hover:bg-purple-50 transition duration-200 text-sm font-medium"
+                                       title="Export jobs from this calendar">
+                                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 11l3 3m0 0l3-3m-3 3V8"></path>
+                                        </svg>
+                                        Export
+                                    </a>
                                     <a href="{% url 'rental_scheduler:calendar_update' calendar.pk %}" 
-                                       class="text-indigo-600 hover:text-indigo-900 transition duration-200">
-                                        <i class="fas fa-edit"></i>
+                                       class="inline-flex items-center px-3 py-1.5 border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition duration-200 text-sm font-medium">
+                                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                        </svg>
+                                        Edit
                                     </a>
-                                    <a href="{% url 'rental_scheduler:calendar_delete' calendar.pk %}" 
-                                       class="text-red-600 hover:text-red-900 transition duration-200">
-                                        <i class="fas fa-trash"></i>
-                                    </a>
+                                    <button type="button"
+                                       onclick="confirmDelete({{ calendar.pk }}, '{{ calendar.name|escapejs }}')"
+                                       class="inline-flex items-center px-3 py-1.5 border border-red-600 text-red-600 rounded-lg hover:bg-red-50 transition duration-200 text-sm font-medium">
+                                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                        </svg>
+                                        Delete
+                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -119,3 +158,12 @@
 </div>
 {% endblock %}
 
+{% block extra_js %}
+<script>
+    function confirmDelete(calendarId, calendarName) {
+        if (confirm(`Are you sure you want to delete the calendar "${calendarName}"?\n\nThis will also delete all jobs associated with this calendar. This action cannot be undone.`)) {
+            window.location.href = `/calendars/${calendarId}/delete/`;
+        }
+    }
+</script>
+{% endblock %}

@@ -90,6 +90,41 @@
                     {% endif %}
                 </div>
 
+                <!-- Call Reminder Color Field -->
+                <div>
+                    <label for="{{ form.call_reminder_color.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-2">
+                        Call Reminder Color *
+                    </label>
+                    <div class="color-input">
+                        <input type="color" 
+                               name="{{ form.call_reminder_color.name }}" 
+                               id="{{ form.call_reminder_color.id_for_label }}"
+                               value="{{ form.call_reminder_color.value|default:'#F59E0B' }}"
+                               class="w-16 h-10 border border-gray-300 rounded-md cursor-pointer"
+                               required>
+                        <span class="color-preview" id="call-reminder-color-preview"></span>
+                        <input type="text" 
+                               value="{{ form.call_reminder_color.value|default:'#F59E0B' }}"
+                               class="ml-3 flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="#F59E0B"
+                               id="call-reminder-color-text"
+                               pattern="^#[0-9A-Fa-f]{6}$"
+                               title="Enter a valid hex color code (e.g., #F59E0B)">
+                    </div>
+                    {% if form.call_reminder_color.errors %}
+                        <div class="mt-1 text-sm text-red-600">
+                            {% for error in form.call_reminder_color.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    {% if form.call_reminder_color.help_text %}
+                        <p class="mt-1 text-sm text-gray-500">{{ form.call_reminder_color.help_text }}</p>
+                    {% else %}
+                        <p class="mt-1 text-sm text-gray-500">Color for call reminder events on the calendar</p>
+                    {% endif %}
+                </div>
+
                 <!-- Active Status Field -->
                 <div>
                     <div class="flex items-center">
@@ -132,6 +167,7 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Calendar color picker
     const colorInput = document.getElementById('{{ form.color.id_for_label }}');
     const colorText = document.getElementById('color-text');
     const colorPreview = document.getElementById('color-preview');
@@ -154,6 +190,30 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize preview with the form's default value
     const initialColor = '{{ form.color.value|default:"#3B82F6" }}';
     colorPreview.style.backgroundColor = initialColor;
+    
+    // Call reminder color picker
+    const callReminderColorInput = document.getElementById('{{ form.call_reminder_color.id_for_label }}');
+    const callReminderColorText = document.getElementById('call-reminder-color-text');
+    const callReminderColorPreview = document.getElementById('call-reminder-color-preview');
+    
+    // Update text input and preview when color picker changes
+    callReminderColorInput.addEventListener('input', function() {
+        callReminderColorText.value = this.value;
+        callReminderColorPreview.style.backgroundColor = this.value;
+    });
+    
+    // Update color picker and preview when text input changes
+    callReminderColorText.addEventListener('input', function() {
+        const value = this.value;
+        if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+            callReminderColorInput.value = value;
+            callReminderColorPreview.style.backgroundColor = value;
+        }
+    });
+    
+    // Initialize preview with the form's default value
+    const initialCallReminderColor = '{{ form.call_reminder_color.value|default:"#F59E0B" }}';
+    callReminderColorPreview.style.backgroundColor = initialCallReminderColor;
 });
 </script>
 {% endblock %}

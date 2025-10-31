@@ -652,5 +652,49 @@
     }
 }
 
+/* ===== JOB WORKSPACE TAB BAR ===== */
+/* Additional workspace-specific styles that complement workspace_bar.html */
+
+/* Ensure workspace tabs are visible and properly styled */
+.workspace-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.workspace-tab.active {
+    background: #eff6ff;
+    border: 2px solid #3b82f6;
+}
+
+.workspace-tab.minimized {
+    opacity: 0.6;
+}
+
+.workspace-tab:hover {
+    background: #f3f4f6;
+}
+
+.workspace-tab-close {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.workspace-tab:hover .workspace-tab-close {
+    opacity: 1;
+}
+
+/* Ensure workspace bar doesn't interfere with other content */
+body {
+    padding-bottom: 0;
+}
+
+body.workspace-active {
+    padding-bottom: 28px; /* Reserve space for workspace bar when visible */
+}
 
 

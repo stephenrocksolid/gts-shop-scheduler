@@ -7,6 +7,8 @@ Django==5.2.5
 django-htmx==1.23.0
 fonttools==4.59.0
 html5lib==1.1
+icalendar==6.1.0
+openai==1.58.1
 pillow==11.3.0
 psycopg2-binary==2.9.10
 pycparser==2.22

@@ -295,6 +295,9 @@
 /* ===== CALENDAR EVENT STYLES ===== */
 .fc-event {
     @apply cursor-pointer transition-all duration-200 select-none;
+    /* Prevent text overflow into adjacent cells - cut off cleanly at boundary */
+    overflow: hidden !important;
+    white-space: nowrap !important;
 }
 
 .fc-event:hover {
@@ -351,19 +354,39 @@
 /* Calendar Grid */
 .fc-daygrid-day {
     @apply min-h-[100px];
+    /* Removed overflow: hidden to allow multi-day events to span across days */
 }
 
 .fc-daygrid-day-number {
     @apply text-sm;
 }
 
+/* Allow event harness and container to span multiple days for multi-day events */
+.fc-daygrid-day-events {
+    /* Removed overflow: hidden to allow multi-day events to span */
+}
+
+/* Allow event harness to span multiple days for multi-day events */
+.fc-daygrid-event-harness {
+    /* Removed overflow: hidden to allow multi-day events to span */
+}
+
+/* Prevent event CONTENT from overflowing within the event box */
+.fc-daygrid-event {
+    overflow: hidden !important;
+    white-space: nowrap !important;
+}
+
 /* Calendar Event Content */
 .fc-event-title {
-    @apply font-medium truncate;
+    @apply font-medium;
     display: inline !important;
     vertical-align: baseline;
     font-size: 0.75rem;
     line-height: 1.2;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    max-width: 100% !important;
 }
 
 .fc-event-time {
@@ -374,6 +397,8 @@
     vertical-align: baseline;
     font-size: 0.75rem;
     line-height: 1.2;
+    overflow: hidden !important;
+    white-space: nowrap !important;
 }
 
 /* Force event times to be visible in month view */
@@ -401,12 +426,16 @@
     display: block !important;
     padding: 2px;
     line-height: 1.2;
+    overflow: hidden !important;
+    white-space: nowrap !important;
 }
 
 .fc-daygrid-event .fc-event-main-frame {
     display: block !important;
     width: 100%;
     line-height: 1.2;
+    overflow: hidden !important;
+    white-space: nowrap !important;
 }
 
 /* Custom event styling to ensure visibility */

@@ -1,0 +1,234 @@
+{% comment %}
+Job Workspace Bar - Bottom tab bar for managing open jobs
+Shows tabs for each open job, allows switching between them
+{% endcomment %}
+
+<div id="workspace-bar" class="workspace-bar hidden">
+    <div class="workspace-container">
+        <div class="workspace-header">
+            <span class="workspace-title">Open Jobs</span>
+        </div>
+        <div id="workspace-tabs" class="workspace-tabs">
+            <!-- Tabs will be dynamically added here by workspace.js -->
+        </div>
+    </div>
+</div>
+
+<style>
+/* Workspace Bar Styles */
+.workspace-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    background: #ffffff;
+    border-top: 2px solid #e5e7eb;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
+}
+
+.workspace-bar.hidden {
+    display: none;
+}
+
+.workspace-container {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 12px;
+    gap: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.workspace-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.workspace-container::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+
+.workspace-container::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+}
+
+.workspace-container::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.workspace-header {
+    flex-shrink: 0;
+    padding-right: 12px;
+    border-right: 1px solid #e5e7eb;
+}
+
+.workspace-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.workspace-tabs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Workspace Tab */
+.workspace-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #f8fafc;
+    border: 2px solid transparent;
+    min-width: 100px;
+    max-width: 180px;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.workspace-tab:hover {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+}
+
+.workspace-tab.active {
+    background: #eff6ff;
+    border-color: #3b82f6;
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.1);
+}
+
+.workspace-tab.minimized {
+    opacity: 0.6;
+    background: #ffffff;
+}
+
+.workspace-tab.minimized:hover {
+    opacity: 0.8;
+}
+
+/* Color indicator */
+.workspace-tab-color {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1.5px solid #ffffff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Customer name */
+.workspace-tab-name {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 500;
+    color: #374151;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.workspace-tab.active .workspace-tab-name {
+    color: #1e40af;
+    font-weight: 600;
+}
+
+/* Close button */
+.workspace-tab-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    opacity: 0;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.workspace-tab:hover .workspace-tab-close {
+    opacity: 1;
+}
+
+.workspace-tab-close:hover {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.workspace-tab-close:active {
+    background: #fecaca;
+}
+
+/* Close All button */
+.workspace-close-all {
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+    color: #6b7280;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.workspace-close-all:hover {
+    background: #fee2e2;
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+.workspace-close-all:active {
+    background: #fecaca;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .workspace-container {
+        padding: 0 8px;
+        height: 24px;
+    }
+    
+    .workspace-header {
+        display: none; /* Hide "Open Jobs" label on mobile */
+    }
+    
+    .workspace-tab {
+        min-width: 80px;
+        max-width: 140px;
+        padding: 3px 6px;
+        gap: 4px;
+    }
+    
+    .workspace-tab-name {
+        font-size: 10px;
+    }
+    
+    .workspace-tab-color {
+        width: 8px;
+        height: 8px;
+    }
+}
+</style>
+

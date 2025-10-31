@@ -33,14 +33,7 @@ rental_scheduler/templates/
     │   ├── job_row.html
     │   └── work_order_line.html
     ├── jobs/                          # Job-related templates
-    │   ├── _job_modal_detail.html
-    │   ├── _job_modal_edit.html
-    │   ├── job_detail.html
-    │   ├── job_detail_simple.html
-    │   ├── job_form.html
-    │   ├── job_form_clean.html       # Clean version using new layout
     │   ├── job_list.html
-    │   ├── job_list_clean.html       # Clean version using new layout
     │   ├── job_print_invoice.html
     │   ├── job_print_wo_customer.html
     │   └── job_print_wo.html
@@ -87,10 +80,9 @@ rental_scheduler/templates/
 ## Naming Conventions
 
 ### File Naming
-- Use lowercase with underscores: `job_detail.html`
-- Use descriptive names: `job_form.html` not `form.html`
-- Prefix modal templates with underscore: `_job_modal_detail.html`
-- Use `_clean.html` suffix for templates using new layout system
+- Use lowercase with underscores: `job_list.html`
+- Use descriptive names: `job_list.html` not `list.html`
+- Prefix partial templates with underscore: `_job_form_partial.html`
 
 ### Template Blocks
 - Use descriptive block names: `{% block page_title %}`

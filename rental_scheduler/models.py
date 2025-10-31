@@ -33,6 +33,11 @@ class Calendar(models.Model):
         default="#3B82F6",  # Default blue color
         help_text="CSS hex color code for calendar display (e.g., #3B82F6)"
     )
+    call_reminder_color = models.CharField(
+        max_length=7,  # CSS hex color code (#RRGGBB)
+        default="#F59E0B",  # Default amber/orange color for reminders
+        help_text="CSS hex color code for call reminder events (e.g., #F59E0B)"
+    )
     is_active = models.BooleanField(
         default=True,
         help_text="Whether this calendar is active and visible"
@@ -80,8 +85,10 @@ class Job(models.Model):
     """
     # Status choices for job tracking
     STATUS_CHOICES = [
+        ('pending', 'Pending'),
         ('uncompleted', 'Uncompleted'),
         ('completed', 'Completed'),
+        ('canceled', 'Canceled'),
     ]
     
     # Repeat type choices for recurring jobs
@@ -166,6 +173,22 @@ class Job(models.Model):
         help_text="Whether this is an all-day event"
     )
     
+    # Call reminder functionality
+    has_call_reminder = models.BooleanField(
+        default=False,
+        help_text="Whether this job has a call reminder"
+    )
+    call_reminder_weeks_prior = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        choices=[(2, '1 week prior'), (3, '2 weeks prior')],
+        help_text="How many weeks before the job to show the call reminder"
+    )
+    call_reminder_completed = models.BooleanField(
+        default=False,
+        help_text="Whether the call reminder has been completed"
+    )
+    
     # Repeat functionality
     repeat_type = models.CharField(
         max_length=40,
@@ -178,6 +201,31 @@ class Job(models.Model):
         null=True,
         blank=True,
         help_text="Number of months between repeats (for 'Every N Months' type)"
+    )
+    
+    # Recurring event support (Google Calendar-like)
+    recurrence_rule = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="JSON storing recurrence rule: {type: monthly/yearly, interval: N, count: X, until_date: YYYY-MM-DD}"
+    )
+    recurrence_parent = models.ForeignKey(
+        'self',
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
+        related_name='recurrence_instances',
+        help_text="Parent job if this is a recurring instance"
+    )
+    recurrence_original_start = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Original start date for this recurrence instance"
+    )
+    end_recurrence_date = models.DateField(
+        blank=True,
+        null=True,
+        help_text="Date after which no more recurrences should be generated"
     )
     
     # Job details
@@ -208,12 +256,11 @@ class Job(models.Model):
     )
     
     # Quote field
-    quote = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        null=True,
+    quote = models.CharField(
+        max_length=100,
         blank=True,
-        help_text="Quote amount for the job"
+        default='',
+        help_text="Quote amount or text for the job"
     )
     trailer_color_overwrite = models.CharField(
         max_length=7,  # CSS hex color code
@@ -246,6 +293,13 @@ class Job(models.Model):
         related_name='updated_jobs',
         help_text="User who last updated this job"
     )
+    import_batch_id = models.CharField(
+        max_length=36,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="UUID for batch import tracking - allows reverting imports"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -259,6 +313,7 @@ class Job(models.Model):
             models.Index(fields=['status', 'start_dt']),
             models.Index(fields=['is_deleted']),
             models.Index(fields=['repeat_type']),
+            models.Index(fields=['recurrence_parent', 'recurrence_original_start'], name='job_recur_idx'),
         ]
     
     def __str__(self):
@@ -365,10 +420,18 @@ class Job(models.Model):
         
         # Validate dates
         if self.start_dt and self.end_dt:
-            if self.start_dt >= self.end_dt:
-                raise ValidationError({
-                    'end_dt': 'End date must be after start date'
-                })
+            # For all-day events, allow same day (start_dt == end_dt)
+            if self.all_day:
+                if self.start_dt > self.end_dt:
+                    raise ValidationError({
+                        'end_dt': 'End date cannot be before start date'
+                    })
+            else:
+                # For timed events, end must be strictly after start
+                if self.start_dt >= self.end_dt:
+                    raise ValidationError({
+                        'end_dt': 'End date/time must be after start date/time'
+                    })
         
         # Validate repeat settings
         if self.repeat_type == 'monthly' and self.repeat_n_months:
@@ -385,10 +448,142 @@ class Job(models.Model):
                 'trailer_color_overwrite': 'Color override must be a valid CSS hex color code starting with #'
             })
     
+    # Recurring event methods
+    @property
+    def is_recurring_parent(self):
+        """Check if this job is a parent of recurring instances"""
+        return self.recurrence_rule is not None and self.recurrence_parent is None
+    
+    @property
+    def is_recurring_instance(self):
+        """Check if this job is an instance of a recurring event"""
+        return self.recurrence_parent is not None
+    
+    def create_recurrence_rule(self, recurrence_type, interval=1, count=None, until_date=None):
+        """
+        Create a recurrence rule for this job.
+        
+        Args:
+            recurrence_type: 'monthly', 'yearly', 'weekly', or 'daily'
+            interval: How often to repeat (e.g., every 2 months)
+            count: Maximum number of occurrences
+            until_date: Don't create occurrences after this date
+        """
+        self.recurrence_rule = {
+            'type': recurrence_type,
+            'interval': interval,
+            'count': count,
+            'until_date': until_date.isoformat() if until_date else None,
+        }
+        self.save(update_fields=['recurrence_rule'])
+    
+    def generate_recurring_instances(self, count=None, until_date=None):
+        """
+        Generate recurring instances for this parent job.
+        
+        Args:
+            count: Maximum number of instances to generate
+            until_date: Don't generate beyond this date
+            
+        Returns:
+            List of created Job instances
+        """
+        from rental_scheduler.utils.recurrence import create_recurring_instances
+        return create_recurring_instances(self, count=count, until_date=until_date)
+    
+    def delete_recurring_instances(self, after_date=None):
+        """
+        Delete all recurring instances.
+        
+        Args:
+            after_date: Only delete instances after this date
+            
+        Returns:
+            Number of instances deleted
+        """
+        from rental_scheduler.utils.recurrence import delete_recurring_instances
+        return delete_recurring_instances(self, after_date=after_date)
+    
+    def cancel_future_recurrences(self, from_date):
+        """
+        Cancel all future recurrences starting from a given date.
+        
+        Args:
+            from_date: Date to start canceling from
+            
+        Returns:
+            Tuple of (instances_canceled, parent_updated)
+        """
+        from rental_scheduler.utils.recurrence import cancel_future_recurrences
+        return cancel_future_recurrences(self, from_date)
+    
+    def update_recurring_instances(self, update_type='all', after_date=None, fields_to_update=None):
+        """
+        Update recurring instances based on changes to this parent.
+        
+        Args:
+            update_type: 'all' or 'future'
+            after_date: For 'future', update instances after this date
+            fields_to_update: Dict of fields to update
+            
+        Returns:
+            Number of instances updated
+        """
+        from rental_scheduler.utils.recurrence import update_recurring_instances
+        return update_recurring_instances(
+            self, 
+            update_type=update_type, 
+            after_date=after_date, 
+            fields_to_update=fields_to_update
+        )
+    
     def save(self, *args, **kwargs):
         """Save the job with validation"""
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class CallReminder(models.Model):
+    """
+    Standalone or job-linked call reminders that appear on Sundays.
+    Can be independent reminders or linked to specific jobs.
+    """
+    job = models.ForeignKey(
+        'Job',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='call_reminders',
+        help_text="Optional link to a job (null for standalone reminders)"
+    )
+    calendar = models.ForeignKey(
+        'Calendar',
+        on_delete=models.CASCADE,
+        help_text="Calendar this reminder belongs to"
+    )
+    reminder_date = models.DateField(
+        help_text="The Sunday this reminder appears on"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Notes about this call reminder"
+    )
+    completed = models.BooleanField(
+        default=False,
+        help_text="Whether this reminder has been completed"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['reminder_date', '-created_at']
+        verbose_name = 'Call Reminder'
+        verbose_name_plural = 'Call Reminders'
+    
+    def __str__(self):
+        if self.job:
+            return f"Call Reminder for {self.job.business_name} on {self.reminder_date}"
+        return f"Call Reminder on {self.reminder_date}"
 
 
 class WorkOrder(models.Model):

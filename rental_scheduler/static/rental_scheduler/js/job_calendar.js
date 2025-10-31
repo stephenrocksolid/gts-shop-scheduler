@@ -6,11 +6,6 @@
 
 (function () {
     'use strict';
-    
-    // Debug: Confirm this version is loaded
-    console.log('🚀 JobCalendar: Loading version 3.0 with calendar color coding - TIMESTAMP: ' + new Date().toISOString());
-    console.log('🎨 This version includes CALENDAR-BASED COLOR CODING!');
-    console.log('🔥 NEW FILE: calendar_main.js - Cache busting complete!');
 
     class JobCalendar {
         constructor() {
@@ -48,7 +43,8 @@
             this.initializeElements();
             this.setupCalendar();
             this.setupEventListeners();
-            this.loadCalendarData();
+            // Note: No need to call loadCalendarData() here - FullCalendar automatically
+            // fetches events on initial render via the 'events' property
         }
 
         /**
@@ -72,12 +68,13 @@
             }
 
             this.calendar = new FullCalendar.Calendar(this.calendarEl, {
+                timeZone: 'local',  // Use local timezone to prevent UTC midnight shift
                 initialView: 'monthSlidingWeek',
                 initialDate: this.getSavedDate() || '2025-09-01',
                 headerToolbar: {
-                    left: '',
-                    center: 'prev title next',
-                    right: 'searchButton jobsButton settingsButton'
+                    left: 'prev title next',
+                    center: '',
+                    right: 'jobsButton settingsButton'
                 },
                 buttonText: {
                     today: 'Today'
@@ -92,17 +89,11 @@
                         fixedWeekCount: false,
                         showNonCurrentDates: true,
                         titleFormat: { month: 'short', day: 'numeric' },
-                        titleRangeSeparator: ' – '
+                        titleRangeSeparator: ' – ',
+                        displayEventEnd: true  // Show end time/date for multi-day events
                     }
                 },
                 customButtons: {
-                    searchButton: {
-                        text: 'Search',
-                        click: function() {
-                            // TODO: Implement search functionality
-                            console.log('Search clicked');
-                        }
-                    },
                     jobsButton: {
                         text: 'Jobs',
                         click: function() {
@@ -144,8 +135,10 @@
                 dayMaxEvents: true,
                 moreLinkClick: 'popover',
                 eventDisplay: 'block',
+                nextDayThreshold: '00:00:00',  // Events that end at midnight or later span to next day
                 eventClassNames: this.getEventClassNames.bind(this),
                 eventContent: this.renderEventContent.bind(this),
+                dayCellContent: this.renderDayCellContent.bind(this),
                 // Hook calendar events to update Today panel and save position
                 eventsSet: () => {
                     this.renderTodayPanel();
@@ -161,7 +154,9 @@
                 },
                 eventAdd: () => this.renderTodayPanel(),
                 eventChange: () => this.renderTodayPanel(),
-                eventRemove: () => this.renderTodayPanel()
+                eventRemove: () => this.renderTodayPanel(),
+                eventMouseEnter: this.handleEventMouseEnter.bind(this),
+                eventMouseLeave: this.handleEventMouseLeave.bind(this)
             });
 
             this.calendar.render();
@@ -218,20 +213,13 @@
             const headerRow = document.querySelector('.fc-col-header');
             if (!headerRow) return;
             
-            // Find all header cells
+            // Find all header cells and make them all equal width
             const headerCells = headerRow.querySelectorAll('th');
-            headerCells.forEach((cell, index) => {
-                if (index === 0) {
-                    // First cell (Sunday) - make it half width
-                    cell.style.width = '7.14%';
-                    cell.style.minWidth = '7.14%';
-                    cell.style.maxWidth = '7.14%';
-                } else {
-                    // Other days - make them wider
-                    cell.style.width = '15.48%';
-                    cell.style.minWidth = '15.48%';
-                    cell.style.maxWidth = '15.48%';
-                }
+            headerCells.forEach((cell) => {
+                // All days equal width (100% / 7 days = 14.29%)
+                cell.style.width = '14.29%';
+                cell.style.minWidth = '14.29%';
+                cell.style.maxWidth = '14.29%';
             });
         }
 
@@ -380,15 +368,38 @@
                     <div><span class="today-item-time">${timeStr}</span>
                     <span class="today-item-title">${ev.title || '(no title)'}</span></div>
                 `;
+                
+                // Add click handler
                 item.addEventListener('click', () => {
-                    this.calendar.gotoDate(ev.start || new Date());
-                    // optional: highlight after render
-                    setTimeout(() => {
-                        const el = this.calendar.el.querySelector('[data-event-id="' + (ev.id || '') + '"]');
-                        el?.classList.add('ring-2'); 
-                        setTimeout(() => el?.classList.remove('ring-2'), 1200);
-                    }, 30);
+                    // Open job edit form when clicking on today sidebar event
+                    const extendedProps = ev.extendedProps || {};
+                    const jobId = extendedProps.job_id;
+                    
+                    if (jobId && window.JobPanel) {
+                        window.JobPanel.setTitle('Edit Job');
+                        window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                    } else {
+                        console.error('JobPanel not available or job ID missing for event:', ev.id);
+                        // Fallback: navigate to the date
+                        this.calendar.gotoDate(ev.start || new Date());
+                        // optional: highlight after render
+                        setTimeout(() => {
+                            const el = this.calendar.el.querySelector('[data-event-id="' + (ev.id || '') + '"]');
+                            el?.classList.add('ring-2'); 
+                            setTimeout(() => el?.classList.remove('ring-2'), 1200);
+                        }, 30);
+                    }
                 });
+                
+                // Add hover tooltip for today sidebar items
+                item.addEventListener('mouseenter', (e) => {
+                    this.showEventTooltip(ev, e.target);
+                });
+                
+                item.addEventListener('mouseleave', () => {
+                    this.hideEventTooltip();
+                });
+                
                 listEl.appendChild(item);
             }
         }
@@ -471,7 +482,7 @@
         }
 
         /**
-         * Adjust Sunday column width to be half of other days
+         * Adjust all day column widths to be equal
          */
         adjustSundayColumnWidth() {
             // Find the table body
@@ -483,33 +494,21 @@
             
             rows.forEach(row => {
                 const cells = row.querySelectorAll('td');
-                cells.forEach((cell, index) => {
-                    if (index === 0) {
-                        // First cell (Sunday) - make it half width
-                        cell.style.width = '7.14%';
-                        cell.style.minWidth = '7.14%';
-                        cell.style.maxWidth = '7.14%';
-                    } else {
-                        // Other days - make them wider
-                        cell.style.width = '15.48%';
-                        cell.style.minWidth = '15.48%';
-                        cell.style.maxWidth = '15.48%';
-                    }
+                cells.forEach((cell) => {
+                    // All days equal width (100% / 7 days = 14.29%)
+                    cell.style.width = '14.29%';
+                    cell.style.minWidth = '14.29%';
+                    cell.style.maxWidth = '14.29%';
                 });
             });
             
             // Also target the day columns directly
             const dayColumns = document.querySelectorAll('.fc-daygrid-day');
             dayColumns.forEach(column => {
-                if (column.classList.contains('fc-day-sun')) {
-                    column.style.width = '7.14%';
-                    column.style.minWidth = '7.14%';
-                    column.style.maxWidth = '7.14%';
-                } else {
-                    column.style.width = '15.48%';
-                    column.style.minWidth = '15.48%';
-                    column.style.maxWidth = '15.48%';
-                }
+                // All days equal width (100% / 7 days = 14.29%)
+                column.style.width = '14.29%';
+                column.style.minWidth = '14.29%';
+                column.style.maxWidth = '14.29%';
             });
         }
 
@@ -565,16 +564,16 @@
                 gap: 8px;
             `;
 
-            // Create Jump to Date label
-            const dateLabel = document.createElement('label');
-            dateLabel.setAttribute('for', 'jump-to-date');
-            dateLabel.textContent = 'Jump to date';
-            dateLabel.style.cssText = `
-                font-size: 14px;
-                color: #666;
-                white-space: nowrap;
-                cursor: pointer;
-            `;
+            // Create Jump to Date label - REMOVED
+            // const dateLabel = document.createElement('label');
+            // dateLabel.setAttribute('for', 'jump-to-date');
+            // dateLabel.textContent = 'Jump to date';
+            // dateLabel.style.cssText = `
+            //     font-size: 14px;
+            //     color: #666;
+            //     white-space: nowrap;
+            //     cursor: pointer;
+            // `;
 
             // Create Jump to Date input
             const dateInput = document.createElement('input');
@@ -613,6 +612,65 @@
                 dateInput.style.boxShadow = 'none';
             });
 
+            // Create Today button
+            const todayButton = document.createElement('button');
+            todayButton.type = 'button';
+            todayButton.title = 'Jump to Today';
+            todayButton.style.cssText = `
+                height: 36px;
+                width: 36px;
+                padding: 0;
+                border-radius: 6px;
+                border: 1px solid #d1d5db;
+                background: #ffffff;
+                color: #374151;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            `;
+
+            // Add calendar icon SVG
+            todayButton.innerHTML = `
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+            `;
+
+            // Add hover styles for today button
+            todayButton.addEventListener('mouseenter', () => {
+                todayButton.style.borderColor = '#3b82f6';
+                todayButton.style.backgroundColor = '#eff6ff';
+                todayButton.style.color = '#3b82f6';
+            });
+            todayButton.addEventListener('mouseleave', () => {
+                todayButton.style.borderColor = '#d1d5db';
+                todayButton.style.backgroundColor = '#ffffff';
+                todayButton.style.color = '#374151';
+            });
+
+            // Add click handler to jump to today
+            todayButton.addEventListener('click', () => {
+                const today = new Date();
+                this.calendar.gotoDate(today);
+                
+                // Update the date input
+                const fmt = (d) => {
+                    const pad = (n) => String(n).padStart(2, '0');
+                    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+                };
+                dateInput.value = fmt(today);
+                
+                // Update URL param
+                const sp = new URLSearchParams(window.location.search);
+                sp.set('date', fmt(today));
+                history.replaceState({}, '', `${location.pathname}?${sp.toString()}`);
+            });
+
             // Create Calendar dropdown section
             const calendarSection = document.createElement('div');
             calendarSection.style.cssText = `
@@ -621,59 +679,8 @@
                 gap: 8px;
             `;
 
-            // Create Calendar label
-            const calendarLabel = document.createElement('label');
-            calendarLabel.setAttribute('for', 'calendar-filter-moved');
-            calendarLabel.textContent = 'Calendar';
-            calendarLabel.style.cssText = `
-                font-size: 14px;
-                color: #666;
-                white-space: nowrap;
-                cursor: pointer;
-            `;
-
-            // Create Calendar dropdown
-            const calendarDropdown = document.createElement('select');
-            calendarDropdown.id = 'calendar-filter-moved';
-            calendarDropdown.style.cssText = `
-                height: 36px;
-                min-width: 140px;
-                border-radius: 6px;
-                border: 1px solid #d1d5db;
-                padding: 0 12px;
-                font-size: 14px;
-                color: #374151;
-                background: #ffffff;
-                cursor: pointer;
-                transition: border-color 0.2s ease;
-            `;
-
-            // Build calendar options
-            let calendarOptions = '<option value="">All Calendars</option>';
-                    if (window.calendarConfig?.calendars && Array.isArray(window.calendarConfig.calendars)) {
-                calendarOptions += window.calendarConfig.calendars.map(cal => 
-                            `<option value="${cal.id}">${cal.name}</option>`
-                        ).join('');
-                    }
-            calendarDropdown.innerHTML = calendarOptions;
-
-            // Add hover and focus styles for calendar dropdown
-            calendarDropdown.addEventListener('mouseenter', () => {
-                calendarDropdown.style.borderColor = '#9ca3af';
-            });
-            calendarDropdown.addEventListener('mouseleave', () => {
-                if (document.activeElement !== calendarDropdown) {
-                    calendarDropdown.style.borderColor = '#d1d5db';
-                }
-            });
-            calendarDropdown.addEventListener('focus', () => {
-                calendarDropdown.style.borderColor = '#3b82f6';
-                calendarDropdown.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-            });
-            calendarDropdown.addEventListener('blur', () => {
-                calendarDropdown.style.borderColor = '#d1d5db';
-                calendarDropdown.style.boxShadow = 'none';
-            });
+            // Create Calendar multi-select button and popover
+            const calendarMultiSelect = this.createCalendarMultiSelect();
 
             // Create Status dropdown section
             const statusSection = document.createElement('div');
@@ -683,16 +690,16 @@
                 gap: 8px;
             `;
 
-            // Create Status label
-            const statusLabel = document.createElement('label');
-            statusLabel.setAttribute('for', 'status-filter-moved');
-            statusLabel.textContent = 'Status';
-            statusLabel.style.cssText = `
-                        font-size: 14px;
-                color: #666;
-                white-space: nowrap;
-                        cursor: pointer;
-            `;
+            // Create Status label - REMOVED
+            // const statusLabel = document.createElement('label');
+            // statusLabel.setAttribute('for', 'status-filter-moved');
+            // statusLabel.textContent = 'Status';
+            // statusLabel.style.cssText = `
+            //             font-size: 14px;
+            //     color: #666;
+            //     white-space: nowrap;
+            //             cursor: pointer;
+            // `;
 
             // Create Status dropdown
             const statusDropdown = document.createElement('select');
@@ -736,11 +743,12 @@
             });
 
             // Assemble the sections
-            jumpToDateSection.appendChild(dateLabel);
+            // jumpToDateSection.appendChild(dateLabel); // Label removed
             jumpToDateSection.appendChild(dateInput);
-            calendarSection.appendChild(calendarLabel);
-            calendarSection.appendChild(calendarDropdown);
-            statusSection.appendChild(statusLabel);
+            jumpToDateSection.appendChild(todayButton);
+            // calendarSection.appendChild(calendarLabel); // Label removed
+            calendarSection.appendChild(calendarMultiSelect);
+            // statusSection.appendChild(statusLabel); // Label removed
             statusSection.appendChild(statusDropdown);
             
             controlsContainer.appendChild(jumpToDateSection);
@@ -751,11 +759,283 @@
             // Initialize the jump to date functionality
             this.initializeJumpToDate(dateInput);
 
-            // Initialize the calendar dropdown functionality
-            this.initializeMovedCalendarDropdown(calendarDropdown);
+            // Calendar multi-select is initialized within createCalendarMultiSelect()
 
             // Initialize the status dropdown functionality
             this.initializeMovedStatusDropdown(statusDropdown);
+        }
+
+        /**
+         * Create calendar multi-select checkbox UI
+         */
+        createCalendarMultiSelect() {
+            const container = document.createElement('div');
+            container.style.cssText = 'position: relative; display: inline-block;';
+            
+            // Create button
+            const button = document.createElement('button');
+            button.id = 'calendar-multi-select-button';
+            button.type = 'button';
+            button.style.cssText = `
+                height: 36px;
+                min-width: 140px;
+                border-radius: 6px;
+                border: 1px solid #d1d5db;
+                padding: 0 32px 0 12px;
+                font-size: 14px;
+                color: #374151;
+                background: #ffffff;
+                cursor: pointer;
+                transition: border-color 0.2s ease;
+                text-align: left;
+                position: relative;
+                white-space: nowrap;
+            `;
+            
+            // Add dropdown arrow
+            button.innerHTML = `
+                <span id="calendar-button-text">All Calendars</span>
+                <svg style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; pointer-events: none;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+            `;
+            
+            // Create popover
+            const popover = document.createElement('div');
+            popover.id = 'calendar-multi-select-popover';
+            popover.style.cssText = `
+                position: absolute;
+                top: calc(100% + 4px);
+                left: 0;
+                min-width: 220px;
+                max-height: 400px;
+                overflow-y: auto;
+                background: white;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+                z-index: 1000;
+                display: none;
+                padding: 8px;
+            `;
+            
+            // Load selected calendars from storage or default to all
+            let selectedCalendars = [];
+            try {
+                const saved = localStorage.getItem('gts-selected-calendars');
+                if (saved) {
+                    selectedCalendars = JSON.parse(saved);
+                }
+            } catch (error) {
+                console.warn('Error loading saved calendar selection:', error);
+            }
+            
+            // Load default calendar from storage
+            let defaultCalendar = null;
+            try {
+                const saved = localStorage.getItem('gts-default-calendar');
+                if (saved) {
+                    defaultCalendar = parseInt(saved);
+                }
+            } catch (error) {
+                console.warn('Error loading default calendar:', error);
+            }
+            
+            // If nothing saved, default to all calendars selected
+            const calendars = window.calendarConfig?.calendars || [];
+            if (selectedCalendars.length === 0 && calendars.length > 0) {
+                selectedCalendars = calendars.map(cal => cal.id);
+            }
+            
+            // Store selected calendars and default calendar
+            this.selectedCalendars = new Set(selectedCalendars);
+            this.defaultCalendar = defaultCalendar;
+            
+            // Build checkboxes
+            let checkboxesHTML = '';
+            
+            // Add "All" checkbox
+            const allChecked = this.selectedCalendars.size === calendars.length;
+            checkboxesHTML += `
+                <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 4px; transition: background 0.15s;" 
+                       onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">
+                    <input type="checkbox" data-calendar-id="all" ${allChecked ? 'checked' : ''} 
+                           style="width: 16px; height: 16px; margin-right: 8px; cursor: pointer;">
+                    <span style="font-weight: 600; color: #111827;">All Calendars</span>
+                </label>
+                <div style="border-top: 1px solid #e5e7eb; margin: 4px 0;"></div>
+            `;
+            
+            // Add individual calendar checkboxes with clickable name areas
+            calendars.forEach(cal => {
+                const isChecked = this.selectedCalendars.has(cal.id);
+                const isDefault = this.defaultCalendar === cal.id;
+                const backgroundColor = isDefault ? '#e0f2fe' : 'transparent';
+                
+                checkboxesHTML += `
+                    <div class="calendar-item" data-calendar-id="${cal.id}" 
+                         style="display: flex; align-items: center; padding: 8px; border-radius: 4px; transition: background 0.15s; background: ${backgroundColor};">
+                        <input type="checkbox" data-calendar-id="${cal.id}" ${isChecked ? 'checked' : ''} 
+                               style="width: 16px; height: 16px; margin-right: 8px; cursor: pointer; accent-color: ${cal.color};">
+                        <div class="calendar-name-area" data-calendar-id="${cal.id}" 
+                             style="display: flex; align-items: center; flex: 1; cursor: pointer;">
+                            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: ${cal.color}; margin-right: 8px;"></span>
+                            <span style="color: #374151; flex: 1;">${cal.name}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            popover.innerHTML = checkboxesHTML;
+            
+            // Prevent scroll events from propagating to calendar (prevents week navigation)
+            popover.addEventListener('wheel', (e) => {
+                e.stopPropagation();
+            }, { passive: false });
+            
+            // Toggle popover on button click
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = popover.style.display === 'block';
+                popover.style.display = isVisible ? 'none' : 'block';
+            });
+            
+            // Close popover when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!container.contains(e.target)) {
+                    popover.style.display = 'none';
+                }
+            });
+            
+            // Handle calendar name clicks (set as default)
+            popover.addEventListener('click', (e) => {
+                const nameArea = e.target.closest('.calendar-name-area');
+                if (nameArea) {
+                    e.stopPropagation();
+                    const calendarId = parseInt(nameArea.dataset.calendarId);
+                    
+                    // Set as default calendar
+                    this.defaultCalendar = calendarId;
+                    
+                    // Auto-check the checkbox if not already checked
+                    if (!this.selectedCalendars.has(calendarId)) {
+                        this.selectedCalendars.add(calendarId);
+                        const checkbox = popover.querySelector(`input[type="checkbox"][data-calendar-id="${calendarId}"]`);
+                        if (checkbox) {
+                            checkbox.checked = true;
+                        }
+                        
+                        // Update "All" checkbox
+                        const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
+                        allCheckbox.checked = this.selectedCalendars.size === calendars.length;
+                        
+                        // Save selected calendars
+                        try {
+                            localStorage.setItem('gts-selected-calendars', JSON.stringify(Array.from(this.selectedCalendars)));
+                        } catch (error) {
+                            console.warn('Error saving calendar selection:', error);
+                        }
+                    }
+                    
+                    // Update visual highlighting
+                    popover.querySelectorAll('.calendar-item').forEach(item => {
+                        const itemId = parseInt(item.dataset.calendarId);
+                        item.style.background = itemId === calendarId ? '#e0f2fe' : 'transparent';
+                    });
+                    
+                    // Save default calendar to localStorage
+                    try {
+                        localStorage.setItem('gts-default-calendar', calendarId.toString());
+                    } catch (error) {
+                        console.warn('Error saving default calendar:', error);
+                    }
+                    
+                    // Update button text
+                    this.updateCalendarButtonText();
+                    
+                    // Refresh calendar
+                    this.calendar.refetchEvents();
+                }
+            });
+            
+            // Handle checkbox changes
+            popover.addEventListener('change', (e) => {
+                if (e.target.type === 'checkbox') {
+                    const calendarId = e.target.dataset.calendarId;
+                    
+                    if (calendarId === 'all') {
+                        // Toggle all calendars
+                        const allCheckbox = e.target;
+                        const checkboxes = popover.querySelectorAll('input[type="checkbox"][data-calendar-id]:not([data-calendar-id="all"])');
+                        
+                        if (allCheckbox.checked) {
+                            // Select all
+                            this.selectedCalendars = new Set(calendars.map(cal => cal.id));
+                            checkboxes.forEach(cb => cb.checked = true);
+                        } else {
+                            // Deselect all
+                            this.selectedCalendars.clear();
+                            checkboxes.forEach(cb => cb.checked = false);
+                        }
+                    } else {
+                        // Toggle individual calendar
+                        const id = parseInt(calendarId);
+                        if (e.target.checked) {
+                            this.selectedCalendars.add(id);
+                        } else {
+                            this.selectedCalendars.delete(id);
+                        }
+                        
+                        // Update "All" checkbox
+                        const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
+                        allCheckbox.checked = this.selectedCalendars.size === calendars.length;
+                    }
+                    
+                    // Update button text
+                    this.updateCalendarButtonText();
+                    
+                    // Save to localStorage
+                    try {
+                        localStorage.setItem('gts-selected-calendars', JSON.stringify(Array.from(this.selectedCalendars)));
+                    } catch (error) {
+                        console.warn('Error saving calendar selection:', error);
+                    }
+                    
+                    // Refresh calendar
+                    this.calendar.refetchEvents();
+                }
+            });
+            
+            // Update button text initially
+            this.updateCalendarButtonText();
+            
+            container.appendChild(button);
+            container.appendChild(popover);
+            
+            return container;
+        }
+        
+        /**
+         * Update calendar button text based on selection
+         */
+        updateCalendarButtonText() {
+            const buttonText = document.getElementById('calendar-button-text');
+            if (!buttonText) return;
+            
+            const calendars = window.calendarConfig?.calendars || [];
+            const selectedCount = this.selectedCalendars.size;
+            
+            if (selectedCount === 0) {
+                buttonText.textContent = 'No Calendars';
+            } else if (selectedCount === calendars.length) {
+                buttonText.textContent = 'All Calendars';
+            } else if (selectedCount === 1) {
+                const selectedId = Array.from(this.selectedCalendars)[0];
+                const calendar = calendars.find(cal => cal.id === selectedId);
+                buttonText.textContent = calendar ? calendar.name : 'Calendars (1)';
+            } else {
+                buttonText.textContent = `Calendars (${selectedCount})`;
+            }
         }
 
         /**
@@ -868,6 +1148,54 @@
             if (this.searchFilter) {
                 this.searchFilter.addEventListener('input', this.debounce(this.handleFilterChange.bind(this), 300));
             }
+            
+            // Add mouse wheel navigation through weeks
+            this.setupWheelNavigation();
+        }
+        
+        /**
+         * Setup mouse wheel navigation to scroll through calendar weeks
+         */
+        setupWheelNavigation() {
+            const calendarEl = this.calendarEl;
+            if (!calendarEl) return;
+            
+            let wheelTimeout = null;
+            let isNavigating = false;
+            
+            calendarEl.addEventListener('wheel', (e) => {
+                // Prevent default scrolling
+                e.preventDefault();
+                
+                // Debounce rapid wheel events
+                if (isNavigating) return;
+                
+                // Determine scroll direction
+                const delta = e.deltaY;
+                
+                // Only navigate if there's significant scroll movement
+                if (Math.abs(delta) < 10) return;
+                
+                isNavigating = true;
+                
+                // Navigate calendar
+                if (delta > 0) {
+                    // Scroll down = next week
+                    this.calendar.next();
+                } else {
+                    // Scroll up = previous week
+                    this.calendar.prev();
+                }
+                
+                // Save the new date
+                this.saveCurrentDate();
+                
+                // Reset navigation lock after a short delay
+                clearTimeout(wheelTimeout);
+                wheelTimeout = setTimeout(() => {
+                    isNavigating = false;
+                }, 100);
+            }, { passive: false });
         }
 
         /**
@@ -876,11 +1204,25 @@
         fetchEvents(info, successCallback, failureCallback) {
             this.showLoading();
             
+            // Build params with selected calendars
             const params = new URLSearchParams({
-                ...this.currentFilters,
                 start: info.startStr,
                 end: info.endStr
             });
+            
+            // Add selected calendars as comma-separated string
+            if (this.selectedCalendars && this.selectedCalendars.size > 0) {
+                const calendarIds = Array.from(this.selectedCalendars).join(',');
+                params.append('calendar', calendarIds);
+            }
+            
+            // Add other filters
+            if (this.currentFilters.status) {
+                params.append('status', this.currentFilters.status);
+            }
+            if (this.currentFilters.search) {
+                params.append('search', this.currentFilters.search);
+            }
 
             // Use the correct API endpoint from calendarConfig
             const apiUrl = window.calendarConfig?.eventsUrl || '/api/job-calendar-data/';
@@ -889,30 +1231,11 @@
             params.append('_t', Date.now());
             
             const fullUrl = `${apiUrl}?${params}`;
-            console.log('JobCalendar: Fetching from URL:', fullUrl);
             
             fetch(fullUrl)
-                .then(response => {
-                    console.log('JobCalendar: Response status:', response.status);
-                    console.log('JobCalendar: Response headers:', response.headers);
-                    return response.text();
-                })
-                .then(text => {
-                    console.log('JobCalendar: Raw response text (first 500 chars):', text.substring(0, 500));
-                    return JSON.parse(text);
-                })
+                .then(response => response.json())
                 .then(data => {
-                    console.log('JobCalendar: Full API response:', data);
                     if (data.status === 'success') {
-                        // Debug: Log the first few events to see their colors
-                        console.log('JobCalendar: Raw events data:', data.events.slice(0, 3));
-                        console.log('JobCalendar: Fetched events with colors:', data.events.slice(0, 3).map(ev => ({
-                            id: ev.id,
-                            title: ev.title,
-                            backgroundColor: ev.backgroundColor,
-                            calendar: ev.extendedProps?.calendar_name,
-                            calendarColor: ev.extendedProps?.calendar_color
-                        })));
                         successCallback(data.events);
                     } else {
                         console.error('JobCalendar: Error fetching events', data.error);
@@ -944,7 +1267,6 @@
                     this.currentFilters.calendar = urlCalendar;
                     this.currentFilters.status = urlStatus;
                     this.currentFilters.search = urlSearch;
-                    console.log('JobCalendar: Loaded filters from URL', this.currentFilters);
                 } else {
                     // Otherwise, load from localStorage
                     const savedFilters = localStorage.getItem('gts-calendar-filters');
@@ -953,7 +1275,6 @@
                         this.currentFilters.calendar = filters.calendar || '';
                         this.currentFilters.status = filters.status || '';
                         this.currentFilters.search = filters.search || '';
-                        console.log('JobCalendar: Loaded saved filters', this.currentFilters);
                     }
                 }
             } catch (error) {
@@ -972,7 +1293,6 @@
                     search: this.currentFilters.search
                 };
                 localStorage.setItem('gts-calendar-filters', JSON.stringify(filtersToSave));
-                console.log('JobCalendar: Saved filters', filtersToSave);
             } catch (error) {
                 console.warn('JobCalendar: Error saving filters', error);
             }
@@ -1036,8 +1356,6 @@
             this.saveFilters();
             this.updateURLParams();
             this.refreshCalendar();
-            
-            console.log('JobCalendar: Cleared all filters');
         }
 
         /**
@@ -1047,8 +1365,6 @@
             this.currentFilters.calendar = this.calendarFilter?.value || '';
             this.currentFilters.status = this.statusFilter?.value || '';
             this.currentFilters.search = this.searchFilter?.value || '';
-            
-            console.log('JobCalendar: Filter changed', this.currentFilters);
             
             // Save filters and update URL
             this.saveFilters();
@@ -1066,31 +1382,658 @@
         }
 
         /**
-         * Handle event click for status updates
+         * Show event tooltip for any event
+         */
+        showEventTooltip(event, targetElement) {
+            const props = event.extendedProps || {};
+            
+            // Create tooltip if it doesn't exist
+            let tooltip = document.getElementById('event-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'event-tooltip';
+                tooltip.style.cssText = `
+                    position: fixed;
+                    z-index: 10000;
+                    background: white;
+                    border: 1px solid #d1d5db;
+                    border-radius: 8px;
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                    padding: 12px;
+                    min-width: 250px;
+                    max-width: 350px;
+                    font-size: 13px;
+                    pointer-events: none;
+                    display: none;
+                `;
+                document.body.appendChild(tooltip);
+            }
+            
+            // Format dates
+            const formatDate = (date) => {
+                if (!date) return 'N/A';
+                return this.calendar.formatDate(date, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: event.allDay ? undefined : 'numeric',
+                    minute: event.allDay ? undefined : '2-digit',
+                    meridiem: event.allDay ? undefined : 'short'
+                });
+            };
+            
+            const startDate = formatDate(event.start);
+            const endDate = formatDate(event.end || event.start);
+            
+            // Build tooltip content
+            let content = `
+                <div style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 8px;">
+                    <div style="font-weight: 600; font-size: 14px; color: #111827; margin-bottom: 4px;">
+                        ${event.title || '(No Title)'}
+                    </div>
+                    <div style="font-size: 11px; color: #6b7280;">
+                        ${props.calendar_name || 'Calendar'}
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+            `;
+            
+            // Date/Time
+            if (event.allDay) {
+                // For all-day events, the end date is exclusive
+                // So we need to subtract 1 day for display purposes
+                let displayEnd = event.end;
+                if (event.end) {
+                    displayEnd = new Date(event.end);
+                    displayEnd.setDate(displayEnd.getDate() - 1);
+                }
+                
+                const formattedEndDate = displayEnd ? this.calendar.formatDate(displayEnd, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                }) : startDate;
+                
+                // Check if single day or multi-day event
+                const isSingleDay = !event.end || 
+                                   event.start.toDateString() === displayEnd.toDateString();
+                const dateRange = isSingleDay ? startDate : `${startDate} - ${formattedEndDate}`;
+                
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div style="flex: 1;">
+                            <div style="color: #374151; font-weight: 500;">All Day</div>
+                            <div style="color: #6b7280; font-size: 12px;">${dateRange}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div style="flex: 1;">
+                            <div style="color: #374151; font-weight: 500;">${startDate}</div>
+                            ${event.end ? `<div style="color: #6b7280; font-size: 12px;">to ${endDate}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Business/Contact
+            if (props.business_name) {
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div style="flex: 1; color: #374151;">
+                            ${props.business_name}
+                            ${props.contact_name ? `<div style="color: #6b7280; font-size: 12px;">${props.contact_name}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Phone
+            if (props.phone) {
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
+                        </svg>
+                        <div style="flex: 1; color: #374151;">${props.phone}</div>
+                    </div>
+                `;
+            }
+            
+            // Trailer Information
+            if (props.trailer_details || props.trailer_color || props.trailer_serial) {
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"></path>
+                            <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"></path>
+                        </svg>
+                        <div style="flex: 1; color: #374151;">
+                            ${props.trailer_details ? `<div style="font-weight: 500;">Trailer: ${props.trailer_details.length > 80 ? props.trailer_details.substring(0, 80) + '...' : props.trailer_details}</div>` : ''}
+                            ${props.trailer_color ? `<div style="color: #6b7280; font-size: 12px; margin-top: 2px;">Color: ${props.trailer_color}</div>` : ''}
+                            ${props.trailer_serial ? `<div style="color: #6b7280; font-size: 12px; margin-top: 2px;">Serial: ${props.trailer_serial}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Repair Notes
+            if (props.repair_notes) {
+                const truncatedRepairNotes = props.repair_notes.length > 100 ? props.repair_notes.substring(0, 100) + '...' : props.repair_notes;
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z"></path>
+                        </svg>
+                        <div style="flex: 1; color: #374151;">
+                            <div style="font-weight: 500; font-size: 12px; margin-bottom: 2px;">Repair Notes</div>
+                            <div style="color: #6b7280; font-size: 12px;">${truncatedRepairNotes}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Status
+            if (props.status) {
+                const statusColors = {
+                    'pending': '#fbbf24',
+                    'confirmed': '#3b82f6',
+                    'in_progress': '#f97316',
+                    'completed': '#10b981',
+                    'cancelled': '#ef4444',
+                    'uncompleted': '#6b7280'
+                };
+                const statusColor = statusColors[props.status] || '#6b7280';
+                const statusText = props.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div style="flex: 1;">
+                            <span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; background-color: ${statusColor}20; color: ${statusColor};">
+                                ${statusText}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Notes
+            if (props.notes) {
+                const truncatedNotes = props.notes.length > 100 ? props.notes.substring(0, 100) + '...' : props.notes;
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path>
+                        </svg>
+                        <div style="flex: 1; color: #6b7280; font-size: 12px;">${truncatedNotes}</div>
+                    </div>
+                `;
+            }
+            
+            // Recurring indicator
+            if (props.is_recurring_parent || props.is_recurring_instance) {
+                content += `
+                    <div style="display: flex; align-items: start;">
+                        <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+                        </svg>
+                        <div style="flex: 1; color: #6b7280; font-size: 12px;">Recurring Event</div>
+                    </div>
+                `;
+            }
+            
+            content += `</div>`;
+            
+            tooltip.innerHTML = content;
+            tooltip.style.display = 'block';
+            
+            // Position tooltip near the event
+            const rect = targetElement.getBoundingClientRect();
+            const tooltipRect = tooltip.getBoundingClientRect();
+            
+            const margin = 10; // Margin from edges and target element
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+            
+            let left = rect.right + margin;
+            let top = rect.top;
+            
+            // Adjust horizontal position if tooltip goes off right edge
+            if (left + tooltipRect.width > viewportWidth - margin) {
+                // Try positioning to the left of the target
+                left = rect.left - tooltipRect.width - margin;
+                
+                // If it still goes off the left edge, clamp it to the viewport
+                if (left < margin) {
+                    left = margin;
+                }
+            }
+            
+            // Ensure tooltip doesn't go off left edge (in case target is very close to left side)
+            if (left < margin) {
+                left = margin;
+            }
+            
+            // Ensure tooltip doesn't go off right edge (in case it's still too wide)
+            if (left + tooltipRect.width > viewportWidth - margin) {
+                left = viewportWidth - tooltipRect.width - margin;
+            }
+            
+            // Adjust vertical position if tooltip goes off bottom edge
+            if (top + tooltipRect.height > viewportHeight - margin) {
+                // Position tooltip above the bottom edge
+                top = viewportHeight - tooltipRect.height - margin;
+            }
+            
+            // Adjust if tooltip goes off top edge
+            if (top < margin) {
+                top = margin;
+            }
+            
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
+        }
+
+        /**
+         * Hide event tooltip
+         */
+        hideEventTooltip() {
+            const tooltip = document.getElementById('event-tooltip');
+            if (tooltip) {
+                tooltip.style.display = 'none';
+            }
+        }
+
+        /**
+         * Handle event mouse enter for tooltip
+         */
+        handleEventMouseEnter(info) {
+            this.showEventTooltip(info.event, info.el);
+        }
+
+        /**
+         * Handle event mouse leave to hide tooltip
+         */
+        handleEventMouseLeave(info) {
+            this.hideEventTooltip();
+        }
+
+        /**
+         * Handle event click to open edit form
          */
         handleEventClick(info) {
             try {
-                console.log('JobCalendar: Single click detected', {
-                    eventId: info.event.id,
-                    title: info.event.title,
-                    type: info.event.extendedProps.type,
-                    extendedProps: info.event.extendedProps
-                });
-                
-                // Use the floating panel for job details
                 const extendedProps = info.event.extendedProps || {};
+                const eventType = extendedProps.type;
                 const jobId = extendedProps.job_id;
                 
-                if (jobId && window.JobPanel) {
-                    window.JobPanel.setTitle('Job Details');
-                    window.JobPanel.load(`/jobs/${jobId}/partial/`);
+                // Check if this is a call reminder event (job-related or standalone)
+                if (eventType === 'call_reminder' || eventType === 'standalone_call_reminder') {
+                    this.showCallReminderPanel(info.event);
+                } else if (jobId && window.JobPanel) {
+                    // Regular job event - add to workspace and show edit form
+                    const props = info.event.extendedProps;
+                    
+                    // Add to workspace if JobWorkspace is available
+                    if (window.JobWorkspace) {
+                        window.JobWorkspace.openJob(jobId, {
+                            customerName: props.business_name || props.contact_name || 'No Name',
+                            trailerColor: props.trailer_color || '',
+                            calendarColor: info.event.backgroundColor || '#3B82F6'
+                        });
+                    }
+                    
+                    // Load job edit form in panel
+                    window.JobPanel.setTitle('Edit Job');
+                    window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                    
+                    // Track current job ID for workspace integration
+                    if (window.JobPanel.setCurrentJobId) {
+                        window.JobPanel.setCurrentJobId(jobId);
+                    }
+                    
+                    // Update minimize button after a short delay to ensure panel is ready
+                    setTimeout(() => {
+                        if (window.JobPanel.updateMinimizeButton) {
+                            window.JobPanel.updateMinimizeButton();
+                        }
+                    }, 100);
                 } else {
                     console.error('JobPanel not available or job ID missing');
-                    this.showError('Unable to open event details. Please try again.');
+                    this.showError('Unable to open event for editing. Please try again.');
                 }
             } catch (error) {
                 console.error('JobCalendar: Error handling single click', error);
-                this.showError('Unable to open event details. Please try again.');
+                this.showError('Unable to open event for editing. Please try again.');
+            }
+        }
+        
+        /**
+         * Show call reminder panel with options
+         */
+        showCallReminderPanel(event) {
+            const props = event.extendedProps;
+            const isStandalone = props.type === 'standalone_call_reminder';
+            const jobId = props.job_id;
+            const reminderId = props.reminder_id;
+            
+            let html = `<div style="padding: 20px;">`;
+            
+            // Header
+            html += `
+                <div style="margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                        <div style="width: 48px; height: 48px; background-color: ${event.backgroundColor}; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                            📞
+                        </div>
+                        <div style="flex: 1;">
+                            <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Call Reminder</h3>`;
+            
+            if (!isStandalone && props.weeks_prior) {
+                const weeksText = props.weeks_prior === 2 ? '1 week' : '2 weeks';
+                html += `<p style="margin: 4px 0 0 0; font-size: 14px; color: #6b7280;">${weeksText} before job</p>`;
+            } else if (props.reminder_date) {
+                html += `<p style="margin: 4px 0 0 0; font-size: 14px; color: #6b7280;">${props.reminder_date}</p>`;
+            }
+            
+            html += `</div></div>`;
+            
+            // Job details (only for job-related reminders)
+            if (!isStandalone && jobId) {
+                const jobDate = new Date(props.job_date);
+                const formattedDate = this.calendar.formatDate(jobDate, {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+                
+                html += `
+                    <div style="background-color: #f9fafb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                        <div style="margin-bottom: 12px;">
+                            <div style="font-weight: 600; color: #374151; margin-bottom: 4px;">Job Details</div>
+                            <div style="color: #6b7280; font-size: 14px;">
+                                <strong style="color: #111827;">${props.business_name || 'No business name'}</strong>
+                                ${props.contact_name ? `<br>${props.contact_name}` : ''}
+                                ${props.phone ? `<br>📱 ${props.phone}` : ''}
+                            </div>
+                        </div>
+                        <div style="padding-top: 12px; border-top: 1px solid #e5e7eb;">
+                            <div style="font-weight: 600; color: #374151; margin-bottom: 4px;">Job Date</div>
+                            <div style="color: #6b7280; font-size: 14px;">${formattedDate}</div>
+                        </div>
+                    </div>`;
+            }
+            
+            // Notes section
+            html += `
+                <div style="margin-bottom: 16px;">
+                    <label style="font-weight: 600; color: #374151; margin-bottom: 8px; display: block;">
+                        Notes
+                    </label>
+                    <textarea id="reminder-notes" 
+                              style="width: 100%; min-height: 100px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; font-size: 14px; resize: vertical;"
+                              placeholder="Add notes about this call reminder...">${props.notes || ''}</textarea>
+                </div>
+                </div>`;
+            
+            // Action buttons
+            html += `<div style="display: flex; gap: 12px;">`;
+            
+            if (isStandalone && reminderId) {
+                // Standalone reminder buttons
+                html += `
+                    <button onclick="jobCalendar.saveStandaloneReminderNotes(${reminderId})" 
+                            style="flex: 1; padding: 12px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            onmouseover="this.style.backgroundColor='#2563eb'" 
+                            onmouseout="this.style.backgroundColor='#3b82f6'">
+                        💾 Save & Close
+                    </button>
+                    <button onclick="jobCalendar.markStandaloneReminderComplete(${reminderId})" 
+                            style="flex: 1; padding: 12px 20px; background-color: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            onmouseover="this.style.backgroundColor='#059669'" 
+                            onmouseout="this.style.backgroundColor='#10b981'">
+                        ✓ Complete
+                    </button>
+                    <button onclick="jobCalendar.deleteStandaloneReminder(${reminderId})" 
+                            style="padding: 12px 20px; background-color: #ef4444; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            onmouseover="this.style.backgroundColor='#dc2626'" 
+                            onmouseout="this.style.backgroundColor='#ef4444'">
+                        🗑️
+                    </button>`;
+            } else if (jobId) {
+                // Job-related reminder buttons
+                html += `
+                    <button onclick="jobCalendar.saveJobReminderNotes(${jobId})" 
+                            style="flex: 1; padding: 12px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            onmouseover="this.style.backgroundColor='#2563eb'" 
+                            onmouseout="this.style.backgroundColor='#3b82f6'">
+                        💾 Save & Close
+                    </button>
+                    <button onclick="jobCalendar.markCallReminderComplete(${jobId})" 
+                            style="flex: 1; padding: 12px 20px; background-color: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            onmouseover="this.style.backgroundColor='#059669'" 
+                            onmouseout="this.style.backgroundColor='#10b981'">
+                        ✓ Mark Complete
+                    </button>
+                    <button onclick="jobCalendar.openJobFromReminder(${jobId})" 
+                            style="flex: 1; padding: 12px 20px; background-color: #6b7280; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            onmouseover="this.style.backgroundColor='#4b5563'" 
+                            onmouseout="this.style.backgroundColor='#6b7280'">
+                        View Job
+                    </button>`;
+            }
+            
+            html += `</div></div>`;
+            
+            if (window.JobPanel) {
+                window.JobPanel.setTitle('📞 Call Reminder');
+                window.JobPanel.showContent(html);
+            }
+        }
+        
+        /**
+         * Mark call reminder as complete
+         */
+        async markCallReminderComplete(jobId) {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/mark-call-reminder-complete/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.getCSRFToken()
+                    }
+                });
+                
+                if (response.ok) {
+                    // Close the panel
+                    if (window.JobPanel) {
+                        window.JobPanel.close();
+                    }
+                    
+                    // Refresh calendar to remove the reminder
+                    this.calendar.refetchEvents();
+                    
+                    // Show success message
+                    this.showSuccess('Call reminder marked as complete');
+                } else {
+                    const data = await response.json();
+                    this.showError(data.error || 'Failed to mark reminder as complete');
+                }
+            } catch (error) {
+                console.error('Error marking call reminder complete:', error);
+                this.showError('Failed to mark reminder as complete');
+            }
+        }
+        
+        /**
+         * Save notes for job-related call reminder and close the dialog
+         */
+        async saveJobReminderNotes(jobId) {
+            const notes = document.getElementById('reminder-notes')?.value || '';
+            
+            try {
+                const response = await fetch(`/jobs/${jobId}/call-reminder/update/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.getCSRFToken()
+                    },
+                    body: JSON.stringify({
+                        notes: notes
+                    })
+                });
+                
+                if (response.ok) {
+                    // Clear unsaved changes flag before closing
+                    if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
+                        window.JobPanel.clearUnsavedChanges();
+                    }
+                    
+                    // Close the panel (skip unsaved check since we just saved)
+                    if (window.JobPanel) {
+                        window.JobPanel.close(true);
+                    }
+                    
+                    // Refresh calendar to show updated notes
+                    this.calendar.refetchEvents();
+                } else {
+                    const data = await response.json();
+                    this.showError(data.error || 'Failed to save notes');
+                }
+            } catch (error) {
+                console.error('Error saving reminder notes:', error);
+                this.showError('Failed to save notes. Please try again.');
+            }
+        }
+        
+        /**
+         * Open the job detail/edit from a call reminder
+         */
+        openJobFromReminder(jobId) {
+            if (window.JobPanel) {
+                window.JobPanel.setTitle('Edit Job');
+                window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+            }
+        }
+        
+        /**
+         * Save notes for standalone call reminder
+         */
+        async saveStandaloneReminderNotes(reminderId) {
+            try {
+                const notes = document.getElementById('reminder-notes')?.value || '';
+                
+                const response = await fetch(`/call-reminders/${reminderId}/update/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.getCSRFToken()
+                    },
+                    body: JSON.stringify({ notes })
+                });
+                
+                if (response.ok) {
+                    // Clear unsaved changes flag and close panel
+                    if (window.JobPanel) {
+                        window.JobPanel.clearUnsavedChanges();
+                        window.JobPanel.close(true);
+                    }
+                    // Refresh calendar to update the event
+                    this.calendar.refetchEvents();
+                } else {
+                    const data = await response.json();
+                    this.showError(data.error || 'Failed to save notes');
+                }
+            } catch (error) {
+                console.error('Error saving reminder notes:', error);
+                this.showError('Failed to save notes');
+            }
+        }
+        
+        /**
+         * Mark standalone call reminder as complete
+         */
+        async markStandaloneReminderComplete(reminderId) {
+            try {
+                const response = await fetch(`/call-reminders/${reminderId}/update/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.getCSRFToken()
+                    },
+                    body: JSON.stringify({ completed: true })
+                });
+                
+                if (response.ok) {
+                    // Close the panel
+                    if (window.JobPanel) {
+                        window.JobPanel.close();
+                    }
+                    
+                    // Refresh calendar to remove the reminder
+                    this.calendar.refetchEvents();
+                    
+                    // Show success message
+                    this.showSuccess('Call reminder marked as complete');
+                } else {
+                    const data = await response.json();
+                    this.showError(data.error || 'Failed to mark reminder as complete');
+                }
+            } catch (error) {
+                console.error('Error marking reminder complete:', error);
+                this.showError('Failed to mark reminder as complete');
+            }
+        }
+        
+        /**
+         * Delete standalone call reminder
+         */
+        async deleteStandaloneReminder(reminderId) {
+            if (!confirm('Are you sure you want to delete this call reminder?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/call-reminders/${reminderId}/delete/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.getCSRFToken()
+                    }
+                });
+                
+                if (response.ok) {
+                    // Close the panel
+                    if (window.JobPanel) {
+                        window.JobPanel.close();
+                    }
+                    
+                    // Refresh calendar to remove the reminder
+                    this.calendar.refetchEvents();
+                    
+                    // Show success message
+                    this.showSuccess('Call reminder deleted successfully');
+                } else {
+                    const data = await response.json();
+                    this.showError(data.error || 'Failed to delete reminder');
+                }
+            } catch (error) {
+                console.error('Error deleting reminder:', error);
+                this.showError('Failed to delete reminder');
             }
         }
 
@@ -1101,8 +2044,6 @@
             try {
                 const currentTime = Date.now();
                 const currentDate = info.date.getTime();
-                
-                console.log('Date clicked:', info.date, 'Current time:', currentTime, 'Last click time:', this.lastClickTime);
                 
                 // Check if this is a double-click (same date within 500ms)
                 if (this.lastClickDate === currentDate && 
@@ -1115,18 +2056,31 @@
                         this.clickTimer = null;
                     }
                     
-                    // Use the floating panel for new job creation with pre-filled date
-                    console.log('Double-click detected, attempting to open panel...');
+                    // Check if clicked date is Sunday (0 = Sunday)
+                    const isSunday = info.date.getDay() === 0;
+                    
                     if (window.JobPanel) {
                         const dateStr = info.date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-                        // Include calendar filter if one is selected
-                        let url = `/jobs/new/partial/?date=${dateStr}`;
-                        if (this.currentFilters.calendar) {
-                            url += `&calendar=${this.currentFilters.calendar}`;
+                        
+                        if (isSunday) {
+                            // Open call reminder form for Sunday
+                            let url = `/call-reminders/new/partial/?date=${dateStr}`;
+                            // Add default calendar if set
+                            if (this.defaultCalendar) {
+                                url += `&calendar=${this.defaultCalendar}`;
+                            }
+                            window.JobPanel.setTitle('New Call Reminder');
+                            window.JobPanel.load(url);
+                        } else {
+                            // Open job form for other days
+                            let url = `/jobs/new/partial/?date=${dateStr}`;
+                            // Add default calendar if set
+                            if (this.defaultCalendar) {
+                                url += `&calendar=${this.defaultCalendar}`;
+                            }
+                            window.JobPanel.setTitle('New Job');
+                            window.JobPanel.load(url);
                         }
-                        console.log('JobPanel available, loading URL:', url);
-                        window.JobPanel.setTitle('New Job');
-                        window.JobPanel.load(url);
                     } else {
                         console.error('JobPanel not available');
                         this.showError('Job panel functionality not available. Please refresh the page.');
@@ -1168,18 +2122,6 @@
             const event = info.event;
             const props = event.extendedProps;
             
-            // Debug: Log event colors
-            console.log('Event mounted:', {
-                id: event.id,
-                title: event.title,
-                backgroundColor: event.backgroundColor,
-                borderColor: event.borderColor,
-                calendar: props?.calendar_name,
-                calendarColor: props?.calendar_color,
-                status: props?.status,
-                allExtendedProps: props
-            });
-            
             // Force apply calendar colors if they exist
             if (props?.calendar_color) {
                 const calendarColor = props.calendar_color;
@@ -1190,8 +2132,6 @@
                 if (isCompleted) {
                     finalColor = this.lightenColor(calendarColor, 0.3);
                 }
-                
-                console.log(`Forcing color for ${event.id}: ${finalColor} (original: ${calendarColor}, completed: ${isCompleted})`);
                 
                 // Force set the colors
                 event.setProp('backgroundColor', finalColor);
@@ -1208,11 +2148,8 @@
                     if (info.el) {
                         info.el.style.backgroundColor = finalColor;
                         info.el.style.borderColor = finalColor;
-                        console.log(`Applied delayed color to ${event.id}: ${finalColor}`);
                     }
                 }, 100);
-            } else {
-                console.log(`No calendar_color found for ${event.id}, props:`, props);
             }
             
             // Apply completion styling
@@ -1277,77 +2214,58 @@
             const isCompleted = props.status === 'completed';
             const titleClass = isCompleted ? 'job-title job-title-completed' : 'job-title';
             
+            // Add recurring event icon
+            const recurringIcon = (props.is_recurring_parent || props.is_recurring_instance) 
+                ? '<svg style="width: 12px; height: 12px; display: inline-block; margin-right: 4px; vertical-align: middle;" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path></svg>' 
+                : '';
+            
             return {
                 html: `
                     <div class="job-event-content">
-                        <div class="${titleClass}">${event.title}</div>
+                        <div class="${titleClass}">${recurringIcon}${event.title}</div>
                     </div>
                 `
             };
         }
 
         /**
-         * Show status update modal
+         * Render custom day cell content with month name for first 7 days
          */
-        showStatusUpdateModal(jobId, currentStatus) {
-            const statusChoices = [
-                { value: 'uncompleted', label: 'Uncompleted' },
-                { value: 'completed', label: 'Completed' }
-            ];
-
-            const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50';
-            modal.innerHTML = `
-                <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-                    <div class="mt-3 text-center">
-                        <h3 class="text-lg font-medium text-gray-900 mb-4">Update Job Status</h3>
-                        <div class="space-y-2">
-                            ${statusChoices.map(status => `
-                                <button class="status-option w-full text-left px-3 py-2 rounded border ${status.value === currentStatus ? 'bg-blue-100 border-blue-300' : 'bg-white border-gray-300 hover:bg-gray-50'}" 
-                                        data-status="${status.value}">
-                                    ${status.label}
-                                </button>
-                            `).join('')}
+        renderDayCellContent(info) {
+            const dayOfMonth = info.date.getDate();
+            
+            // Only show month name for first 7 days of the month
+            if (dayOfMonth >= 1 && dayOfMonth <= 7) {
+                const monthName = info.date.toLocaleDateString('en-US', { month: 'short' });
+                
+                return {
+                    html: `
+                        <div class="fc-daygrid-day-top">
+                            <a class="fc-daygrid-day-number">${dayOfMonth}</a>
                         </div>
-                        <div class="flex justify-end space-x-3 mt-6">
-                            <button class="cancel-btn px-4 py-2 text-gray-600 border border-gray-300 rounded hover:bg-gray-50">
-                                Cancel
-                            </button>
+                        <div class="fc-month-name-wrapper">
+                            <span class="fc-month-name">${monthName}</span>
                         </div>
+                    `
+                };
+            }
+            
+            // Default rendering for other days
+            return {
+                html: `
+                    <div class="fc-daygrid-day-top">
+                        <a class="fc-daygrid-day-number">${dayOfMonth}</a>
                     </div>
-                </div>
-            `;
-
-            document.body.appendChild(modal);
-
-            // Handle status selection
-            modal.querySelectorAll('.status-option').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const newStatus = btn.dataset.status;
-                    this.updateJobStatus(jobId, newStatus);
-                    document.body.removeChild(modal);
-                });
-            });
-
-            // Handle cancel
-            modal.querySelector('.cancel-btn').addEventListener('click', () => {
-                document.body.removeChild(modal);
-            });
-
-            // Close on outside click
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    document.body.removeChild(modal);
-                }
-            });
+                `
+            };
         }
+
 
         /**
          * Update job status via API
          */
         updateJobStatus(jobId, newStatus) {
             const csrfToken = this.getCSRFToken();
-            console.log('JobCalendar: Updating status with CSRF Token:', csrfToken);
 
             fetch(`/rental_scheduler/api/jobs/${jobId}/update-status/`, {
                 method: 'POST',
@@ -1473,478 +2391,6 @@
             };
         }
 
-        /**
-         * Open comprehensive event details dialog
-         * @param {Object} info - FullCalendar event info
-         */
-        openEventDetailsDialog(info) {
-            try {
-                console.log('JobCalendar: Opening event details dialog', info);
-                
-                // Get the latest event data from the calendar to ensure we have fresh info
-                const latestEvent = this.calendar?.getEventById(info.event.id);
-                const eventProps = latestEvent ? latestEvent.extendedProps : info.event.extendedProps;
-                const event = latestEvent || info.event;
-                
-                console.log('JobCalendar: Event data', { event, eventProps });
-
-                // Create dialog backdrop
-                const backdrop = document.createElement('div');
-                backdrop.className = 'event-details-backdrop';
-                backdrop.style.cssText = `
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background-color: rgba(0, 0, 0, 0.5);
-                    z-index: 1000;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                `;
-
-                // Create dialog container
-                const dialog = document.createElement('div');
-                dialog.className = 'card card-elevated';
-                dialog.style.cssText = `
-                    max-width: 800px;
-                    width: 100%;
-                    max-height: 90vh;
-                    overflow: hidden;
-                    position: relative;
-                    background-color: #ffffff;
-                    border-radius: 16px;
-                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-                    margin: 20px;
-                `;
-                
-                // Add responsive styles
-                const style = document.createElement('style');
-                style.textContent = `
-                    @media (max-width: 768px) {
-                        .event-details-dialog {
-                            margin: 10px !important;
-                            max-width: calc(100vw - 20px) !important;
-                            max-height: calc(100vh - 20px) !important;
-                        }
-                        .event-details-dialog .grid-responsive {
-                            grid-template-columns: 1fr !important;
-                        }
-                    }
-                `;
-                document.head.appendChild(style);
-
-                // Build dialog content for job events
-                const content = this.buildJobEventContent(event, eventProps);
-                dialog.innerHTML = content;
-
-                // Add to DOM
-                backdrop.appendChild(dialog);
-                document.body.appendChild(backdrop);
-
-                // Setup event listeners
-                this.setupEventDetailsDialogListeners(backdrop, dialog, event, eventProps);
-
-                // Store reference for cleanup
-                this.eventDetailsDialog = backdrop;
-
-            } catch (error) {
-                console.error('JobCalendar: Error opening event details dialog', error);
-                this.showError('Unable to open event details. Please try again.');
-            }
-        }
-
-
-        /**
-         * Build content for job events
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         * @returns {string} HTML content
-         */
-        buildJobEventContent(event, props) {
-            const formatDateTime = (isoString) => {
-                if (!isoString) return 'Not set';
-                try {
-                    const date = new Date(isoString);
-                    return date.toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        hour12: true
-                    });
-                } catch (error) {
-                    return 'Invalid date';
-                }
-            };
-
-            const getJobStatusBadge = (status) => {
-                const statusDisplay = status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
-                let backgroundColor, textColor;
-                
-                switch (status ? status.toLowerCase() : '') {
-                    case 'completed':
-                        backgroundColor = '#10b981';
-                        textColor = '#ffffff';
-                        break;
-                    case 'in_progress':
-                        backgroundColor = '#f59e0b';
-                        textColor = '#ffffff';
-                        break;
-                    case 'pending':
-                        backgroundColor = '#6b7280';
-                        textColor = '#ffffff';
-                        break;
-                    case 'cancelled':
-                        backgroundColor = '#ef4444';
-                        textColor = '#ffffff';
-                        break;
-                    default:
-                        backgroundColor = '#f59e0b';
-                        textColor = '#ffffff';
-                }
-                
-                return `<span style="
-                    background-color: ${backgroundColor};
-                    color: ${textColor};
-                    padding: 6px 12px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                ">${statusDisplay}</span>`;
-            };
-
-            // Format phone number for tel: link
-            const formatPhoneForLink = (phone) => {
-                if (!phone || phone === 'N/A') return null;
-                return phone.replace(/[^\d]/g, '');
-            };
-            
-            const phoneLink = formatPhoneForLink(props.phone);
-            
-            return `
-                <!-- Header with title and status -->
-                <div style="padding: 32px 32px 24px 32px; border-bottom: 1px solid #e5e7eb;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <h2 style="font-size: 24px; font-weight: 700; color: #111827; margin: 0;">Job Details</h2>
-                        ${getJobStatusBadge(props.status)}
-                    </div>
-                </div>
-                
-                <!-- Scrollable content area -->
-                <div style="max-height: calc(90vh - 200px); overflow-y: auto; padding: 32px;">
-                    <div style="display: flex; flex-direction: column; gap: 32px;">
-                        
-                        <!-- Customer Information -->
-                        <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-                            <div style="background: #e2e8f0; padding: 16px 24px; border-bottom: 1px solid #cbd5e1;">
-                                <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-                                    <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    Customer Information
-                                </h3>
-                            </div>
-                            <div style="padding: 24px;">
-                                <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                                    <div>
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">Business Name</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${props.business_name || 'N/A'}</div>
-                                    </div>
-                                    <div>
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">Contact Name</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${props.contact_name || 'N/A'}</div>
-                                    </div>
-                                    <div style="grid-column: 1 / -1;">
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px; display: flex; align-items: center;">
-                                            <svg style="width: 16px; height: 16px; margin-right: 6px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                                <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
-                                            </svg>
-                                            Phone
-                                        </div>
-                                        <div style="color: #6b7280; font-size: 14px;">
-                                            ${phoneLink ? `<a href="tel:${phoneLink}" style="color: #3b82f6; text-decoration: none;">${props.phone}</a>` : (props.phone || 'N/A')}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Trailer Information -->
-                        <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-                            <div style="background: #e2e8f0; padding: 16px 24px; border-bottom: 1px solid #cbd5e1;">
-                                <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-                                    <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"></path>
-                                        <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"></path>
-                                    </svg>
-                                    Trailer Information
-                                </h3>
-                            </div>
-                            <div style="padding: 24px;">
-                                <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                                    <div>
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">Color</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${props.trailer_color || 'N/A'}</div>
-                                    </div>
-                                    <div>
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">Serial</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${props.trailer_serial || 'N/A'}</div>
-                                    </div>
-                                    <div style="grid-column: 1 / -1;">
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">Details</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${props.trailer_details || 'N/A'}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Schedule Information -->
-                        <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-                            <div style="background: #e2e8f0; padding: 16px 24px; border-bottom: 1px solid #cbd5e1;">
-                                <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-                                    <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    Schedule Information
-                                </h3>
-                            </div>
-                            <div style="padding: 24px;">
-                                <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                                    <div>
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">Start Date & Time</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${formatDateTime(event.start)}</div>
-                                    </div>
-                                    <div>
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">End Date & Time</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${event.end ? formatDateTime(event.end) : 'Not set'}</div>
-                                    </div>
-                                    <div style="grid-column: 1 / -1;">
-                                        <div style="font-weight: 600; color: #374151; margin-bottom: 4px; font-size: 14px;">All Day Event</div>
-                                        <div style="color: #6b7280; font-size: 14px;">${event.allDay ? 'Yes' : 'No'}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        ${props.notes ? `
-                        <!-- Notes -->
-                        <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-                            <div style="background: #e2e8f0; padding: 16px 24px; border-bottom: 1px solid #cbd5e1;">
-                                <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-                                    <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    Notes
-                                </h3>
-                            </div>
-                            <div style="padding: 24px;">
-                                <p style="color: #6b7280; font-size: 14px; line-height: 1.5; margin: 0;">${props.notes}</p>
-                            </div>
-                        </div>
-                        ` : ''}
-
-                        ${props.repair_notes ? `
-                        <!-- Repair Notes -->
-                        <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-                            <div style="background: #e2e8f0; padding: 16px 24px; border-bottom: 1px solid #cbd5e1;">
-                                <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-                                    <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    Repair Notes
-                                </h3>
-                            </div>
-                            <div style="padding: 24px;">
-                                <p style="color: #6b7280; font-size: 14px; line-height: 1.5; margin: 0;">${props.repair_notes}</p>
-                            </div>
-                        </div>
-                        ` : ''}
-                    </div>
-                </div>
-                
-                <!-- Footer with buttons -->
-                <div style="padding: 24px 32px; border-top: 1px solid #e5e7eb; background: #ffffff;">
-                    <div style="display: flex; justify-content: flex-end; gap: 12px;">
-                        <button class="cancel-btn" style="
-                            padding: 12px 24px;
-                            border: 1px solid #d1d5db;
-                            border-radius: 8px;
-                            background: #ffffff;
-                            color: #374151;
-                            font-weight: 500;
-                            font-size: 14px;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
-                            Close
-                        </button>
-                        ${props.status === 'uncompleted' ? 
-                            `<button class="mark-complete-btn" style="
-                                padding: 12px 24px;
-                                border: none;
-                                border-radius: 8px;
-                                background: #10b981;
-                                color: #ffffff;
-                                font-weight: 500;
-                                font-size: 14px;
-                                cursor: pointer;
-                                transition: all 0.2s;
-                            " onmouseover="this.style.backgroundColor='#059669'" onmouseout="this.style.backgroundColor='#10b981'">
-                                Mark as Complete
-                            </button>` : 
-                            ''
-                        }
-                        <button class="view-details-btn" style="
-                            padding: 12px 24px;
-                            border: 1px solid #6b7280;
-                            border-radius: 8px;
-                            background: #ffffff;
-                            color: #374151;
-                            font-weight: 500;
-                            font-size: 14px;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
-                            View Details
-                        </button>
-                        <button class="edit-btn" style="
-                            padding: 12px 24px;
-                            border: none;
-                            border-radius: 8px;
-                            background: #3b82f6;
-                            color: #ffffff;
-                            font-weight: 500;
-                            font-size: 14px;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                        " onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
-                            Edit Job
-                        </button>
-                        <button class="print-wo-btn" style="
-                            padding: 12px 24px;
-                            border: 1px solid #d1d5db;
-                            border-radius: 8px;
-                            background: #ffffff;
-                            color: #374151;
-                            font-weight: 500;
-                            font-size: 14px;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
-                            Print WO
-                        </button>
-                        <button class="print-customer-copy-wo-btn" style="
-                            padding: 12px 24px;
-                            border: 1px solid #d1d5db;
-                            border-radius: 8px;
-                            background: #ffffff;
-                            color: #374151;
-                            font-weight: 500;
-                            font-size: 14px;
-                            cursor: pointer;
-                            transition: all 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
-                            Print Customer Copy WO
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-
-        /**
-         * Setup event listeners for the event details dialog
-         * @param {HTMLElement} backdrop - Dialog backdrop element
-         * @param {HTMLElement} dialog - Dialog element
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         */
-        setupEventDetailsDialogListeners(backdrop, dialog, event, props) {
-            const closeDialog = () => {
-                if (backdrop && backdrop.parentNode) {
-                    backdrop.parentNode.removeChild(backdrop);
-                }
-                this.eventDetailsDialog = null;
-            };
-
-            // Close button
-            const closeBtn = dialog.querySelector('.close-btn');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', closeDialog);
-            }
-
-            // Cancel button
-            const cancelBtn = dialog.querySelector('.cancel-btn');
-            if (cancelBtn) {
-                cancelBtn.addEventListener('click', closeDialog);
-            }
-
-            // Mark Complete button (for jobs only)
-            const markCompleteBtn = dialog.querySelector('.mark-complete-btn');
-            if (markCompleteBtn) {
-                markCompleteBtn.addEventListener('click', () => {
-                    this.updateJobStatus(event, props, 'completed', closeDialog);
-                });
-            }
-
-            // View Details button
-            const viewDetailsBtn = dialog.querySelector('.view-details-btn');
-            if (viewDetailsBtn) {
-                viewDetailsBtn.addEventListener('click', () => {
-                    // Navigate to job detail page
-                    const jobId = props.job_id;
-                    if (jobId) {
-                        window.location.href = `/rental_scheduler/jobs/${jobId}/`;
-                    }
-                });
-            }
-
-            // Edit button
-            const editBtn = dialog.querySelector('.edit-btn');
-            if (editBtn) {
-                editBtn.addEventListener('click', () => {
-                    // Switch to edit mode instead of closing
-                    this.switchToEditMode(backdrop, dialog, event, props);
-                });
-            }
-
-            // Print WO button
-            const printWoBtn = dialog.querySelector('.print-wo-btn');
-            if (printWoBtn) {
-                printWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
-                });
-            }
-
-            // Print Customer Copy WO button
-            const printCustomerCopyWoBtn = dialog.querySelector('.print-customer-copy-wo-btn');
-            if (printCustomerCopyWoBtn) {
-                printCustomerCopyWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
-                });
-            }
-
-            // Backdrop click
-            backdrop.addEventListener('click', (e) => {
-                if (e.target === backdrop) {
-                    closeDialog();
-                }
-            });
-
-            // Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeDialog();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
-        }
 
         /**
          * Show error message
@@ -1960,736 +2406,6 @@
             }
         }
 
-        /**
-         * Update job status
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         * @param {string} newStatus - New status to set
-         * @param {Function} closeDialog - Function to close the dialog
-         */
-        async updateJobStatus(event, props, newStatus, closeDialog) {
-            try {
-                if (!confirm(`Are you sure you want to mark this job as ${newStatus}?`)) {
-                    return;
-                }
-
-                // Extract job ID from event ID (remove "job-" prefix)
-                const jobId = event.id.replace(/^job-/, '');
-                
-                // Get CSRF token
-                const csrfToken = this.getCSRFToken();
-                
-                const response = await fetch(`/api/jobs/${jobId}/update-status/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken,
-                    },
-                    body: JSON.stringify({
-                        status: newStatus
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    // Show success message
-                    this.showSuccess('Job status updated successfully!');
-                    
-                    // Close dialog
-                    closeDialog();
-                    
-                    // Refresh calendar to show updated status
-                    this.loadCalendarData();
-                } else {
-                    this.showError(data.error || 'Failed to update job status');
-                }
-            } catch (error) {
-                console.error('JobCalendar: Error updating job status', error);
-                this.showError('Network error occurred while updating status');
-            }
-        }
-
-        /**
-         * Show success message
-         * @param {string} message - Success message to display
-         */
-        showSuccess(message) {
-            console.log('JobCalendar Success:', message);
-            // Use the global toast system if available, otherwise use the local toast method
-            if (window.layout && window.layout.showToast) {
-                window.layout.showToast(message, 'success');
-            } else {
-                this.showToast(message, 'success');
-            }
-        }
-
-        /**
-         * Switch dialog to edit mode
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         */
-        switchToEditMode(backdrop, dialog, event, props) {
-            try {
-                console.log('JobCalendar: Switching to edit mode', { event, props });
-                
-                // Build edit content
-                const editContent = this.buildJobEventEditContent(event, props);
-                dialog.innerHTML = editContent;
-                
-                // Setup edit mode listeners
-                this.setupEditModeListeners(backdrop, dialog, event, props);
-                
-            } catch (error) {
-                console.error('JobCalendar: Error switching to edit mode', error);
-                this.showError('Unable to switch to edit mode. Please try again.');
-            }
-        }
-
-        /**
-         * Build edit content for job events
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         * @returns {string} HTML content
-         */
-        buildJobEventEditContent(event, props) {
-            const jobId = props.job_id || event.id.replace(/^job-/, '');
-            const status = props.status || 'uncompleted';
-            
-            // Define status display and badge functions locally
-            const getJobStatusDisplay = (status) => {
-                return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
-            };
-            
-            const getJobStatusBadge = (status) => {
-                const statusDisplay = getJobStatusDisplay(status);
-                let backgroundColor, textColor;
-                
-                switch (status ? status.toLowerCase() : '') {
-                    case 'completed':
-                        backgroundColor = '#10b981';
-                        textColor = '#ffffff';
-                        break;
-                    case 'in_progress':
-                        backgroundColor = '#f59e0b';
-                        textColor = '#ffffff';
-                        break;
-                    case 'pending':
-                        backgroundColor = '#6b7280';
-                        textColor = '#ffffff';
-                        break;
-                    case 'cancelled':
-                        backgroundColor = '#ef4444';
-                        textColor = '#ffffff';
-                        break;
-                    default:
-                        backgroundColor = '#f59e0b';
-                        textColor = '#ffffff';
-                        break;
-                }
-                
-                return `display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; background-color: ${backgroundColor}; color: ${textColor};`;
-            };
-            
-            const statusDisplay = getJobStatusDisplay(status);
-            const statusBadge = getJobStatusBadge(status);
-
-            // Format dates for input fields
-            const formatDateForInput = (dateStr) => {
-                if (!dateStr) return '';
-                const date = new Date(dateStr);
-                // Check if date is valid
-                if (isNaN(date.getTime())) return '';
-                // Convert to local timezone and format for datetime-local input
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                return `${year}-${month}-${day}T${hours}:${minutes}`;
-            };
-
-            return `
-                <div class="event-details-dialog" style="max-width: 800px; max-height: 90vh; overflow: hidden; background-color: #ffffff; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); margin: 20px;">
-                    <!-- Header -->
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 24px 24px 0 24px; border-bottom: 1px solid #e5e7eb; margin-bottom: 0;">
-                        <h2 style="font-size: 24px; font-weight: bold; color: #111827; margin: 0;">Edit Job</h2>
-                        <div style="${statusBadge}">${statusDisplay}</div>
-                    </div>
-
-                    <!-- Scrollable Content -->
-                    <div style="max-height: calc(90vh - 200px); overflow-y: auto; padding: 24px;">
-                        <form id="edit-job-form" class="space-y-6">
-                            <!-- Customer Information -->
-                            <div style="background-color: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
-                                <div style="display: flex; align-items: center; gap: 8px; background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-                                    <svg style="width: 16px; height: 16px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Customer Information</h3>
-                                </div>
-                                <div style="padding: 20px;">
-                                    <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="business_name">Business Name *</label>
-                                            <input type="text" id="business_name" name="business_name" value="${props.business_name || ''}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;" required>
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="contact_name">Contact Name</label>
-                                            <input type="text" id="contact_name" name="contact_name" value="${props.contact_name || ''}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="phone">Phone</label>
-                                            <input type="tel" id="phone" name="phone" value="${props.phone || ''}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Trailer Information -->
-                            <div style="background-color: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
-                                <div style="display: flex; align-items: center; gap: 8px; background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-                                    <svg style="width: 16px; height: 16px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"></path>
-                                        <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"></path>
-                                    </svg>
-                                    <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Trailer Information</h3>
-                                </div>
-                                <div style="padding: 20px;">
-                                    <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="trailer_color">Color</label>
-                                            <input type="text" id="trailer_color" name="trailer_color" value="${props.trailer_color || ''}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="trailer_serial">Serial Number</label>
-                                            <input type="text" id="trailer_serial" name="trailer_serial" value="${props.trailer_serial || ''}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div style="grid-column: 1 / -1;">
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="trailer_details">Details</label>
-                                            <textarea id="trailer_details" name="trailer_details" rows="3" 
-                                                      style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; resize: vertical;">${props.trailer_details || ''}</textarea>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Schedule Information -->
-                            <div style="background-color: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
-                                <div style="display: flex; align-items: center; gap: 8px; background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-                                    <svg style="width: 16px; height: 16px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Schedule Information</h3>
-                                </div>
-                                <div style="padding: 20px;">
-                                    <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="start_dt">Start Date & Time</label>
-                                            <input type="datetime-local" id="start_dt" name="start_dt" value="${formatDateForInput(event.start)}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="end_dt">End Date & Time</label>
-                                            <input type="datetime-local" id="end_dt" name="end_dt" value="${formatDateForInput(event.end)}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;">
-                                                <input type="checkbox" id="all_day" name="all_day" ${event.allDay ? 'checked' : ''} 
-                                                       style="width: 16px; height: 16px; accent-color: #3b82f6;">
-                                                All Day Event
-                                            </label>
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="status">Status</label>
-                                            <select id="status" name="status" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                                <option value="uncompleted" ${status === 'uncompleted' ? 'selected' : ''}>Uncompleted</option>
-                                                <option value="completed" ${status === 'completed' ? 'selected' : ''}>Completed</option>
-                                                <option value="cancelled" ${status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Notes -->
-                            <div style="background-color: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
-                                <div style="display: flex; align-items: center; gap: 8px; background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-                                    <svg style="width: 16px; height: 16px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Notes</h3>
-                                </div>
-                                <div style="padding: 20px;">
-                                    <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="notes">General Notes</label>
-                                            <textarea id="notes" name="notes" rows="4" 
-                                                      style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; resize: vertical;">${props.notes || ''}</textarea>
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="repair_notes">Repair Notes</label>
-                                            <textarea id="repair_notes" name="repair_notes" rows="4" 
-                                                      style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; resize: vertical;">${props.repair_notes || ''}</textarea>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
-
-                    <!-- Footer -->
-                    <div style="display: flex; justify-content: flex-end; gap: 12px; padding: 20px 24px; border-top: 1px solid #e5e7eb; background-color: #ffffff;">
-                        <button type="button" class="cancel-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Cancel</button>
-                        <button type="button" class="print-wo-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Print WO</button>
-                        <button type="button" class="print-customer-copy-wo-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Print Customer Copy WO</button>
-                        <button type="button" class="save-btn" style="padding: 10px 20px; border: none; border-radius: 8px; background-color: #3b82f6; color: #ffffff; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Save Changes</button>
-                    </div>
-                </div>
-            `;
-        }
-
-        /**
-         * Build new job form content
-         * @param {Object} event - Mock event object with clicked date/time
-         * @param {Object} props - Mock props for new job
-         * @returns {string} HTML content
-         */
-        buildNewJobFormContent(event, props) {
-            // Format dates for input fields
-            const formatDateForInput = (dateStr) => {
-                if (!dateStr) return '';
-                const date = new Date(dateStr);
-                // Check if date is valid
-                if (isNaN(date.getTime())) return '';
-                // Convert to local timezone and format for datetime-local input
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                return `${year}-${month}-${day}T${hours}:${minutes}`;
-            };
-
-            return `
-                <div class="event-details-dialog" style="max-width: 800px; max-height: 90vh; overflow: hidden; background-color: #ffffff; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); margin: 20px;">
-                    <!-- Header -->
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 24px 24px 0 24px; border-bottom: 1px solid #e5e7eb; margin-bottom: 0;">
-                        <h2 style="font-size: 24px; font-weight: bold; color: #111827; margin: 0;">Create New Job</h2>
-                        <div style="display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; background-color: #f59e0b; color: #ffffff;">New</div>
-                    </div>
-
-                    <!-- Scrollable Content -->
-                    <div style="max-height: calc(90vh - 200px); overflow-y: auto; padding: 24px;">
-                        <form id="new-job-form" class="space-y-6">
-                            <!-- Customer Information -->
-                            <div style="background-color: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
-                                <div style="display: flex; align-items: center; gap: 8px; background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-                                    <svg style="width: 16px; height: 16px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Customer Information</h3>
-                                </div>
-                                <div style="padding: 20px;">
-                                    <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="business_name">Business Name *</label>
-                                            <input type="text" id="business_name" name="business_name" value="" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;" required>
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="contact_name">Contact Name</label>
-                                            <input type="text" id="contact_name" name="contact_name" value="" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="phone">Phone</label>
-                                            <input type="tel" id="phone" name="phone" value="" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="date_call_received">Date Call was Received</label>
-                                            <input type="date" id="date_call_received" name="date_call_received" value="" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Schedule Information -->
-                            <div style="background-color: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
-                                <div style="display: flex; align-items: center; gap: 8px; background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-                                    <svg style="width: 16px; height: 16px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Schedule Information</h3>
-                                </div>
-                                <div style="padding: 20px;">
-                                    <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                        <div>
-                                            <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;">
-                                                <input type="checkbox" id="all_day" name="all_day" ${event.allDay ? 'checked' : ''} 
-                                                       style="width: 16px; height: 16px; accent-color: #3b82f6;">
-                                                All Day Event
-                                            </label>
-                                        </div>
-                                        <div></div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="start_dt">Start Date & Time</label>
-                                            <input type="datetime-local" id="start_dt" name="start_dt" value="${formatDateForInput(event.start)}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;" required>
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="end_dt">End Date & Time</label>
-                                            <input type="datetime-local" id="end_dt" name="end_dt" value="${formatDateForInput(event.end)}" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="status">Status</label>
-                                            <select id="status" name="status" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                                <option value="uncompleted" selected>Uncompleted</option>
-                                                <option value="completed">Completed</option>
-                                                <option value="cancelled">Cancelled</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="repeat_type">Repeat</label>
-                                            <select id="repeat_type" name="repeat_type" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                                <option value="">No Repeat</option>
-                                                <option value="annually">Annually</option>
-                                                <option value="monthly">Monthly</option>
-                                            </select>
-                                        </div>
-                                        <div id="repeat_months_container" style="display: none;">
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="repeat_months">Months</label>
-                                            <input type="number" id="repeat_months" name="repeat_months" value="1" min="1" max="12"
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div style="grid-column: 1 / -1;">
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="notes">General Notes</label>
-                                            <textarea id="notes" name="notes" rows="3" 
-                                                      style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; resize: vertical;"></textarea>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Trailer Information -->
-                            <div style="background-color: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden;">
-                                <div style="display: flex; align-items: center; gap: 8px; background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
-                                    <svg style="width: 16px; height: 16px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
-                                        <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"></path>
-                                        <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"></path>
-                                    </svg>
-                                    <h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 0;">Trailer Information</h3>
-                                </div>
-                                <div style="padding: 20px;">
-                                    <div class="grid-responsive" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="trailer_color">Color</label>
-                                            <input type="text" id="trailer_color" name="trailer_color" value="" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="trailer_serial">Serial Number</label>
-                                            <input type="text" id="trailer_serial" name="trailer_serial" value="" 
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                                        </div>
-                                        <div style="grid-column: 1 / -1;">
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="trailer_details">Trailer Details</label>
-                                            <textarea id="trailer_details" name="trailer_details" rows="3" 
-                                                      style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; resize: vertical;"></textarea>
-                                        </div>
-                                        <div style="grid-column: 1 / -1;">
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="repair_notes">Repair Notes</label>
-                                            <textarea id="repair_notes" name="repair_notes" rows="3" 
-                                                      style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; resize: vertical;"></textarea>
-                                        </div>
-                                        <div>
-                                            <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px;" for="quote">Quote</label>
-                                            <input type="number" id="quote" name="quote" value="" step="0.01" min="0"
-                                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;" placeholder="0.00">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                        </form>
-                    </div>
-
-                    <!-- Footer -->
-                    <div style="display: flex; justify-content: flex-end; gap: 12px; padding: 20px 24px; border-top: 1px solid #e5e7eb; background-color: #ffffff;">
-                        <button type="button" class="cancel-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #ffffff; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Cancel</button>
-                        <button type="button" class="create-btn" style="padding: 10px 20px; border: none; border-radius: 8px; background-color: #10b981; color: #ffffff; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">Create Job</button>
-                    </div>
-                </div>
-            `;
-        }
-
-        /**
-         * Setup edit mode event listeners
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         */
-        setupEditModeListeners(backdrop, dialog, event, props) {
-            const closeDialog = () => {
-                if (backdrop && backdrop.parentNode) {
-                    backdrop.parentNode.removeChild(backdrop);
-                }
-                this.eventDetailsDialog = null;
-            };
-
-            // Cancel button
-            const cancelBtn = dialog.querySelector('.cancel-btn');
-            if (cancelBtn) {
-                cancelBtn.addEventListener('click', () => {
-                    // Switch back to detail view
-                    this.switchToDetailMode(backdrop, dialog, event, props);
-                });
-            }
-
-            // Save button
-            const saveBtn = dialog.querySelector('.save-btn');
-            if (saveBtn) {
-                saveBtn.addEventListener('click', () => {
-                    this.saveJobChanges(backdrop, dialog, event, props);
-                });
-            }
-
-            // Print WO button
-            const printWoBtn = dialog.querySelector('.print-wo-btn');
-            if (printWoBtn) {
-                printWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
-                });
-            }
-
-            // Print Customer Copy WO button
-            const printCustomerCopyWoBtn = dialog.querySelector('.print-customer-copy-wo-btn');
-            if (printCustomerCopyWoBtn) {
-                printCustomerCopyWoBtn.addEventListener('click', () => {
-                    // Do nothing when clicked
-                });
-            }
-
-            // Backdrop click
-            backdrop.addEventListener('click', (e) => {
-                if (e.target === backdrop) {
-                    closeDialog();
-                }
-            });
-
-            // Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeDialog();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
-        }
-
-
-        /**
-         * Switch back to detail mode
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         */
-        switchToDetailMode(backdrop, dialog, event, props) {
-            try {
-                console.log('JobCalendar: Switching back to detail mode');
-                
-                // Build detail content
-                const detailContent = this.buildJobEventContent(event, props);
-                dialog.innerHTML = detailContent;
-                
-                // Setup detail mode listeners
-                this.setupEventDetailsDialogListeners(backdrop, dialog, event, props);
-                
-            } catch (error) {
-                console.error('JobCalendar: Error switching to detail mode', error);
-                this.showError('Unable to switch to detail mode. Please try again.');
-            }
-        }
-
-        /**
-         * Save job changes
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - FullCalendar event
-         * @param {Object} props - Event extended properties
-         */
-        saveJobChanges(backdrop, dialog, event, props) {
-            try {
-                console.log('JobCalendar: Saving job changes');
-                
-                const form = dialog.querySelector('#edit-job-form');
-                const formData = new FormData(form);
-                
-                // Convert FormData to object
-                const data = {};
-                for (let [key, value] of formData.entries()) {
-                    data[key] = value;
-                }
-                
-                // Add job ID
-                data.job_id = props.job_id || event.id.replace(/^job-/, '');
-                
-                console.log('JobCalendar: Saving data', data);
-                
-                // Get CSRF token and log for debugging
-                const csrfToken = this.getCSRFToken();
-                console.log('JobCalendar: CSRF Token:', csrfToken);
-                
-                // Send update request with proper CSRF headers
-                fetch(`/api/jobs/${data.job_id}/update/`, {
-                    method: 'POST',
-                    credentials: 'same-origin',  // Send cookies so CsrfViewMiddleware can see csrftoken
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken,   // exact header name + cookie name
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: JSON.stringify(data)
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        // Read and log the response body for debugging
-                        return response.text().then(text => {
-                            console.error('JobCalendar: Save failed', response.status, text);
-                            throw new Error(`HTTP ${response.status}: ${text}`);
-                        });
-                    }
-                    return response.json();
-                })
-                .then(result => {
-                    console.log('JobCalendar: Job updated successfully', result);
-                    
-                    // Update the event in the calendar
-                    this.updateCalendarEvent(event, result);
-                    
-                    // Switch back to detail view with updated data
-                    this.switchToDetailMode(backdrop, dialog, event, result);
-                    
-                    // Show success message
-                    this.showSuccess('Job updated successfully!');
-                })
-                .catch(error => {
-                    console.error('JobCalendar: Error saving job', error);
-                    this.showError(`Error saving job: ${error.message}`);
-                });
-                
-            } catch (error) {
-                console.error('JobCalendar: Error saving job changes', error);
-                this.showError('Unable to save changes. Please try again.');
-            }
-        }
-
-        /**
-         * Update calendar event with new data
-         * @param {Object} event - FullCalendar event
-         * @param {Object} newData - Updated job data
-         */
-        updateCalendarEvent(event, newData) {
-            try {
-                // For any changes, remove the event and let the refresh add it back with updated data
-                // This ensures all changes (dates, names, phone, etc.) are properly reflected
-                console.log('JobCalendar: Removing event to refresh with updated data');
-                event.remove();
-                
-                console.log('JobCalendar: Calendar event updated');
-                
-                // Always refresh the calendar to show all changes and re-fetch events
-                this.refreshCalendar();
-                
-            } catch (error) {
-                console.error('JobCalendar: Error updating calendar event', error);
-            }
-        }
-
-        /**
-         * Create new job
-         * @param {HTMLElement} backdrop - Dialog backdrop
-         * @param {HTMLElement} dialog - Dialog container
-         * @param {Object} event - Mock event object
-         * @param {Object} props - Mock props for new job
-         */
-        createNewJob(backdrop, dialog, event, props) {
-            try {
-                console.log('JobCalendar: Creating new job');
-                
-                const form = dialog.querySelector('#new-job-form');
-                const formData = new FormData(form);
-                
-                // Convert FormData to object
-                const data = {};
-                for (let [key, value] of formData.entries()) {
-                    data[key] = value;
-                }
-                
-                console.log('JobCalendar: Creating job with data', data);
-                
-                // Get CSRF token
-                const csrfToken = this.getCSRFToken();
-                console.log('JobCalendar: CSRF Token:', csrfToken);
-                
-                // Send create request
-                fetch('/api/jobs/create/', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken,
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: JSON.stringify(data)
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.text().then(text => {
-                            console.error('JobCalendar: Create failed', response.status, text);
-                            throw new Error(`HTTP ${response.status}: ${text}`);
-                        });
-                    }
-                    return response.json();
-                })
-                .then(result => {
-                    console.log('JobCalendar: Job created successfully', result);
-                    
-                    // Close the dialog
-                    if (backdrop && backdrop.parentNode) {
-                        backdrop.parentNode.removeChild(backdrop);
-                    }
-                    this.eventDetailsDialog = null;
-                    
-                    // Refresh the calendar to show the new job
-                    this.calendar.refetchEvents();
-                    
-                    // Show success message
-                    this.showSuccess('Job created successfully!');
-                })
-                .catch(error => {
-                    console.error('JobCalendar: Error creating job', error);
-                    this.showError(`Error creating job: ${error.message}`);
-                });
-                
-            } catch (error) {
-                console.error('JobCalendar: Error creating new job', error);
-                this.showError('Unable to create job. Please try again.');
-            }
-        }
 
         /**
          * Get CSRF token for API requests
@@ -2722,7 +2438,6 @@
          * @param {string} message - Success message
          */
         showSuccess(message) {
-            console.log('JobCalendar Success:', message);
             // Use the global toast system if available, otherwise use the local toast method
             if (window.layout && window.layout.showToast) {
                 window.layout.showToast(message, 'success');
@@ -2735,16 +2450,9 @@
          * Cleanup method for removing event listeners and resetting state
          */
         destroy() {
-            // Close event details dialog if open
-            if (this.eventDetailsDialog && this.eventDetailsDialog.parentNode) {
-                this.eventDetailsDialog.parentNode.removeChild(this.eventDetailsDialog);
-                this.eventDetailsDialog = null;
-            }
-
             if (this.calendar) {
                 this.calendar.destroy();
             }
-            console.log('JobCalendar: Destroyed');
         }
     }
 
