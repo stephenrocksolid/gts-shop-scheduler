@@ -353,8 +353,10 @@
 
 /* Calendar Grid */
 .fc-daygrid-day {
-    @apply min-h-[100px];
-    /* Removed overflow: hidden to allow multi-day events to span across days */
+    height: 200px !important;
+    min-height: 200px !important;
+    max-height: 200px !important;
+    /* Fixed height for consistent day cell sizing */
 }
 
 .fc-daygrid-day-number {
@@ -947,5 +949,56 @@
     
     .event-details-footer .btn {
         @apply w-full;
+    }
+}
+
+/* ===== SCROLLABLE DAY CELLS ===== */
+/* Enable scrolling within day cells to view all jobs */
+.fc-daygrid-day-events {
+    max-height: 180px !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    /* Smooth scrolling */
+    scroll-behavior: smooth;
+    /* Custom scrollbar styling for webkit browsers */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+/* Webkit scrollbar styling (Chrome, Safari, Edge) */
+.fc-daygrid-day-events::-webkit-scrollbar {
+    width: 6px;
+}
+
+.fc-daygrid-day-events::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.fc-daygrid-day-events::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.5);
+    border-radius: 3px;
+}
+
+.fc-daygrid-day-events::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(107, 114, 128, 0.7);
+}
+
+/* Ensure day frame has proper structure for scrolling */
+.fc-daygrid-day-frame {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Responsive adjustments for scrollable cells */
+@media (max-width: 768px) {
+    .fc-daygrid-day-events {
+        max-height: 120px !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .fc-daygrid-day-events {
+        max-height: 80px !important;
     }
 }

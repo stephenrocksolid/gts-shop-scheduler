@@ -1,7 +1,7 @@
 {% load static %}
 <form hx-post="{% url 'rental_scheduler:job_create_submit' %}"
       hx-swap="none"
-      hx-on::after-request="if(event.detail.successful) { if(window.JobPanel) { if(window.JobPanel.clearUnsavedChanges) { window.JobPanel.clearUnsavedChanges(); } window.JobPanel.close(true); } if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
+      hx-on::after-request="if(event.detail.successful) { if(window.JobPanel) { if(window.JobPanel.clearUnsavedChanges) { window.JobPanel.clearUnsavedChanges(); } if(!window.JobPanel.isSwitchingJobs) { const currentJobId = window.JobPanel.currentJobId; if(currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(currentJobId)) { window.JobWorkspace.closeJob(currentJobId); } else { window.JobPanel.close(true); } } } if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
       style="display: flex; flex-direction: column; gap: 24px;">
   {% csrf_token %}
   {% if form.instance.pk %}
@@ -143,39 +143,49 @@
         <!-- Recurring Event Section -->
         <div style="grid-column: 1 / -1; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px;">
           <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; margin-bottom: 12px; cursor: pointer;">
-            <input type="checkbox" id="recurrence-enabled" name="recurrence_enabled" style="width: 18px; height: 18px; accent-color: #3b82f6;" {% if form.instance.recurrence_rule %}checked{% endif %}>
+            <input type="checkbox" id="recurrence-enabled" name="recurrence_enabled" style="width: 18px; height: 18px; accent-color: #3b82f6;" {% if form.instance.pk %}{% if form.instance.recurrence_parent or form.instance.recurrence_rule %}checked{% endif %} {% if form.instance.recurrence_parent %}disabled{% endif %}{% endif %}>
             <svg style="width: 18px; height: 18px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
             </svg>
             Make this a recurring event
           </label>
           
-          <div id="recurrence-options" class="{% if form.instance.recurrence_rule %}recurrence-visible{% else %}recurrence-hidden{% endif %}" style="grid-template-columns: 1fr 1fr; gap: 12px;">
+          {% if form.instance.pk and form.instance.recurrence_parent %}
+          <!-- For recurring instances, show info message -->
+          <div style="background: #e0f2fe; border: 1px solid #7dd3fc; border-radius: 6px; padding: 12px; margin-top: 8px;">
+            <p style="margin: 0; color: #0369a1; font-size: 14px;">
+              This is part of a recurring series. 
+              <a href="#" onclick="event.preventDefault(); JobPanel.load('{% url 'rental_scheduler:job_create_partial' %}?edit={{ form.instance.recurrence_parent.id }}');" style="text-decoration: underline; font-weight: 600;">Edit the entire series</a>
+            </p>
+          </div>
+          {% else %}
+          <div id="recurrence-options" class="{% if form.instance.pk and form.instance.recurrence_rule %}recurrence-visible{% else %}recurrence-hidden{% endif %}" style="grid-template-columns: 1fr 1fr; gap: 12px;">
             <div>
               <label for="recurrence-type" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repeats</label>
               <select id="recurrence-type" name="recurrence_type" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                <option value="monthly" {% if form.instance.recurrence_rule.type == 'monthly' %}selected{% endif %}>Monthly</option>
-                <option value="yearly" {% if form.instance.recurrence_rule.type == 'yearly' or not form.instance.recurrence_rule %}selected{% endif %}>Yearly</option>
-                <option value="weekly" {% if form.instance.recurrence_rule.type == 'weekly' %}selected{% endif %}>Weekly</option>
-                <option value="daily" {% if form.instance.recurrence_rule.type == 'daily' %}selected{% endif %}>Daily</option>
+                <option value="monthly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'monthly' %}selected{% endif %}>Monthly</option>
+                <option value="yearly" {% if not form.instance.recurrence_rule or form.instance.recurrence_rule.type == 'yearly' %}selected{% endif %}>Yearly</option>
+                <option value="weekly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'weekly' %}selected{% endif %}>Weekly</option>
+                <option value="daily" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'daily' %}selected{% endif %}>Daily</option>
               </select>
             </div>
             
             <div>
               <label for="recurrence-interval" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Every</label>
-              <input type="number" id="recurrence-interval" name="recurrence_interval" min="1" max="12" value="{{ form.instance.recurrence_rule.interval|default:'1' }}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
+              <input type="number" id="recurrence-interval" name="recurrence_interval" min="1" max="12" value="{% if form.instance.recurrence_rule %}{{ form.instance.recurrence_rule.interval|default:'1' }}{% else %}1{% endif %}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
             </div>
             
             <div>
               <label for="recurrence-count" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Number of occurrences</label>
-              <input type="number" id="recurrence-count" name="recurrence_count" min="1" max="500" value="{{ form.instance.recurrence_rule.count|default:'50' }}" placeholder="50" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
+              <input type="number" id="recurrence-count" name="recurrence_count" min="1" max="500" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}{{ form.instance.recurrence_rule.count }}{% else %}50{% endif %}" placeholder="50" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
             </div>
             
             <div>
               <label for="recurrence-until" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Or end by date</label>
-              <input type="date" id="recurrence-until" name="recurrence_until" value="{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
+              <input type="date" id="recurrence-until" name="recurrence_until" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}{% endif %}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
             </div>
           </div>
+          {% endif %}
         </div>
         <div style="grid-column: 1 / -1;">
           <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">General Notes</label>
@@ -199,7 +209,7 @@
     <div style="padding: 24px;">
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
         <div style="grid-column: 1 / -1;">
-          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Trailer</label>
+          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Description</label>
           {{ form.trailer_details }}
         </div>
         <div>

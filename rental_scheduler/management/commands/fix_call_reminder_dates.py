@@ -81,3 +81,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('\n✓ No corrupted records found'))
 
 
+
+
+
+
+
+

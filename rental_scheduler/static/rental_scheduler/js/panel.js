@@ -45,6 +45,7 @@
       dragging: false,
       sx: 0,
       sy: 0,
+      isSwitchingJobs: false,  // Flag to prevent auto-close when switching between jobs
       currentJobId: null, // Track current job for workspace integration
       
       updateVisibility() {
@@ -102,6 +103,7 @@
       open() {
         this.isOpen = true;
         this.updateVisibility();
+        this.updateMinimizeButton();
         save(this);
       },
       
@@ -136,8 +138,8 @@
         const minimizeBtn = document.getElementById('panel-workspace-minimize-btn');
         if (!minimizeBtn) return;
         
-        // Show minimize button only if this job is in the workspace
-        if (this.currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(this.currentJobId)) {
+        // Always show minimize button when panel is open
+        if (this.isOpen) {
           minimizeBtn.style.display = 'inline-flex';
         } else {
           minimizeBtn.style.display = 'none';
@@ -193,10 +195,15 @@
       
       hasUnsavedChanges() {
         const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) return false;
+        if (!panelBody) {
+          console.log('hasUnsavedChanges: No panel body found');
+          return false;
+        }
         
         // Check for any form inputs that have been modified
         const inputs = panelBody.querySelectorAll('input, select, textarea');
+        console.log('hasUnsavedChanges: Checking', inputs.length, 'inputs');
+        
         for (const input of inputs) {
           // Skip hidden inputs and buttons
           if (input.type === 'hidden' || input.type === 'submit' || input.type === 'button') {
@@ -208,24 +215,31 @@
             const originalValue = input.getAttribute('data-original-value');
             const currentValue = input.value;
             if (originalValue !== currentValue) {
+              console.log('hasUnsavedChanges: Found change in', input.name, 'original:', originalValue, 'current:', currentValue);
               return true;
             }
           } else if (input.value !== '') {
             // If no original value stored but input has a value, it might be a change
             // This is a fallback for inputs that weren't tracked from the start
+            console.log('hasUnsavedChanges: Found untracked field with value:', input.name, 'value:', input.value);
             return true;
           }
         }
         
+        console.log('hasUnsavedChanges: No changes detected');
         return false;
       },
       
       trackFormChanges() {
         const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) return;
+        if (!panelBody) {
+          console.log('trackFormChanges: No panel body found');
+          return;
+        }
         
         // Store original values for all form inputs
         const inputs = panelBody.querySelectorAll('input, select, textarea');
+        console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
         inputs.forEach(input => {
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
             input.setAttribute('data-original-value', input.value);
@@ -269,7 +283,33 @@
             if (event.detail.successful) {
               // Clear unsaved changes tracking
               this.clearUnsavedChanges();
-              // Execute callback
+              
+              // Capture job ID from trigger event (available immediately)
+              if (event.detail.xhr) {
+                const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
+                if (triggerHeader) {
+                  try {
+                    const triggerData = JSON.parse(triggerHeader);
+                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
+                      this.currentJobId = triggerData.jobSaved.jobId;
+                      console.log('Captured job ID from trigger:', this.currentJobId);
+                    }
+                  } catch (e) {
+                    console.warn('Could not parse trigger data:', e);
+                  }
+                }
+              }
+              
+              // Fallback: try to get from DOM (for older responses)
+              if (!this.currentJobId) {
+                const jobIdInput = form.querySelector('input[name="job_id"]');
+                if (jobIdInput && jobIdInput.value) {
+                  this.currentJobId = parseInt(jobIdInput.value);
+                  console.log('Captured job ID from DOM fallback:', this.currentJobId);
+                }
+              }
+              
+              // Execute callback AFTER capturing job ID
               if (callback) callback();
             } else {
               console.error('Form submission failed');
@@ -320,20 +360,38 @@
         const workspaceMinimizeBtn = document.getElementById('panel-workspace-minimize-btn');
         if (workspaceMinimizeBtn) {
           workspaceMinimizeBtn.addEventListener('click', () => {
-            // If there are unsaved changes, save first
-            if (this.hasUnsavedChanges()) {
-              this.saveForm(() => {
-                // After saving, minimize
-                if (this.currentJobId && window.JobWorkspace) {
-                  window.JobWorkspace.minimizeJob(this.currentJobId);
+            // Always save first (needed for new jobs to get an ID)
+            this.saveForm(() => {
+              // After saving, get the job ID (might be newly created)
+              const form = document.querySelector('#job-panel .panel-body form');
+              const jobIdInput = form?.querySelector('input[name="job_id"]');
+              let jobId = this.currentJobId || (jobIdInput ? jobIdInput.value : null);
+              
+              if (jobId && window.JobWorkspace) {
+                // If job is not in workspace yet, add it
+                if (!window.JobWorkspace.hasJob(jobId)) {
+                  // Get job details from the form
+                  const businessName = form?.querySelector('input[name="business_name"]')?.value || 
+                                     form?.querySelector('input[name="contact_name"]')?.value || 
+                                     'Unnamed Job';
+                  const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
+                  
+                  // Add to workspace
+                  window.JobWorkspace.openJob(jobId, {
+                    customerName: businessName,
+                    trailerColor: trailerColor,
+                    calendarColor: '#3B82F6'
+                  });
+                  
+                  // Update the panel's currentJobId
+                  this.currentJobId = jobId;
+                  this.setCurrentJobId(jobId);
                 }
-              });
-            } else {
-              // No unsaved changes, just minimize
-              if (this.currentJobId && window.JobWorkspace) {
-                window.JobWorkspace.minimizeJob(this.currentJobId);
+                
+                // Now minimize
+                window.JobWorkspace.minimizeJob(jobId);
               }
-            }
+            });
           });
         }
         
@@ -453,7 +511,7 @@
       htmx.ajax('GET', url, { 
         target: target, 
         swap: 'innerHTML',
-        'hx-on::after-settle': 'if(window.JobPanel && window.JobPanel.trackFormChanges) window.JobPanel.trackFormChanges()'
+        'hx-on::after-settle': 'if(window.JobPanel && window.JobPanel.trackFormChanges) window.JobPanel.trackFormChanges(); if(window.JobPanel && window.JobPanel.updateMinimizeButton) window.JobPanel.updateMinimizeButton()'
       });
       executeOperation(() => panelInstance.open());
     },
@@ -472,8 +530,17 @@
     clearUnsavedChanges: () => {
       executeOperation(() => panelInstance.clearUnsavedChanges());
     },
+    hasUnsavedChanges: () => {
+      return panelInstance.hasUnsavedChanges();
+    },
     saveForm: (callback) => {
       executeOperation(() => panelInstance.saveForm(callback));
+    },
+    get currentJobId() {
+      return panelInstance.currentJobId;
+    },
+    set currentJobId(value) {
+      panelInstance.currentJobId = value;
     }
   };
 
@@ -491,7 +558,7 @@
         }
         return `top:0; left:0; transform: translate(${this.x}px, ${this.y}px);`;
       },
-      open(){ this.isOpen = true; save(this); },
+      open(){ this.isOpen = true; this.updateMinimizeButton(); save(this); },
       close(skipUnsavedCheck){ 
         // Check for unsaved changes before closing (unless explicitly skipped)
         if (!skipUnsavedCheck && this.hasUnsavedChanges()) {
@@ -514,8 +581,8 @@
         const minimizeBtn = document.getElementById('panel-workspace-minimize-btn');
         if (!minimizeBtn) return;
         
-        // Show minimize button only if this job is in the workspace
-        if (this.currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(this.currentJobId)) {
+        // Always show minimize button when panel is open
+        if (this.isOpen) {
           minimizeBtn.style.display = 'inline-flex';
         } else {
           minimizeBtn.style.display = 'none';
@@ -552,10 +619,14 @@
       },
       trackFormChanges() {
         const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) return;
+        if (!panelBody) {
+          console.log('trackFormChanges: No panel body found');
+          return;
+        }
         
         // Store original values for all form inputs
         const inputs = panelBody.querySelectorAll('input, select, textarea');
+        console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
         inputs.forEach(input => {
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
             input.setAttribute('data-original-value', input.value);
@@ -597,7 +668,33 @@
             if (event.detail.successful) {
               // Clear unsaved changes tracking
               this.clearUnsavedChanges();
-              // Execute callback
+              
+              // Capture job ID from trigger event (available immediately)
+              if (event.detail.xhr) {
+                const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
+                if (triggerHeader) {
+                  try {
+                    const triggerData = JSON.parse(triggerHeader);
+                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
+                      this.currentJobId = triggerData.jobSaved.jobId;
+                      console.log('Captured job ID from trigger:', this.currentJobId);
+                    }
+                  } catch (e) {
+                    console.warn('Could not parse trigger data:', e);
+                  }
+                }
+              }
+              
+              // Fallback: try to get from DOM (for older responses)
+              if (!this.currentJobId) {
+                const jobIdInput = form.querySelector('input[name="job_id"]');
+                if (jobIdInput && jobIdInput.value) {
+                  this.currentJobId = parseInt(jobIdInput.value);
+                  console.log('Captured job ID from DOM fallback:', this.currentJobId);
+                }
+              }
+              
+              // Execute callback AFTER capturing job ID
               if (callback) callback();
             } else {
               console.error('Form submission failed');

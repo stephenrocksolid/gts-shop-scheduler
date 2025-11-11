@@ -168,7 +168,7 @@ def event_to_calendar_json(event, title=None, **extra_props):
         Dict suitable for FullCalendar event feed
     """
     if getattr(event, "all_day", False):
-        # All-day events: use date-only strings
+        # All-day events: use noon to avoid timezone shifting issues
         start_date = timezone.localtime(event.start_dt).date()
         end_date = timezone.localtime(event.end_dt).date()
         
@@ -177,12 +177,16 @@ def event_to_calendar_json(event, title=None, **extra_props):
         # E.g., Mon-Tue event (stored) becomes Mon to Wed (exclusive) for display
         end_date_exclusive = end_date + timedelta(days=1)
         
+        # Use noon (12:00:00) to prevent timezone conversion from shifting dates
+        start_str = f"{start_date.isoformat()}T12:00:00"
+        end_str = f"{end_date_exclusive.isoformat()}T12:00:00"
+        
         return {
             "id": getattr(event, "id", None),
             "title": title or str(event),
             "allDay": True,
-            "start": start_date.isoformat(),
-            "end": end_date_exclusive.isoformat(),  # +1 day for exclusive end
+            "start": start_str,
+            "end": end_str,  # +1 day for exclusive end
             **extra_props
         }
     else:

@@ -137,6 +137,12 @@ def job_create_api_recurring(request):
         # Handle recurring event creation
         recurrence = data.get('recurrence', {})
         if recurrence and recurrence.get('enabled'):
+            # Don't allow instances to become recurring parents
+            if job.recurrence_parent:
+                return JsonResponse({
+                    'error': 'Cannot make a recurring instance into a new recurring series. Edit the parent series instead.'
+                }, status=400)
+            
             try:
                 # Parse recurrence parameters
                 recur_type = recurrence.get('type', 'monthly')

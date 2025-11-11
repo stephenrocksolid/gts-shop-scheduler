@@ -33,6 +33,9 @@
             // Load saved filters from localStorage
             this.loadSavedFilters();
             
+            // Initialize selected calendars BEFORE calendar is set up
+            this.initializeSelectedCalendars();
+            
             this.initialize();
         }
 
@@ -119,8 +122,8 @@
                         }
                     }
                 },
-                height: '100%',        // fill #calendar-wrap
-                expandRows: true,      // make weeks expand to fill vertical space
+                height: 'auto',        // auto height based on content
+                expandRows: false,     // fixed height rows
                 windowResizeDelay: 50, // better resizing behavior
                 events: this.fetchEvents.bind(this),
                 dateClick: this.handleDateClick.bind(this),
@@ -132,7 +135,7 @@
                     minute: '2-digit',
                     meridiem: 'short'
                 },
-                dayMaxEvents: true,
+                dayMaxEvents: false,  // Show all events, enable scrolling in day cells
                 moreLinkClick: 'popover',
                 eventDisplay: 'block',
                 nextDayThreshold: '00:00:00',  // Events that end at midnight or later span to next day
@@ -185,8 +188,263 @@
             // Initialize date picker controls
             this.initializeDatePickerControls();
             
+            // Setup day number clicks to show event list
+            this.setupDayNumberClicks();
+            
             // Make calendar instance globally available
             window.jobCalendar = this;
+        }
+        
+        /**
+         * Setup click handlers for day numbers to show event list popover
+         */
+        setupDayNumberClicks() {
+            // Add CSS to make day numbers look clickable
+            const style = document.createElement('style');
+            style.textContent = `
+                .fc-daygrid-day-number {
+                    cursor: pointer !important;
+                    padding: 2px 6px;
+                    border-radius: 4px;
+                    transition: background-color 0.2s;
+                }
+                .fc-daygrid-day-number:hover {
+                    background-color: #e5e7eb !important;
+                }
+            `;
+            document.head.appendChild(style);
+            
+            // Use event delegation on the calendar element
+            this.calendarEl.addEventListener('click', (e) => {
+                // Check if clicked element is a day number
+                const dayNumber = e.target.closest('.fc-daygrid-day-number');
+                if (!dayNumber) return;
+                
+                // Prevent default behavior and event propagation
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Get the day cell
+                const dayCell = dayNumber.closest('.fc-daygrid-day');
+                if (!dayCell) return;
+                
+                // Get the date from the day cell's data attribute
+                const dateStr = dayCell.getAttribute('data-date');
+                if (!dateStr) return;
+                
+                // Parse the date
+                const date = new Date(dateStr + 'T00:00:00');
+                
+                // Get all events for this date
+                const events = this.calendar.getEvents().filter(event => {
+                    // Get date in YYYY-MM-DD format without timezone conversion
+                    const getLocalDateStr = (d) => {
+                        const year = d.getFullYear();
+                        const month = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        return `${year}-${month}-${day}`;
+                    };
+                    
+                    const eventStartDate = getLocalDateStr(event.start);
+                    const clickedDate = dateStr; // Already in YYYY-MM-DD format
+                    
+                    // Check if event starts on this day
+                    // (Our split multi-day events have start dates matching the day they appear on)
+                    return eventStartDate === clickedDate;
+                });
+                
+                // If there are events, show the popover
+                if (events.length > 0) {
+                    // Create a mock "more link" click to trigger the popover
+                    // FullCalendar's popover API requires specific parameters
+                    this.showDayEventsPopover(events, dayNumber, date);
+                }
+            });
+        }
+        
+        /**
+         * Show a popover with all events for a specific day
+         */
+        showDayEventsPopover(events, anchorEl, date) {
+            // Create popover element
+            const popover = document.createElement('div');
+            popover.className = 'fc-popover fc-more-popover';
+            popover.style.cssText = `
+                position: absolute;
+                z-index: 10000;
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                min-width: 300px;
+                max-width: 400px;
+                max-height: 600px;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+            `;
+            
+            // Format date for header
+            const dateStr = this.calendar.formatDate(date, {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric'
+            });
+            
+            // Create header
+            const header = document.createElement('div');
+            header.style.cssText = `
+                padding: 10px 12px;
+                background: #f8f9fa;
+                border-bottom: 1px solid #ddd;
+                font-weight: 600;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            `;
+            header.innerHTML = `
+                <span>${dateStr}</span>
+                <button class="fc-popover-close" style="
+                    background: none;
+                    border: none;
+                    font-size: 20px;
+                    cursor: pointer;
+                    padding: 0;
+                    width: 24px;
+                    height: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #666;
+                    line-height: 1;
+                ">&times;</button>
+            `;
+            
+            // Create event list container
+            const eventList = document.createElement('div');
+            eventList.style.cssText = `
+                padding: 8px;
+                overflow-y: auto;
+                max-height: 550px;
+            `;
+            
+            // Sort events by start time
+            events.sort((a, b) => {
+                if (a.allDay && !b.allDay) return -1;
+                if (!a.allDay && b.allDay) return 1;
+                return a.start - b.start;
+            });
+            
+            // Add events to list
+            events.forEach(event => {
+                const eventEl = document.createElement('div');
+                eventEl.style.cssText = `
+                    padding: 2px 4px;
+                    margin-bottom: 2px;
+                    border-radius: 2px;
+                    cursor: pointer;
+                    background: ${event.backgroundColor || '#3788d8'};
+                    color: white;
+                    font-size: 12px;
+                    line-height: 1.3;
+                    min-height: 20px;
+                    display: flex;
+                    align-items: center;
+                    transition: opacity 0.2s;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                `;
+                
+                // Format time
+                let timeStr = '';
+                if (!event.allDay) {
+                    timeStr = this.calendar.formatDate(event.start, {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        meridiem: 'short'
+                    }) + ' ';
+                }
+                
+                eventEl.innerHTML = `<strong style="margin-right: 4px;">${timeStr}</strong><span>${event.title}</span>`;
+                
+                // Add hover effect and tooltip
+                eventEl.addEventListener('mouseenter', (e) => {
+                    eventEl.style.opacity = '0.8';
+                    // Show tooltip
+                    this.showEventTooltip(event, eventEl);
+                });
+                eventEl.addEventListener('mouseleave', () => {
+                    eventEl.style.opacity = '1';
+                    // Hide tooltip
+                    this.hideEventTooltip();
+                });
+                
+                // Add click handler to open the event
+                eventEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    // Hide tooltip
+                    this.hideEventTooltip();
+                    // Close popover
+                    document.body.removeChild(popover);
+                    // Trigger event click
+                    this.handleEventClick({ event });
+                });
+                
+                eventList.appendChild(eventEl);
+            });
+            
+            // Assemble popover
+            popover.appendChild(header);
+            popover.appendChild(eventList);
+            
+            // Add close button handler
+            const closeBtn = header.querySelector('.fc-popover-close');
+            closeBtn.addEventListener('click', () => {
+                this.hideEventTooltip();
+                document.body.removeChild(popover);
+            });
+            
+            // Add to body
+            document.body.appendChild(popover);
+            
+            // Position the popover near the anchor element
+            const anchorRect = anchorEl.getBoundingClientRect();
+            const popoverRect = popover.getBoundingClientRect();
+            
+            // Calculate position (try to show below, but above if no room)
+            let top = anchorRect.bottom + 5;
+            let left = anchorRect.left;
+            
+            // Check if popover goes off bottom of screen
+            if (top + popoverRect.height > window.innerHeight) {
+                top = anchorRect.top - popoverRect.height - 5;
+            }
+            
+            // Check if popover goes off right of screen
+            if (left + popoverRect.width > window.innerWidth) {
+                left = window.innerWidth - popoverRect.width - 10;
+            }
+            
+            // Ensure popover doesn't go off left of screen
+            if (left < 10) {
+                left = 10;
+            }
+            
+            popover.style.top = top + 'px';
+            popover.style.left = left + 'px';
+            
+            // Close popover when clicking outside
+            const closeOnOutsideClick = (e) => {
+                if (!popover.contains(e.target)) {
+                    this.hideEventTooltip();
+                    document.body.removeChild(popover);
+                    document.removeEventListener('click', closeOnOutsideClick);
+                }
+            };
+            setTimeout(() => {
+                document.addEventListener('click', closeOnOutsideClick);
+            }, 0);
         }
 
         /**
@@ -376,8 +634,76 @@
                     const jobId = extendedProps.job_id;
                     
                     if (jobId && window.JobPanel) {
-                        window.JobPanel.setTitle('Edit Job');
-                        window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                        // Check if there are unsaved changes
+                        if (window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
+                            // Set flag to prevent panel from auto-closing
+                            window.JobPanel.isSwitchingJobs = true;
+                            // Save the form first
+                            window.JobPanel.saveForm(() => {
+                                // After saving, add to workspace if it has a job ID
+                                const currentJobId = window.JobPanel.currentJobId;
+                                if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
+                                    // Get job details from the form
+                                    const form = document.querySelector('#job-panel .panel-body form');
+                                    const businessName = form?.querySelector('input[name="business_name"]')?.value || 
+                                                       form?.querySelector('input[name="contact_name"]')?.value || 
+                                                       'Unnamed Job';
+                                    const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
+                                    
+                                    // Add to workspace as minimized
+                                    window.JobWorkspace.addJobMinimized(currentJobId, {
+                                        customerName: businessName,
+                                        trailerColor: trailerColor,
+                                        calendarColor: '#3B82F6'
+                                    });
+                                }
+                                
+                                // Now open the new job
+                                if (window.JobWorkspace) {
+                                    // Check if the clicked job is already in the workspace
+                                    if (window.JobWorkspace.hasJob(jobId)) {
+                                        // Job is in workspace, switch to it
+                                        window.JobWorkspace.switchToJob(jobId);
+                                    } else {
+                                        // Job is not in workspace, open it fresh
+                                        const props = ev.extendedProps;
+                                        window.JobWorkspace.openJob(jobId, {
+                                            customerName: props.business_name || props.contact_name || 'Job',
+                                            trailerColor: props.trailer_color || '',
+                                            calendarColor: props.calendar_color || '#3B82F6'
+                                        });
+                                    }
+                                } else {
+                                    // Fallback to direct panel opening if workspace not available
+                                    this.openJobInPanel(ev, jobId);
+                                }
+                                
+                                // Clear the switching flag after a delay to allow new form to load
+                                setTimeout(() => {
+                                    window.JobPanel.isSwitchingJobs = false;
+                                }, 500);
+                            });
+                        } else {
+                            // No unsaved changes, open directly
+                            if (window.JobWorkspace) {
+                                // Check if the clicked job is already in the workspace
+                                if (window.JobWorkspace.hasJob(jobId)) {
+                                    // Job is in workspace, switch to it
+                                    window.JobWorkspace.switchToJob(jobId);
+                                } else {
+                                    // Job is not in workspace, open it fresh
+                                    const props = ev.extendedProps;
+                                    window.JobWorkspace.openJob(jobId, {
+                                        customerName: props.business_name || props.contact_name || 'Job',
+                                        trailerColor: props.trailer_color || '',
+                                        calendarColor: props.calendar_color || '#3B82F6'
+                                    });
+                                }
+                            } else {
+                                // Fallback to direct panel opening if workspace not available
+                                this.openJobInPanel(ev, jobId);
+                            }
+                        }
                     } else {
                         console.error('JobPanel not available or job ID missing for event:', ev.id);
                         // Fallback: navigate to the date
@@ -760,6 +1086,8 @@
             this.initializeJumpToDate(dateInput);
 
             // Calendar multi-select is initialized within createCalendarMultiSelect()
+            // Update the calendar button text now that it's in the DOM
+            this.updateCalendarButtonText();
 
             // Initialize the status dropdown functionality
             this.initializeMovedStatusDropdown(statusDropdown);
@@ -819,37 +1147,9 @@
                 padding: 8px;
             `;
             
-            // Load selected calendars from storage or default to all
-            let selectedCalendars = [];
-            try {
-                const saved = localStorage.getItem('gts-selected-calendars');
-                if (saved) {
-                    selectedCalendars = JSON.parse(saved);
-                }
-            } catch (error) {
-                console.warn('Error loading saved calendar selection:', error);
-            }
-            
-            // Load default calendar from storage
-            let defaultCalendar = null;
-            try {
-                const saved = localStorage.getItem('gts-default-calendar');
-                if (saved) {
-                    defaultCalendar = parseInt(saved);
-                }
-            } catch (error) {
-                console.warn('Error loading default calendar:', error);
-            }
-            
-            // If nothing saved, default to all calendars selected
+            // selectedCalendars and defaultCalendar are already initialized in the constructor
+            // Just get the list of available calendars
             const calendars = window.calendarConfig?.calendars || [];
-            if (selectedCalendars.length === 0 && calendars.length > 0) {
-                selectedCalendars = calendars.map(cal => cal.id);
-            }
-            
-            // Store selected calendars and default calendar
-            this.selectedCalendars = new Set(selectedCalendars);
-            this.defaultCalendar = defaultCalendar;
             
             // Build checkboxes
             let checkboxesHTML = '';
@@ -1006,8 +1306,8 @@
                 }
             });
             
-            // Update button text initially
-            this.updateCalendarButtonText();
+            // Note: Button text will be updated after the element is added to the DOM
+            // See updateCalendarButtonText() call in addJumpToDateControl()
             
             container.appendChild(button);
             container.appendChild(popover);
@@ -1149,53 +1449,27 @@
                 this.searchFilter.addEventListener('input', this.debounce(this.handleFilterChange.bind(this), 300));
             }
             
-            // Add mouse wheel navigation through weeks
-            this.setupWheelNavigation();
+            // Enable scrolling within day cells
+            this.enableDayCellScrolling();
         }
         
         /**
-         * Setup mouse wheel navigation to scroll through calendar weeks
+         * Enable scrolling within day event containers
          */
-        setupWheelNavigation() {
+        enableDayCellScrolling() {
             const calendarEl = this.calendarEl;
             if (!calendarEl) return;
             
-            let wheelTimeout = null;
-            let isNavigating = false;
-            
+            // Allow normal scrolling within day cells only
             calendarEl.addEventListener('wheel', (e) => {
-                // Prevent default scrolling
-                e.preventDefault();
+                const dayEventsContainer = e.target.closest('.fc-daygrid-day-events');
                 
-                // Debounce rapid wheel events
-                if (isNavigating) return;
-                
-                // Determine scroll direction
-                const delta = e.deltaY;
-                
-                // Only navigate if there's significant scroll movement
-                if (Math.abs(delta) < 10) return;
-                
-                isNavigating = true;
-                
-                // Navigate calendar
-                if (delta > 0) {
-                    // Scroll down = next week
-                    this.calendar.next();
-                } else {
-                    // Scroll up = previous week
-                    this.calendar.prev();
+                if (dayEventsContainer) {
+                    // We're inside a day events container - allow scrolling
+                    e.stopPropagation();
+                    // Don't preventDefault - let browser handle the scroll naturally
                 }
-                
-                // Save the new date
-                this.saveCurrentDate();
-                
-                // Reset navigation lock after a short delay
-                clearTimeout(wheelTimeout);
-                wheelTimeout = setTimeout(() => {
-                    isNavigating = false;
-                }, 100);
-            }, { passive: false });
+            }, { passive: true });
         }
 
         /**
@@ -1280,6 +1554,47 @@
             } catch (error) {
                 console.warn('JobCalendar: Error loading saved filters', error);
             }
+        }
+
+        /**
+         * Initialize selected calendars from localStorage
+         * This must happen BEFORE the calendar is rendered to ensure
+         * the first event fetch includes the proper calendar filter
+         */
+        initializeSelectedCalendars() {
+            let selectedCalendars = [];
+            
+            // Load selected calendars from storage
+            try {
+                const saved = localStorage.getItem('gts-selected-calendars');
+                if (saved) {
+                    selectedCalendars = JSON.parse(saved);
+                }
+            } catch (error) {
+                console.warn('Error loading saved calendar selection:', error);
+            }
+            
+            // If nothing saved, default to all calendars selected
+            const calendars = window.calendarConfig?.calendars || [];
+            if (selectedCalendars.length === 0 && calendars.length > 0) {
+                selectedCalendars = calendars.map(cal => cal.id);
+            }
+            
+            // Store selected calendars
+            this.selectedCalendars = new Set(selectedCalendars);
+            
+            // Load default calendar from storage
+            let defaultCalendar = null;
+            try {
+                const saved = localStorage.getItem('gts-default-calendar');
+                if (saved) {
+                    defaultCalendar = parseInt(saved);
+                }
+            } catch (error) {
+                console.warn('Error loading default calendar:', error);
+            }
+            
+            this.defaultCalendar = defaultCalendar;
         }
 
         /**
@@ -1422,8 +1737,20 @@
                 });
             };
             
-            const startDate = formatDate(event.start);
-            const endDate = formatDate(event.end || event.start);
+            // For multi-day events, use the full job date range instead of the split day
+            let startDate, endDate;
+            if (props.is_multi_day && props.job_start_date && props.job_end_date) {
+                // Use the full job date range
+                // Append T12:00:00 to ensure local parsing without timezone shift
+                const jobStartDate = new Date(props.job_start_date + 'T12:00:00');
+                const jobEndDate = new Date(props.job_end_date + 'T12:00:00');
+                startDate = formatDate(jobStartDate);
+                endDate = formatDate(jobEndDate);
+            } else {
+                // Use the event's own dates
+                startDate = formatDate(event.start);
+                endDate = formatDate(event.end || event.start);
+            }
             
             // Build tooltip content
             let content = `
@@ -1439,25 +1766,10 @@
             `;
             
             // Date/Time
-            if (event.allDay) {
-                // For all-day events, the end date is exclusive
-                // So we need to subtract 1 day for display purposes
-                let displayEnd = event.end;
-                if (event.end) {
-                    displayEnd = new Date(event.end);
-                    displayEnd.setDate(displayEnd.getDate() - 1);
-                }
-                
-                const formattedEndDate = displayEnd ? this.calendar.formatDate(displayEnd, {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                }) : startDate;
-                
-                // Check if single day or multi-day event
-                const isSingleDay = !event.end || 
-                                   event.start.toDateString() === displayEnd.toDateString();
-                const dateRange = isSingleDay ? startDate : `${startDate} - ${formattedEndDate}`;
+            if (event.allDay || (props.is_multi_day && props.job_start_date)) {
+                // For all-day and multi-day events, show date range
+                const isSingleDay = startDate === endDate;
+                const dateRange = isSingleDay ? startDate : `${startDate} - ${endDate}`;
                 
                 content += `
                     <div style="display: flex; align-items: start;">
@@ -1478,7 +1790,7 @@
                         </svg>
                         <div style="flex: 1;">
                             <div style="color: #374151; font-weight: 500;">${startDate}</div>
-                            ${event.end ? `<div style="color: #6b7280; font-size: 12px;">to ${endDate}</div>` : ''}
+                            ${endDate !== startDate ? `<div style="color: #6b7280; font-size: 12px;">to ${endDate}</div>` : ''}
                         </div>
                     </div>
                 `;
@@ -1685,33 +1997,84 @@
                 if (eventType === 'call_reminder' || eventType === 'standalone_call_reminder') {
                     this.showCallReminderPanel(info.event);
                 } else if (jobId && window.JobPanel) {
-                    // Regular job event - add to workspace and show edit form
-                    const props = info.event.extendedProps;
-                    
-                    // Add to workspace if JobWorkspace is available
-                    if (window.JobWorkspace) {
-                        window.JobWorkspace.openJob(jobId, {
-                            customerName: props.business_name || props.contact_name || 'No Name',
-                            trailerColor: props.trailer_color || '',
-                            calendarColor: info.event.backgroundColor || '#3B82F6'
+                    // Check if there are unsaved changes
+                    const hasChanges = window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges();
+                    console.log('Has unsaved changes:', hasChanges);
+                    if (hasChanges) {
+                        console.log('Auto-saving before switching jobs...');
+                        // Set flag to prevent panel from auto-closing
+                        window.JobPanel.isSwitchingJobs = true;
+                        // Save the form first
+                        window.JobPanel.saveForm(() => {
+                            console.log('Save complete, adding to workspace...');
+                            // After saving, add to workspace if it has a job ID
+                            const currentJobId = window.JobPanel.currentJobId;
+                            console.log('Current job ID after save:', currentJobId);
+                            if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
+                                // Get job details from the form
+                                const form = document.querySelector('#job-panel .panel-body form');
+                                const businessName = form?.querySelector('input[name="business_name"]')?.value || 
+                                                   form?.querySelector('input[name="contact_name"]')?.value || 
+                                                   'Unnamed Job';
+                                const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
+                                
+                                console.log('Adding job to workspace (minimized):', currentJobId, businessName);
+                                // Add to workspace as minimized (don't make it active)
+                                window.JobWorkspace.addJobMinimized(currentJobId, {
+                                    customerName: businessName,
+                                    trailerColor: trailerColor,
+                                    calendarColor: '#3B82F6'
+                                });
+                            }
+                            
+                            // Now open the new job
+                            console.log('Opening clicked job:', jobId);
+                            if (window.JobWorkspace) {
+                                // Check if the clicked job is already in the workspace
+                                if (window.JobWorkspace.hasJob(jobId)) {
+                                    // Job is in workspace, switch to it
+                                    window.JobWorkspace.switchToJob(jobId);
+                                } else {
+                                    // Job is not in workspace, open it fresh
+                                    const props = info.event.extendedProps;
+                                    window.JobWorkspace.openJob(jobId, {
+                                        customerName: props.business_name || props.contact_name || 'Job',
+                                        trailerColor: props.trailer_color || '',
+                                        calendarColor: props.calendar_color || '#3B82F6'
+                                    });
+                                }
+                            } else {
+                                // Fallback to direct panel opening if workspace not available
+                                this.openJobInPanel(info.event, jobId);
+                            }
+                            
+                            // Clear the switching flag after a delay to allow new form to load
+                            setTimeout(() => {
+                                window.JobPanel.isSwitchingJobs = false;
+                            }, 500);
                         });
-                    }
-                    
-                    // Load job edit form in panel
-                    window.JobPanel.setTitle('Edit Job');
-                    window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
-                    
-                    // Track current job ID for workspace integration
-                    if (window.JobPanel.setCurrentJobId) {
-                        window.JobPanel.setCurrentJobId(jobId);
-                    }
-                    
-                    // Update minimize button after a short delay to ensure panel is ready
-                    setTimeout(() => {
-                        if (window.JobPanel.updateMinimizeButton) {
-                            window.JobPanel.updateMinimizeButton();
+                    } else {
+                        // No unsaved changes, open directly
+                        console.log('Opening clicked job:', jobId);
+                        if (window.JobWorkspace) {
+                            // Check if the clicked job is already in the workspace
+                            if (window.JobWorkspace.hasJob(jobId)) {
+                                // Job is in workspace, switch to it
+                                window.JobWorkspace.switchToJob(jobId);
+                            } else {
+                                // Job is not in workspace, open it fresh
+                                const props = info.event.extendedProps;
+                                window.JobWorkspace.openJob(jobId, {
+                                    customerName: props.business_name || props.contact_name || 'Job',
+                                    trailerColor: props.trailer_color || '',
+                                    calendarColor: props.calendar_color || '#3B82F6'
+                                });
+                            }
+                        } else {
+                            // Fallback to direct panel opening if workspace not available
+                            this.openJobInPanel(info.event, jobId);
                         }
-                    }, 100);
+                    }
                 } else {
                     console.error('JobPanel not available or job ID missing');
                     this.showError('Unable to open event for editing. Please try again.');
@@ -1720,6 +2083,196 @@
                 console.error('JobCalendar: Error handling single click', error);
                 this.showError('Unable to open event for editing. Please try again.');
             }
+        }
+        
+        /**
+         * Open a job in the panel
+         */
+        openJobInPanel(event, jobId) {
+            console.log('openJobInPanel called for job:', jobId);
+            const props = event.extendedProps;
+            
+            // Load job edit form in panel
+            console.log('Loading job form for:', jobId);
+            window.JobPanel.setTitle('Edit Job');
+            window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+            
+            // Track current job ID for workspace integration
+            if (window.JobPanel.setCurrentJobId) {
+                window.JobPanel.setCurrentJobId(jobId);
+            }
+            
+            // Update minimize button after a short delay to ensure panel is ready
+            setTimeout(() => {
+                if (window.JobPanel.updateMinimizeButton) {
+                    window.JobPanel.updateMinimizeButton();
+                }
+            }, 100);
+        }
+        
+        /**
+         * Show dialog for unsaved changes with options to save, minimize, or cancel
+         */
+        showUnsavedChangesDialog(onProceed) {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 10000;
+                animation: fadeIn 0.2s ease;
+            `;
+            
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 12px;
+                padding: 24px;
+                max-width: 480px;
+                width: 90%;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                animation: slideUp 0.2s ease;
+            `;
+            
+            dialog.innerHTML = `
+                <div style="display: flex; align-items: start; margin-bottom: 16px;">
+                    <svg style="width: 24px; height: 24px; color: #f59e0b; margin-right: 12px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    <div>
+                        <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #111827;">Unsaved Changes</h3>
+                        <p style="margin: 0; color: #6b7280; font-size: 14px; line-height: 1.5;">You have unsaved changes. What would you like to do?</p>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <button id="dialog-save-btn" style="width: 100%; padding: 10px 16px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s;">
+                        Save and Open New Job
+                    </button>
+                    <button id="dialog-minimize-btn" style="width: 100%; padding: 10px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s;">
+                        Minimize to Workspace
+                    </button>
+                    <button id="dialog-discard-btn" style="width: 100%; padding: 10px 16px; background: #fee2e2; color: #dc2626; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s;">
+                        Discard Changes
+                    </button>
+                    <button id="dialog-cancel-btn" style="width: 100%; padding: 10px 16px; background: white; color: #6b7280; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">
+                        Cancel
+                    </button>
+                </div>
+            `;
+            
+            // Add animations
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes fadeIn {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+                @keyframes slideUp {
+                    from { transform: translateY(20px); opacity: 0; }
+                    to { transform: translateY(0); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+            
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+            
+            // Button hover effects
+            const saveBtn = dialog.querySelector('#dialog-save-btn');
+            const minimizeBtn = dialog.querySelector('#dialog-minimize-btn');
+            const discardBtn = dialog.querySelector('#dialog-discard-btn');
+            const cancelBtn = dialog.querySelector('#dialog-cancel-btn');
+            
+            saveBtn.addEventListener('mouseenter', () => saveBtn.style.background = '#2563eb');
+            saveBtn.addEventListener('mouseleave', () => saveBtn.style.background = '#3b82f6');
+            
+            minimizeBtn.addEventListener('mouseenter', () => minimizeBtn.style.background = '#e5e7eb');
+            minimizeBtn.addEventListener('mouseleave', () => minimizeBtn.style.background = '#f3f4f6');
+            
+            discardBtn.addEventListener('mouseenter', () => discardBtn.style.background = '#fecaca');
+            discardBtn.addEventListener('mouseleave', () => discardBtn.style.background = '#fee2e2');
+            
+            cancelBtn.addEventListener('mouseenter', () => {
+                cancelBtn.style.background = '#f9fafb';
+                cancelBtn.style.borderColor = '#9ca3af';
+            });
+            cancelBtn.addEventListener('mouseleave', () => {
+                cancelBtn.style.background = 'white';
+                cancelBtn.style.borderColor = '#d1d5db';
+            });
+            
+            // Close dialog function
+            const closeDialog = () => {
+                overlay.remove();
+                style.remove();
+            };
+            
+            // Save and proceed
+            saveBtn.addEventListener('click', () => {
+                if (window.JobPanel.saveForm) {
+                    window.JobPanel.saveForm(() => {
+                        closeDialog();
+                        onProceed();
+                    });
+                } else {
+                    closeDialog();
+                    onProceed();
+                }
+            });
+            
+            // Minimize to workspace
+            minimizeBtn.addEventListener('click', () => {
+                const currentJobId = window.JobPanel.currentJobId;
+                if (currentJobId && window.JobWorkspace) {
+                    // Save first if there are changes
+                    if (window.JobPanel.saveForm) {
+                        window.JobPanel.saveForm(() => {
+                            window.JobWorkspace.minimizeJob(currentJobId);
+                            closeDialog();
+                            onProceed();
+                        });
+                    } else {
+                        window.JobWorkspace.minimizeJob(currentJobId);
+                        closeDialog();
+                        onProceed();
+                    }
+                } else {
+                    // No workspace, just close and proceed
+                    closeDialog();
+                    onProceed();
+                }
+            });
+            
+            // Discard changes and proceed
+            discardBtn.addEventListener('click', () => {
+                closeDialog();
+                onProceed();
+            });
+            
+            // Cancel - don't open new job
+            cancelBtn.addEventListener('click', closeDialog);
+            
+            // ESC key to cancel
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    closeDialog();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+            
+            // Click overlay to cancel
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    closeDialog();
+                }
+            });
         }
         
         /**
@@ -2050,7 +2603,7 @@
                     this.lastClickTime && 
                     (currentTime - this.lastClickTime) < 500) {
                     
-                    // Double click detected - clear timer and open dialog
+                    // Double click detected - clear timer
                     if (this.clickTimer) {
                         clearTimeout(this.clickTimer);
                         this.clickTimer = null;
@@ -2062,24 +2615,57 @@
                     if (window.JobPanel) {
                         const dateStr = info.date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
                         
-                        if (isSunday) {
-                            // Open call reminder form for Sunday
-                            let url = `/call-reminders/new/partial/?date=${dateStr}`;
-                            // Add default calendar if set
-                            if (this.defaultCalendar) {
-                                url += `&calendar=${this.defaultCalendar}`;
+                        // Define the load operation
+                        const loadForm = () => {
+                            if (isSunday) {
+                                // Open call reminder form for Sunday
+                                let url = `/call-reminders/new/partial/?date=${dateStr}`;
+                                // Add default calendar if set
+                                if (this.defaultCalendar) {
+                                    url += `&calendar=${this.defaultCalendar}`;
+                                }
+                                window.JobPanel.setTitle('New Call Reminder');
+                                window.JobPanel.load(url);
+                            } else {
+                                // Open job form for other days
+                                let url = `/jobs/new/partial/?date=${dateStr}`;
+                                // Add default calendar if set
+                                if (this.defaultCalendar) {
+                                    url += `&calendar=${this.defaultCalendar}`;
+                                }
+                                window.JobPanel.setTitle('New Job');
+                                window.JobPanel.load(url);
                             }
-                            window.JobPanel.setTitle('New Call Reminder');
-                            window.JobPanel.load(url);
+                        };
+                        
+                        // Check for unsaved changes before loading new form
+                        if (window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
+                            // Save the form first
+                            window.JobPanel.saveForm(() => {
+                                // After saving, add to workspace if it has a job ID
+                                const currentJobId = window.JobPanel.currentJobId;
+                                if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
+                                    // Get job details from the form
+                                    const form = document.querySelector('#job-panel .panel-body form');
+                                    const businessName = form?.querySelector('input[name="business_name"]')?.value || 
+                                                       form?.querySelector('input[name="contact_name"]')?.value || 
+                                                       'Unnamed Job';
+                                    const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
+                                    
+                                    // Add to workspace as minimized
+                                    window.JobWorkspace.addJobMinimized(currentJobId, {
+                                        customerName: businessName,
+                                        trailerColor: trailerColor,
+                                        calendarColor: '#3B82F6'
+                                    });
+                                }
+                                
+                                // Now load the new form
+                                loadForm();
+                            });
                         } else {
-                            // Open job form for other days
-                            let url = `/jobs/new/partial/?date=${dateStr}`;
-                            // Add default calendar if set
-                            if (this.defaultCalendar) {
-                                url += `&calendar=${this.defaultCalendar}`;
-                            }
-                            window.JobPanel.setTitle('New Job');
-                            window.JobPanel.load(url);
+                            // No unsaved changes, load directly
+                            loadForm();
                         }
                     } else {
                         console.error('JobPanel not available');
@@ -2219,10 +2805,18 @@
                 ? '<svg style="width: 12px; height: 12px; display: inline-block; margin-right: 4px; vertical-align: middle;" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path></svg>' 
                 : '';
             
+            // Add multi-day indicator
+            let multiDayIndicator = '';
+            if (props.is_multi_day) {
+                const dayNumber = props.multi_day_number + 1;  // Convert 0-indexed to 1-indexed
+                const totalDays = props.multi_day_total + 1;   // Convert count to 1-indexed total
+                multiDayIndicator = ` <span style="font-size: 0.85em; opacity: 0.8;">(Day ${dayNumber}/${totalDays})</span>`;
+            }
+            
             return {
                 html: `
                     <div class="job-event-content">
-                        <div class="${titleClass}">${recurringIcon}${event.title}</div>
+                        <div class="${titleClass}">${recurringIcon}${event.title}${multiDayIndicator}</div>
                     </div>
                 `
             };

@@ -141,31 +141,29 @@ class JobListView(ListView):
         """Filter and sort jobs based on query parameters"""
         queryset = Job.objects.select_related('calendar').filter(is_deleted=False)
         
-        # Filter by status
-        status = self.request.GET.get('status')
-        if status:
-            queryset = queryset.filter(status=status)
-        
-        # Filter by calendar
-        calendar_id = self.request.GET.get('calendar')
-        if calendar_id:
-            queryset = queryset.filter(calendar_id=calendar_id)
-        
-        # Search across multiple fields
-        search = self.request.GET.get('search')
+        # Unified search across multiple fields with word-based matching
+        search = self.request.GET.get('search', '').strip()
         if search:
-            queryset = queryset.filter(
-                models.Q(business_name__icontains=search) |
-                models.Q(contact_name__icontains=search) |
-                models.Q(phone__icontains=search) |
-                models.Q(address_line1__icontains=search) |
-                models.Q(city__icontains=search) |
-                models.Q(trailer_color__icontains=search) |
-                models.Q(trailer_serial__icontains=search) |
-                models.Q(trailer_details__icontains=search) |
-                models.Q(repair_notes__icontains=search) |
-                models.Q(quote_text__icontains=search)
-            )
+            # Split search query into individual words
+            search_words = search.split()
+            
+            # For each word, create a Q object that searches across all fields
+            for word in search_words:
+                word_query = models.Q(business_name__icontains=word) | \
+                             models.Q(contact_name__icontains=word) | \
+                             models.Q(phone__icontains=word) | \
+                             models.Q(address_line1__icontains=word) | \
+                             models.Q(address_line2__icontains=word) | \
+                             models.Q(city__icontains=word) | \
+                             models.Q(state__icontains=word) | \
+                             models.Q(trailer_color__icontains=word) | \
+                             models.Q(trailer_serial__icontains=word) | \
+                             models.Q(trailer_details__icontains=word) | \
+                             models.Q(notes__icontains=word) | \
+                             models.Q(repair_notes__icontains=word)
+                
+                # Chain with AND logic - all words must match
+                queryset = queryset.filter(word_query)
         
         # Sorting
         sort_by = self.request.GET.get('sort', '-start_dt')
@@ -196,19 +194,13 @@ class JobListView(ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['title'] = 'Jobs'
-        context['calendars'] = Calendar.objects.filter(is_active=True)
-        context['status_choices'] = Job.STATUS_CHOICES
         
         # Add sorting context
         context['current_sort'] = self.request.GET.get('sort', 'start_dt')
         context['current_direction'] = self.request.GET.get('direction', 'desc')
         
-        # Add filter context for maintaining state
-        context['current_filters'] = {
-            'search': self.request.GET.get('search', ''),
-            'status': self.request.GET.get('status', ''),
-            'calendar': self.request.GET.get('calendar', ''),
-        }
+        # Add search filter context for maintaining state
+        context['search_query'] = self.request.GET.get('search', '')
         
         return context
 
@@ -512,41 +504,134 @@ def get_job_calendar_data(request):
                 # Create a lighter shade for completed events
                 calendar_color = lighten_color(calendar_color, 0.3)
             
-            # Use the helper function to serialize the event with proper all-day handling
-            event = event_to_calendar_json(
-                job,
-                title=title,
-                backgroundColor=calendar_color,
-                borderColor=calendar_color,
-                extendedProps={
-                    'type': 'job',
-                    'job_id': job.id,
-                    'status': job.status,
-                    'calendar_id': job.calendar.id,
-                    'calendar_name': job.calendar.name,
-                    'calendar_color': job.calendar.color,
-                    'business_name': job.business_name,
-                    'contact_name': job.contact_name,
-                    'phone': job.get_phone(),
-                    'trailer_color': job.trailer_color,
-                    'trailer_serial': job.trailer_serial,
-                    'trailer_details': job.trailer_details,
-                    'notes': job.notes,
-                    'repair_notes': job.repair_notes,
-                    # Recurring event info
-                    'is_recurring_parent': job.is_recurring_parent,
-                    'is_recurring_instance': job.is_recurring_instance,
-                    'recurrence_parent_id': job.recurrence_parent_id,
-                    'recurrence_rule': job.recurrence_rule,
-                    'repeat_type': job.repeat_type,
-                    'repeat_n_months': job.repeat_n_months,
-                }
-            )
+            # Calculate the date span of this job
+            job_start_local = timezone.localtime(job.start_dt)
+            job_end_local = timezone.localtime(job.end_dt)
             
-            # Override the id to use the "job-{id}" format
-            event['id'] = f"job-{job.id}"
+            # Determine if this is a multi-day job
+            start_date = job_start_local.date()
+            end_date = job_end_local.date()
+            is_multi_day = (end_date > start_date)
             
-            events.append(event)
+            if is_multi_day:
+                # Break multi-day jobs into separate events for each day
+                current_date = start_date
+                day_number = 0
+                total_days = (end_date - start_date).days
+                
+                while current_date <= end_date:
+                    # For all-day events, use date strings
+                    # For timed events, use the actual times on first/last day, full day for middle days
+                    if job.all_day:
+                        # All-day event: use noon to avoid timezone shifting issues
+                        day_start = current_date.strftime('%Y-%m-%dT12:00:00')
+                        day_end = (current_date + timedelta(days=1)).strftime('%Y-%m-%dT12:00:00')  # Exclusive end
+                        is_all_day = True
+                    else:
+                        # Timed event: first day starts at job time, last day ends at job time, middle days are full days
+                        if current_date == start_date and current_date == end_date:
+                            # Single day (shouldn't happen in multi-day branch, but handle it)
+                            day_start = job_start_local.strftime('%Y-%m-%dT%H:%M:%S')
+                            day_end = job_end_local.strftime('%Y-%m-%dT%H:%M:%S')
+                            is_all_day = False
+                        elif current_date == start_date:
+                            # First day: start at job start time, end at midnight
+                            day_start = job_start_local.strftime('%Y-%m-%dT%H:%M:%S')
+                            day_end = (current_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00')
+                            is_all_day = False
+                        elif current_date == end_date:
+                            # Last day: start at midnight, end at job end time
+                            day_start = current_date.strftime('%Y-%m-%dT00:00:00')
+                            day_end = job_end_local.strftime('%Y-%m-%dT%H:%M:%S')
+                            is_all_day = False
+                        else:
+                            # Middle day: full day from midnight to midnight
+                            day_start = current_date.strftime('%Y-%m-%dT00:00:00')
+                            day_end = (current_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00')
+                            is_all_day = False
+                    
+                    # Create event for this day
+                    day_event = {
+                        'id': f"job-{job.id}-day-{day_number}",
+                        'title': title,
+                        'start': day_start,
+                        'end': day_end,
+                        'allDay': is_all_day,
+                        'backgroundColor': calendar_color,
+                        'borderColor': calendar_color,
+                        'extendedProps': {
+                            'type': 'job',
+                            'job_id': job.id,
+                            'status': job.status,
+                            'calendar_id': job.calendar.id,
+                            'calendar_name': job.calendar.name,
+                            'calendar_color': job.calendar.color,
+                            'business_name': job.business_name,
+                            'contact_name': job.contact_name,
+                            'phone': job.get_phone(),
+                            'trailer_color': job.trailer_color,
+                            'trailer_serial': job.trailer_serial,
+                            'trailer_details': job.trailer_details,
+                            'notes': job.notes,
+                            'repair_notes': job.repair_notes,
+                            # Recurring event info
+                            'is_recurring_parent': job.is_recurring_parent,
+                            'is_recurring_instance': job.is_recurring_instance,
+                            'recurrence_parent_id': job.recurrence_parent_id,
+                            'recurrence_rule': job.recurrence_rule,
+                            'repeat_type': job.repeat_type,
+                            'repeat_n_months': job.repeat_n_months,
+                            # Multi-day tracking
+                            'is_multi_day': True,
+                            'multi_day_number': day_number,
+                            'multi_day_total': total_days,
+                            # Store full job date range for display
+                            'job_start_date': start_date.isoformat(),
+                            'job_end_date': end_date.isoformat(),
+                        }
+                    }
+                    
+                    events.append(day_event)
+                    current_date += timedelta(days=1)
+                    day_number += 1
+            else:
+                # Single-day job: use the original approach
+                event = event_to_calendar_json(
+                    job,
+                    title=title,
+                    backgroundColor=calendar_color,
+                    borderColor=calendar_color,
+                    extendedProps={
+                        'type': 'job',
+                        'job_id': job.id,
+                        'status': job.status,
+                        'calendar_id': job.calendar.id,
+                        'calendar_name': job.calendar.name,
+                        'calendar_color': job.calendar.color,
+                        'business_name': job.business_name,
+                        'contact_name': job.contact_name,
+                        'phone': job.get_phone(),
+                        'trailer_color': job.trailer_color,
+                        'trailer_serial': job.trailer_serial,
+                        'trailer_details': job.trailer_details,
+                        'notes': job.notes,
+                        'repair_notes': job.repair_notes,
+                        # Recurring event info
+                        'is_recurring_parent': job.is_recurring_parent,
+                        'is_recurring_instance': job.is_recurring_instance,
+                        'recurrence_parent_id': job.recurrence_parent_id,
+                        'recurrence_rule': job.recurrence_rule,
+                        'repeat_type': job.repeat_type,
+                        'repeat_n_months': job.repeat_n_months,
+                        # Multi-day tracking
+                        'is_multi_day': False,
+                    }
+                )
+                
+                # Override the id to use the "job-{id}" format
+                event['id'] = f"job-{job.id}"
+                
+                events.append(event)
             
             # Create call reminder event if enabled and not completed
             if job.has_call_reminder and job.call_reminder_weeks_prior and not job.call_reminder_completed:
@@ -573,8 +658,8 @@ def get_job_calendar_data(request):
                     reminder_event = {
                         'id': f"reminder-{job.id}",
                         'title': reminder_title,
-                        'start': reminder_dt.date().isoformat(),
-                        'end': reminder_end_dt.date().isoformat(),  # Exclusive end
+                        'start': f"{reminder_dt.date().isoformat()}T12:00:00",
+                        'end': f"{reminder_end_dt.date().isoformat()}T12:00:00",  # Exclusive end
                         'backgroundColor': reminder_color,
                         'borderColor': reminder_color,
                         'allDay': True,
@@ -668,8 +753,8 @@ def get_job_calendar_data(request):
                     reminder_event = {
                         'id': f"call-reminder-{reminder.id}",
                         'title': reminder_title,
-                        'start': reminder_date.isoformat(),
-                        'end': reminder_end_dt.isoformat(),  # Exclusive end for all-day event
+                        'start': f"{reminder_date.isoformat()}T12:00:00",
+                        'end': f"{reminder_end_dt.isoformat()}T12:00:00",  # Exclusive end for all-day event
                         'backgroundColor': reminder_color,
                         'borderColor': reminder_color,
                         'allDay': True,
@@ -1327,6 +1412,11 @@ def job_create_submit(request):
         # Handle recurring event creation
         recurrence_enabled = request.POST.get('recurrence_enabled') == 'on'
         if recurrence_enabled and not job_id:  # Only on creation, not updates
+            # Don't allow instances to become recurring parents
+            if job.recurrence_parent:
+                messages.error(request, 'Cannot make a recurring instance into a new recurring series. Edit the parent series instead.')
+                return redirect('rental_scheduler:job_list')
+            
             recurrence_type = request.POST.get('recurrence_type', 'monthly')
             recurrence_interval = int(request.POST.get('recurrence_interval', 1))
             recurrence_count = request.POST.get('recurrence_count')
@@ -1353,7 +1443,13 @@ def job_create_submit(request):
         
         logger.info(f"Job saved successfully: {job.id}")
         # Return a simple success response that triggers the close action
-        return HttpResponse('<div hx-swap-oob="true" id="job-success">Job saved successfully!</div>', headers={'HX-Trigger': 'jobSaved'})
+        # Include job ID in the trigger for the minimize button to use
+        import json as json_module
+        trigger_data = json_module.dumps({'jobSaved': {'jobId': job.id}})
+        return HttpResponse(
+            f'<input type="hidden" name="job_id" value="{job.id}" hx-swap-oob="true"><div hx-swap-oob="true" id="job-success">Job saved successfully!</div>', 
+            headers={'HX-Trigger': trigger_data}
+        )
     else:
         logger.error(f"Form validation errors: {form.errors}")
         return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {'form': form}, status=400)
