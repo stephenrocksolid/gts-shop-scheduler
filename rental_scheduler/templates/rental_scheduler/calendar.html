@@ -96,28 +96,378 @@ html, body {
     transform: translateX(-50%);
 }
 
-/* Allow FullCalendar to be as wide as its parent */
+/* Allow FullCalendar to be as wide as its parent and fill height */
 .fc { 
     max-width: none !important; 
     margin: 0 !important; 
-    height: 100%;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
 }
 
-/* Calendar shell should fit viewport exactly */
+/* FullCalendar header toolbar stays at top */
+.fc-header-toolbar {
+    flex-shrink: 0 !important;
+}
+
+/* Make FullCalendar view fill remaining space */
+.fc-view-harness {
+    flex: 1 1 auto !important;
+    height: 0 !important; /* Reset height so flex can work */
+    min-height: 0 !important;
+}
+
+/* Ensure daygrid view fills container */
+.fc-daygrid {
+    height: 100% !important;
+}
+
+/* Scrollgrid must fill height */
+.fc-scrollgrid {
+    height: 100% !important;
+}
+
+.fc-scrollgrid > tbody {
+    height: 100% !important;
+}
+
+/* Make scrollgrid sections fill properly */
+.fc-scrollgrid-section {
+    height: auto !important;
+}
+
+/* Header section stays small */
+.fc-scrollgrid-section-header {
+    height: auto !important;
+}
+
+/* Body section with weeks takes all remaining space */
+.fc-scrollgrid-section-body {
+    height: 100% !important;
+}
+
+.fc-scrollgrid-section-body > td {
+    height: 100% !important;
+    position: relative !important;
+}
+
+/* The tr that contains the body section must expand */
+.fc-scrollgrid > tbody > tr.fc-scrollgrid-section {
+    height: auto !important;
+}
+
+.fc-scrollgrid > tbody > tr.fc-scrollgrid-section:has(.fc-scrollgrid-section-body) {
+    height: 100% !important;
+}
+
+/* Daygrid body must expand to fill */
+.fc-daygrid-body {
+    height: 100% !important;
+}
+
+.fc-daygrid-body-balanced {
+    height: 100% !important;
+}
+
+.fc-daygrid-body-unbalanced {
+    height: 100% !important;
+}
+
+.fc-daygrid-body > tr {
+    height: 100% !important;
+}
+
+.fc-daygrid-body > tr > td {
+    height: 100% !important;
+}
+
+/* Ensure the scrollgrid inner table fills the section */
+.fc-scrollgrid-section-body .fc-scrollgrid-sync-inner {
+    height: 100% !important;
+}
+
+/* Make sure the liquid section (body with weeks) takes full height */
+.fc-scrollgrid-section-liquid {
+    height: 100% !important;
+}
+
+.fc-scrollgrid-section-liquid > td {
+    height: 100% !important;
+}
+
+/* Search Panel Styles */
+#calendar-search-panel {
+    height: 0;
+    overflow: hidden;
+    transition: height 0.3s ease-in-out;
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+}
+
+#calendar-search-panel.open {
+    height: 50vh;
+}
+
+#search-panel-content {
+    padding: 1rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#search-results-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin-top: 1rem;
+}
+
+#search-results-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+#search-results-container::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+
+#search-results-container::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+#search-results-container::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* Compact table styling for search results */
+#search-results table {
+    font-size: 0.875rem;
+}
+
+#search-results th {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.75rem !important;
+}
+
+#search-results td {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.875rem !important;
+}
+
+#search-results .job-row {
+    line-height: 1.25 !important;
+}
+
+#search-results .badge,
+#search-results .status-badge {
+    padding: 0.125rem 0.5rem !important;
+    font-size: 0.75rem !important;
+}
+
+/* Search button styling - white with grey border when collapsed, blue when expanded */
+.fc-searchButton-button {
+    background-color: white !important;
+    border-color: #d1d5db !important;
+    color: #374151 !important;
+}
+
+.fc-searchButton-button:hover {
+    background-color: #f9fafb !important;
+    border-color: #9ca3af !important;
+}
+
+.fc-searchButton-button.active {
+    background-color: #2563eb !important;
+    border-color: #2563eb !important;
+    color: white !important;
+}
+
+.fc-searchButton-button.active:hover {
+    background-color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
+    color: white !important;
+}
+
+/* Calendar shell should fit viewport minus bottom workspace bar */
 #calendar-shell {
-    height: 100vh;
+    height: calc(100vh - 45px) !important; /* Subtract bottom workspace bar height */
     overflow: hidden;
     padding: 0 12px !important;
     box-sizing: border-box;
     overscroll-behavior: none;
+    display: flex !important;
+    flex-direction: column !important;
+    transition: height 0.3s ease-in-out;
 }
 
-/* Calendar should consume the full viewport height */
+/* Calendar should fill available space in flex container */
 #calendar-wrap {
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
     position: relative;
     overscroll-behavior: none;
+}
+
+/* Force equal height for all table rows (weeks) - CRITICAL */
+.fc-scrollgrid-sync-table {
+    height: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+    width: 100% !important;
+}
+
+.fc-scrollgrid-sync-table tbody {
+    height: 100% !important;
+    display: table-row-group !important;
+}
+
+/* Ensure table respects height constraints */
+.fc-daygrid-body table {
+    height: 100% !important;
+    table-layout: fixed !important;
+}
+
+/* Each week row gets exactly 25% - ABSOLUTE */
+.fc-scrollgrid-sync-table tbody tr {
+    height: 25% !important;
+    max-height: 25% !important;
+    min-height: 25% !important;
+    display: table-row !important;
+    overflow: hidden !important;
+}
+
+.fc-scrollgrid-sync-table tbody tr td {
+    height: 100% !important;
+    max-height: 100% !important;
+    vertical-align: top !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Target each week individually with nuclear option */
+.fc-daygrid-body table tbody tr:nth-child(1) {
+    height: 25% !important;
+    max-height: 25% !important;
+    min-height: 25% !important;
+}
+
+.fc-daygrid-body table tbody tr:nth-child(2) {
+    height: 25% !important;
+    max-height: 25% !important;
+    min-height: 25% !important;
+}
+
+.fc-daygrid-body table tbody tr:nth-child(3) {
+    height: 25% !important;
+    max-height: 25% !important;
+    min-height: 25% !important;
+}
+
+.fc-daygrid-body table tbody tr:nth-child(4) {
+    height: 25% !important;
+    max-height: 25% !important;
+    min-height: 25% !important;
+}
+
+/* Ensure daygrid-week class rows are equal */
+.fc-daygrid-week {
+    height: 25% !important;
+    max-height: 25% !important;
+    min-height: 25% !important;
+    overflow: hidden !important;
+}
+
+/* Force day cells to fill their row height */
+.fc-daygrid-day-frame {
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+}
+
+/* Day top (contains day number) stays at top */
+.fc-daygrid-day-top {
+    flex-shrink: 0 !important;
+    padding: 4px !important;
+    height: auto !important;
+    max-height: 30px !important;
+}
+
+/* Events container fills remaining space and scrolls */
+.fc-daygrid-day-events {
+    flex: 1 1 0 !important;
+    overflow-y: scroll !important;
+    overflow-x: hidden !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    position: relative !important;
+    pointer-events: auto !important;
+    z-index: 1 !important;
+}
+
+/* Scrollbar styling for day events */
+.fc-daygrid-day-events::-webkit-scrollbar {
+    width: 12px;
+    cursor: pointer;
+}
+
+.fc-daygrid-day-events::-webkit-scrollbar-track {
+    background: #d1d5db;
+    border-radius: 6px;
+    margin: 2px 0;
+}
+
+.fc-daygrid-day-events::-webkit-scrollbar-thumb {
+    background: #6b7280;
+    border-radius: 6px;
+    border: 2px solid #d1d5db;
+    cursor: grab;
+}
+
+.fc-daygrid-day-events::-webkit-scrollbar-thumb:hover {
+    background: #4b5563;
+}
+
+.fc-daygrid-day-events::-webkit-scrollbar-thumb:active {
+    background: #374151;
+    cursor: grabbing;
+}
+
+/* Bottom padding area (if any) */
+.fc-daygrid-day-bottom {
+    flex-shrink: 0 !important;
+    display: none !important;
+}
+
+/* Prevent day bg events from expanding */
+.fc-daygrid-day-bg {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+}
+
+/* Prevent event harnesses from expanding the cell */
+.fc-daygrid-event-harness {
+    margin: 1px 0 !important;
+}
+
+/* Prevent more link from expanding */
+.fc-daygrid-more-link {
+    display: none !important;
+}
+
+/* Day cell content must not expand */
+.fc-daygrid-day-events,
+.fc-daygrid-event-harness,
+.fc-daygrid-event {
+    flex-shrink: 0 !important;
 }
 
 /* Make the FullCalendar canvas fill its parent */
@@ -325,7 +675,8 @@ html, body {
     display: flex;
     gap: 16px;
     align-items: stretch;
-    height: 100vh;
+    height: 100% !important;
+    flex: 1 1 auto !important;
     overflow: hidden;
     overscroll-behavior: none;
 }
@@ -335,6 +686,7 @@ html, body {
     min-width: 0;
     position: relative;
     overscroll-behavior: none;
+    z-index: 1;
 }
 
 .today-sidebar {
@@ -346,21 +698,24 @@ html, body {
     flex-direction: column;
     position: relative;
     min-width: 10px;
-    max-width: 800px;
-    height: 100vh;
+    max-width: 1200px;
+    height: 100%;
     overflow: hidden;
     overscroll-behavior: contain;
+    z-index: 10;
+    flex-shrink: 0;
+    flex-grow: 0;
 }
 
 .resize-handle {
     position: absolute;
-    left: 0;
+    left: -4px;
     top: 0;
     bottom: 0;
-    width: 8px;
+    width: 16px;
     cursor: ew-resize;
     background: transparent;
-    z-index: 10;
+    z-index: 100;
     transition: background 0.2s ease;
 }
 
@@ -375,17 +730,18 @@ html, body {
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 3px;
-    height: 40px;
-    background: #d1d5db;
+    width: 4px;
+    height: 60px;
+    background: #6b7280;
     border-radius: 2px;
-    opacity: 0;
-    transition: opacity 0.2s ease;
+    opacity: 0.7;
+    transition: all 0.2s ease;
 }
 
 .resize-handle:hover::after,
 .resize-handle.active::after {
     opacity: 1;
+    background: #3b82f6;
 }
 
 .today-sidebar header {
@@ -470,7 +826,6 @@ html, body {
 }
 
 .today-item:hover {
-    opacity: 0.9;
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
@@ -675,6 +1030,107 @@ html, body {
 {% block main_container_class %}full-bleed{% endblock %}
 
 {% block content %}
+<!-- Search Panel -->
+<div id="calendar-search-panel">
+    <div id="search-panel-content">
+        <form method="get" id="calendar-search-form" class="mb-4">
+            <!-- Filters and Search on Same Row -->
+            <div class="flex flex-row gap-4 items-center flex-wrap">
+                <!-- Calendar Filter -->
+                <div style="flex: 0 0 280px; min-width: 280px; display: flex; align-items: center; gap: 0.75rem;">
+                    <label class="text-sm font-medium text-gray-700" style="margin: 0; white-space: nowrap;">Calendars</label>
+                    <div class="relative" style="flex: 1; min-width: 180px;">
+                        <button type="button" id="search-calendar-dropdown-btn" 
+                                class="w-full flex items-center justify-between px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <span id="search-calendar-selected-text">All Calendars</span>
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        <div id="search-calendar-dropdown" class="hidden absolute w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto" style="z-index: 1000;">
+                            {% for calendar in calendars %}
+                            <label class="flex items-center px-4 py-2 hover:bg-gray-50 cursor-pointer">
+                                <input type="checkbox" name="calendars" value="{{ calendar.id }}" 
+                                       class="search-calendar-checkbox w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                <span class="ml-3 flex items-center">
+                                    <span class="inline-block w-3 h-3 rounded mr-2" style="background-color: {{ calendar.color }};"></span>
+                                    <span class="text-sm text-gray-700">{{ calendar.name }}</span>
+                                </span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Events Date Filter -->
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <label class="text-sm font-medium text-gray-700" style="margin: 0; white-space: nowrap;">Events</label>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="radio" name="date_filter" value="all" checked
+                                   class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                            <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">All Events</span>
+                        </label>
+                        <label class="flex items-center cursor-pointer">
+                            <input type="radio" name="date_filter" value="future"
+                                   class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                            <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">All Future</span>
+                        </label>
+                        <label class="flex items-center cursor-pointer">
+                            <input type="radio" name="date_filter" value="current_view"
+                                   class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                            <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events in Current View</span>
+                        </label>
+                    </div>
+                    <!-- Hidden inputs to store current view dates -->
+                    <input type="hidden" name="start_date" id="search-view-start-date">
+                    <input type="hidden" name="end_date" id="search-view-end-date">
+                </div>
+                
+                <!-- Search Bar -->
+                <div class="flex-1 flex items-center gap-2" style="min-width: 300px;">
+                    <div class="flex-1 relative">
+                        <div class="absolute inset-y-0 left-0 flex items-center pointer-events-none" style="padding-left: 12px;">
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                        </div>
+                        <input type="text" 
+                               name="search" 
+                               id="calendar-search-input" 
+                               class="w-full pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               style="padding-left: 36px;"
+                               placeholder="Search jobs..."
+                               autocomplete="off">
+                    </div>
+                    <button type="submit" 
+                            class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md whitespace-nowrap">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        Search
+                    </button>
+                    <button type="button" 
+                            id="calendar-clear-search-btn"
+                            class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200 whitespace-nowrap">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        Clear
+                    </button>
+                </div>
+            </div>
+        </form>
+        
+        <!-- Search Results -->
+        <div id="search-results-container">
+            <div id="search-results" class="text-center text-gray-500 py-8">
+                Enter search criteria and click Search to see results.
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="calendar-shell" class="container-fluid px-3">
     <div id="calendarPage" class="cal-page">
         <div id="calendar-wrap">
@@ -730,7 +1186,7 @@ window.calendarConfig = {
     jobUpdateUrl: "{% url 'rental_scheduler:update_job_status' 0 %}".replace('/0/', '/'),
     jobDetailUrl: "",
     jobEditUrl: "",
-    jobCreateUrl: "",
+    jobCreateUrl: "{% url 'rental_scheduler:job_create_partial' %}",
     csrfToken: "{{ csrf_token }}",
     calendars: JSON.parse('{{ calendars_json|default:"[]"|escapejs }}'),
     statusChoices: JSON.parse('{{ status_choices|default:"[]"|escapejs }}'),
@@ -758,9 +1214,14 @@ window.calendarConfig = {
 (function() {
     const sidebar = document.getElementById('todaySidebar');
     const resizeHandle = document.getElementById('sidebarResizeHandle');
+    
+    if (!sidebar || !resizeHandle) {
+        return;
+    }
+    
     const STORAGE_KEY = 'gts-sidebar-width';
     const MIN_WIDTH = 10;
-    const MAX_WIDTH = 800;
+    const MAX_WIDTH = 1200;
     
     // Load saved width
     const savedWidth = localStorage.getItem(STORAGE_KEY);
@@ -780,6 +1241,7 @@ window.calendarConfig = {
         document.body.style.cursor = 'ew-resize';
         document.body.style.userSelect = 'none';
         e.preventDefault();
+        e.stopPropagation();
     });
     
     document.addEventListener('mousemove', function(e) {
@@ -808,6 +1270,7 @@ window.calendarConfig = {
             // Trigger calendar resize event so it adjusts
             if (window.jobCalendar && window.jobCalendar.calendar) {
                 window.jobCalendar.calendar.updateSize();
+                window.jobCalendar.forceEqualWeekHeights();
             }
         }
     });
@@ -956,6 +1419,295 @@ document.addEventListener('DOMContentLoaded', function() {
     // Start observing the calendar for popover additions
     if (calendarWrap) {
         observer.observe(calendarWrap, { childList: true, subtree: true });
+    }
+    
+    // Search Panel Functionality
+    const searchCalendarDropdownBtn = document.getElementById('search-calendar-dropdown-btn');
+    const searchCalendarDropdown = document.getElementById('search-calendar-dropdown');
+    const searchCalendarCheckboxes = document.querySelectorAll('.search-calendar-checkbox');
+    const searchCalendarSelectedText = document.getElementById('search-calendar-selected-text');
+    const searchDateFilterRadios = document.querySelectorAll('.search-date-filter-radio');
+    const searchForm = document.getElementById('calendar-search-form');
+    const searchResults = document.getElementById('search-results');
+    const searchResultsContainer = document.getElementById('search-results-container');
+    const searchInput = document.getElementById('calendar-search-input');
+    
+    // Keyboard navigation state
+    let currentHighlightIndex = -1;
+    let jobRows = [];
+    let hasSubmitted = false;
+    
+    // Allow scrolling in search results container
+    if (searchResultsContainer) {
+        searchResultsContainer.addEventListener('wheel', function(e) {
+            e.stopPropagation();
+        }, { passive: false });
+    }
+    
+    // Update job rows after search
+    function updateJobRows() {
+        jobRows = Array.from(searchResults.querySelectorAll('.job-row'));
+        currentHighlightIndex = -1;
+    }
+    
+    // Highlight a specific row
+    function highlightRow(index) {
+        // Remove previous highlights
+        jobRows.forEach(row => {
+            row.classList.remove('bg-blue-100', 'ring-2', 'ring-blue-500');
+            row.style.backgroundColor = '';
+        });
+        
+        if (index >= 0 && index < jobRows.length) {
+            const row = jobRows[index];
+            row.classList.add('bg-blue-100', 'ring-2', 'ring-blue-500');
+            
+            // Scroll the row into view smoothly within the search results container
+            row.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center' 
+            });
+        }
+    }
+    
+    // Toggle calendar dropdown
+    if (searchCalendarDropdownBtn) {
+        searchCalendarDropdownBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            searchCalendarDropdown.classList.toggle('hidden');
+        });
+    }
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (searchCalendarDropdownBtn && searchCalendarDropdown && 
+            !searchCalendarDropdownBtn.contains(e.target) && 
+            !searchCalendarDropdown.contains(e.target)) {
+            searchCalendarDropdown.classList.add('hidden');
+        }
+    });
+    
+    // Update selected text when checkboxes change
+    if (searchCalendarCheckboxes) {
+        searchCalendarCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const checkedCount = document.querySelectorAll('.search-calendar-checkbox:checked').length;
+                const totalCount = searchCalendarCheckboxes.length;
+                
+                if (checkedCount === 0 || checkedCount === totalCount) {
+                    searchCalendarSelectedText.textContent = 'All Calendars';
+                } else {
+                    searchCalendarSelectedText.textContent = checkedCount + ' calendar(s) selected';
+                }
+            });
+        });
+    }
+    
+    // Get calendar instance function
+    function getCalendarInstance() {
+        // Try to get the calendar from the global JobCalendar instance
+        if (window.jobCalendar && window.jobCalendar.calendar) {
+            return window.jobCalendar.calendar;
+        }
+        return null;
+    }
+    
+    // Update hidden date inputs when "Events in Current View" is selected
+    function updateCurrentViewDates() {
+        const currentViewRadio = document.querySelector('.search-date-filter-radio[value="current_view"]');
+        if (currentViewRadio && currentViewRadio.checked) {
+            const calendar = getCalendarInstance();
+            if (calendar && calendar.view) {
+                const startDate = calendar.view.currentStart;
+                const endDate = calendar.view.currentEnd;
+                
+                // Format dates as YYYY-MM-DD
+                const formatDate = (date) => {
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                };
+                
+                document.getElementById('search-view-start-date').value = formatDate(startDate);
+                document.getElementById('search-view-end-date').value = formatDate(endDate);
+            }
+        }
+    }
+    
+    // Handle Enter key navigation
+    if (searchInput) {
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                
+                // If search hasn't been submitted yet or input has changed
+                if (!hasSubmitted || this.value !== this.getAttribute('data-last-search')) {
+                    // Submit the form
+                    this.setAttribute('data-last-search', this.value);
+                    hasSubmitted = true;
+                    currentHighlightIndex = -1;
+                    
+                    // Trigger form submission
+                    if (searchForm) {
+                        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+                        searchForm.dispatchEvent(submitEvent);
+                    }
+                    return;
+                }
+                
+                // Otherwise, navigate through results
+                if (jobRows.length > 0) {
+                    currentHighlightIndex = (currentHighlightIndex + 1) % jobRows.length;
+                    highlightRow(currentHighlightIndex);
+                }
+            }
+        });
+        
+        // Track if search value changes
+        searchInput.addEventListener('input', function() {
+            hasSubmitted = false;
+        });
+    }
+    
+    // Handle clear button click
+    const clearSearchBtn = document.getElementById('calendar-clear-search-btn');
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', function() {
+            // Clear search input
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            
+            // Uncheck all calendar checkboxes
+            document.querySelectorAll('.search-calendar-checkbox').forEach(cb => {
+                cb.checked = false;
+            });
+            searchCalendarSelectedText.textContent = 'All Calendars';
+            
+            // Reset date filter to "All Events"
+            const allEventsRadio = document.querySelector('.search-date-filter-radio[value="all"]');
+            if (allEventsRadio) {
+                allEventsRadio.checked = true;
+            }
+            
+            // Clear search results
+            searchResults.innerHTML = '<div class="text-center text-gray-500 py-8">Enter search criteria and click Search to see results.</div>';
+            
+            // Reset keyboard navigation
+            currentHighlightIndex = -1;
+            hasSubmitted = false;
+        });
+    }
+    
+    // Handle search form submission
+    if (searchForm) {
+        searchForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Update current view dates if that option is selected
+            updateCurrentViewDates();
+            
+            // Build query parameters
+            const formData = new FormData(searchForm);
+            const params = new URLSearchParams();
+            
+            // Add search term
+            const searchTerm = formData.get('search');
+            if (searchTerm) {
+                params.append('search', searchTerm);
+            }
+            
+            // Add selected calendars
+            const selectedCalendars = [];
+            document.querySelectorAll('.search-calendar-checkbox:checked').forEach(cb => {
+                selectedCalendars.push(cb.value);
+            });
+            selectedCalendars.forEach(calId => {
+                params.append('calendars', calId);
+            });
+            
+            // Add date filter
+            const dateFilter = document.querySelector('.search-date-filter-radio:checked');
+            if (dateFilter && dateFilter.value !== 'all') {
+                params.append('date_filter', dateFilter.value);
+                
+                if (dateFilter.value === 'current_view') {
+                    // Use custom date filter on backend but with current view dates
+                    params.set('date_filter', 'custom');
+                    const startDate = formData.get('start_date');
+                    const endDate = formData.get('end_date');
+                    if (startDate) params.append('start_date', startDate);
+                    if (endDate) params.append('end_date', endDate);
+                }
+            }
+            
+            // Show loading state
+            searchResults.innerHTML = '<div class="text-center text-gray-500 py-8">Searching...</div>';
+            
+            // Make AJAX request to job list endpoint
+            fetch('/jobs/?' + params.toString(), {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.text())
+            .then(html => {
+                // Parse the HTML and extract the job table
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const jobTable = doc.querySelector('#job-table-container');
+                
+                if (jobTable) {
+                    searchResults.innerHTML = jobTable.innerHTML;
+                    
+                    // Update job rows for keyboard navigation
+                    updateJobRows();
+                    
+                    // Make job rows clickable and add hover effects
+                    jobRows.forEach(row => {
+                        row.addEventListener('click', function(e) {
+                            if (e.target.tagName === 'A' || e.target.closest('a') || 
+                                e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                                return;
+                            }
+                            
+                            const jobId = this.getAttribute('data-job-id');
+                            if (jobId && window.JobPanel && window.calendarConfig) {
+                                window.JobPanel.setTitle('Edit Job');
+                                window.JobPanel.load(window.calendarConfig.jobCreateUrl + '?edit=' + jobId);
+                            }
+                        });
+                        
+                        // Add visual feedback on hover (but don't override highlight)
+                        row.addEventListener('mouseenter', function() {
+                            if (!this.classList.contains('bg-blue-100')) {
+                                this.style.backgroundColor = '#f9fafb';
+                            }
+                        });
+                        
+                        row.addEventListener('mouseleave', function() {
+                            if (!this.classList.contains('bg-blue-100')) {
+                                this.style.backgroundColor = '';
+                            }
+                        });
+                    });
+                    
+                    // Focus search input after results load
+                    if (searchInput) {
+                        searchInput.focus();
+                    }
+                } else {
+                    searchResults.innerHTML = '<div class="text-center text-gray-500 py-8">No results found.</div>';
+                    updateJobRows();
+                }
+            })
+            .catch(error => {
+                console.error('Search error:', error);
+                searchResults.innerHTML = '<div class="text-center text-red-500 py-8">Error performing search. Please try again.</div>';
+                updateJobRows();
+            });
+        });
     }
 });
 </script>

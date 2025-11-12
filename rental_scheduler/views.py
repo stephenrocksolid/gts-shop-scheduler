@@ -141,6 +141,32 @@ class JobListView(ListView):
         """Filter and sort jobs based on query parameters"""
         queryset = Job.objects.select_related('calendar').filter(is_deleted=False)
         
+        # Calendar filter
+        calendars = self.request.GET.getlist('calendars')
+        if calendars:
+            queryset = queryset.filter(calendar_id__in=calendars)
+        
+        # Date filter
+        date_filter = self.request.GET.get('date_filter', 'all')
+        if date_filter == 'custom':
+            start_date = self.request.GET.get('start_date')
+            end_date = self.request.GET.get('end_date')
+            if start_date:
+                try:
+                    start_date_obj = timezone.datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.get_current_timezone())
+                    queryset = queryset.filter(start_dt__gte=start_date_obj)
+                except ValueError:
+                    pass
+            if end_date:
+                try:
+                    end_date_obj = timezone.datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.get_current_timezone())
+                    queryset = queryset.filter(start_dt__lte=end_date_obj)
+                except ValueError:
+                    pass
+        elif date_filter == 'future':
+            now = timezone.now()
+            queryset = queryset.filter(start_dt__gte=now)
+        
         # Unified search across multiple fields with word-based matching
         search = self.request.GET.get('search', '').strip()
         if search:
@@ -201,6 +227,19 @@ class JobListView(ListView):
         
         # Add search filter context for maintaining state
         context['search_query'] = self.request.GET.get('search', '')
+        
+        # Add calendar filter context
+        from .models import Calendar
+        context['calendars'] = Calendar.objects.all().order_by('name')
+        
+        # Get selected calendars
+        selected_calendars = self.request.GET.getlist('calendars')
+        context['selected_calendars'] = [int(cal_id) for cal_id in selected_calendars if cal_id.isdigit()]
+        
+        # Add date filter context
+        context['date_filter'] = self.request.GET.get('date_filter', 'all')
+        context['start_date'] = self.request.GET.get('start_date', '')
+        context['end_date'] = self.request.GET.get('end_date', '')
         
         return context
 
@@ -509,17 +548,17 @@ def get_job_calendar_data(request):
             job_end_local = timezone.localtime(job.end_dt)
             
             # Determine if this is a multi-day job
-            start_date = job_start_local.date()
-            end_date = job_end_local.date()
-            is_multi_day = (end_date > start_date)
+            job_start_date = job_start_local.date()
+            job_end_date = job_end_local.date()
+            is_multi_day = (job_end_date > job_start_date)
             
             if is_multi_day:
                 # Break multi-day jobs into separate events for each day
-                current_date = start_date
+                current_date = job_start_date
                 day_number = 0
-                total_days = (end_date - start_date).days
+                total_days = (job_end_date - job_start_date).days
                 
-                while current_date <= end_date:
+                while current_date <= job_end_date:
                     # For all-day events, use date strings
                     # For timed events, use the actual times on first/last day, full day for middle days
                     if job.all_day:
@@ -529,17 +568,17 @@ def get_job_calendar_data(request):
                         is_all_day = True
                     else:
                         # Timed event: first day starts at job time, last day ends at job time, middle days are full days
-                        if current_date == start_date and current_date == end_date:
+                        if current_date == job_start_date and current_date == job_end_date:
                             # Single day (shouldn't happen in multi-day branch, but handle it)
                             day_start = job_start_local.strftime('%Y-%m-%dT%H:%M:%S')
                             day_end = job_end_local.strftime('%Y-%m-%dT%H:%M:%S')
                             is_all_day = False
-                        elif current_date == start_date:
+                        elif current_date == job_start_date:
                             # First day: start at job start time, end at midnight
                             day_start = job_start_local.strftime('%Y-%m-%dT%H:%M:%S')
                             day_end = (current_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00')
                             is_all_day = False
-                        elif current_date == end_date:
+                        elif current_date == job_end_date:
                             # Last day: start at midnight, end at job end time
                             day_start = current_date.strftime('%Y-%m-%dT00:00:00')
                             day_end = job_end_local.strftime('%Y-%m-%dT%H:%M:%S')
@@ -586,8 +625,8 @@ def get_job_calendar_data(request):
                             'multi_day_number': day_number,
                             'multi_day_total': total_days,
                             # Store full job date range for display
-                            'job_start_date': start_date.isoformat(),
-                            'job_end_date': end_date.isoformat(),
+                            'job_start_date': job_start_date.isoformat(),
+                            'job_end_date': job_end_date.isoformat(),
                         }
                     }
                     
@@ -694,9 +733,15 @@ def get_job_calendar_data(request):
                 start_date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00')).date()
                 end_date_obj = datetime.fromisoformat(end_date.replace('Z', '+00:00')).date()
             except (ValueError, AttributeError):
-                # If parsing fails, try just taking the date part
-                start_date_obj = start_date.split('T')[0] if 'T' in start_date else start_date
-                end_date_obj = end_date.split('T')[0] if 'T' in end_date else end_date
+                # If parsing fails, try just taking the date part and parse it
+                try:
+                    start_date_str = start_date.split('T')[0] if 'T' in start_date else start_date
+                    end_date_str = end_date.split('T')[0] if 'T' in end_date else end_date
+                    start_date_obj = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                    end_date_obj = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                except Exception as date_error:
+                    logger.error(f"Failed to parse dates: {start_date}, {end_date} - {str(date_error)}")
+                    raise
             
             # Get the list of calendar IDs from the filter
             calendar_ids = []
@@ -715,23 +760,24 @@ def get_job_calendar_data(request):
                     calendar_id__in=calendar_ids,
                     reminder_date__range=[start_date_obj, end_date_obj],
                     job__isnull=True,  # Only standalone reminders
-                    completed=False  # Only show uncompleted reminders
                 ).select_related('calendar')
             else:
                 # No filter, get all active calendars
                 call_reminders = CallReminder.objects.filter(
                     reminder_date__range=[start_date_obj, end_date_obj],
                     job__isnull=True,
-                    completed=False,
                     calendar__is_active=True
                 ).select_related('calendar')
             
             # Add standalone call reminders to events
             for reminder in call_reminders:
                 try:
-                    # Ensure reminder_date is a date object, not datetime
+                    # Ensure reminder_date is a date object, not datetime or string
                     from datetime import datetime as dt, date
+                    from dateutil.parser import parse as parse_date
                     reminder_date = reminder.reminder_date
+                    
+                    # Handle datetime objects
                     if isinstance(reminder_date, dt):
                         # Convert datetime to date if needed (shouldn't happen, but defensive)
                         reminder_date = reminder_date.date()
@@ -739,8 +785,25 @@ def get_job_calendar_data(request):
                         reminder.reminder_date = reminder_date
                         reminder.save(update_fields=['reminder_date'])
                         logger.warning(f"Fixed reminder {reminder.id}: converted datetime to date")
+                    # Handle string objects
+                    elif isinstance(reminder_date, str):
+                        # Parse string to date
+                        try:
+                            reminder_date = parse_date(reminder_date).date()
+                        except Exception:
+                            # Fallback to simple parsing
+                            reminder_date = dt.strptime(reminder_date, '%Y-%m-%d').date()
+                        # Fix in database
+                        reminder.reminder_date = reminder_date
+                        reminder.save(update_fields=['reminder_date'])
+                        logger.warning(f"Fixed reminder {reminder.id}: converted string to date")
                     
                     reminder_color = reminder.calendar.call_reminder_color or '#F59E0B'
+                    
+                    # Apply lighter shade for completed reminders
+                    if reminder.completed:
+                        reminder_color = lighten_color(reminder_color, 0.3)
+                    
                     reminder_end_dt = reminder_date + timedelta(days=1)
                     
                     # Build title with notes if available
@@ -749,6 +812,10 @@ def get_job_calendar_data(request):
                         # Truncate notes if too long for display
                         notes_preview = reminder.notes[:50] + '...' if len(reminder.notes) > 50 else reminder.notes
                         reminder_title = f"📞 {notes_preview}"
+                    
+                    # Add completion indicator to title for completed reminders
+                    if reminder.completed:
+                        reminder_title = f"✓ {reminder_title}"
                     
                     reminder_event = {
                         'id': f"call-reminder-{reminder.id}",

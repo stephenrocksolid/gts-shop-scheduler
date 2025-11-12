@@ -1,64 +1,78 @@
 {% load static %}
-<form hx-post="{% url 'rental_scheduler:call_reminder_create_submit' %}"
+
+<!-- Compact styling to match Edit Job Dialog -->
+<style>
+  /* Global input/select/textarea styling */
+  #call-reminder-form input,
+  #call-reminder-form select,
+  #call-reminder-form textarea {
+    font-size: 12px !important;
+    padding: 4px 8px !important;
+    border-radius: 6px !important;
+  }
+</style>
+
+<form id="call-reminder-form"
+      hx-post="{% url 'rental_scheduler:call_reminder_create_submit' %}"
       hx-swap="none"
       hx-on::after-request="if(event.detail.successful) { if(window.JobPanel) { if(window.JobPanel.clearUnsavedChanges) { window.JobPanel.clearUnsavedChanges(); } window.JobPanel.close(true); } if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
-      style="display: flex; flex-direction: column; gap: 24px;">
+      style="display: flex; flex-direction: column; gap: 8px;">
   {% csrf_token %}
   
   {% if form.non_field_errors %}
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; color: #dc2626;">
+    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 4px; color: #dc2626; font-size: 12px;">
       {{ form.non_field_errors }}
     </div>
   {% endif %}
   
-  <!-- Calendar Selection -->
-  <div style="background: #fef3c7; border-radius: 12px; border: 1px solid #fcd34d; overflow: hidden;">
-    <div style="background: #fcd34d; padding: 8px 16px; border-bottom: 1px solid #fbbf24;">
-      <h3 style="font-size: 14px; font-weight: 600; color: #92400e; margin: 0; display: flex; align-items: center;">
-        <svg style="width: 20px; height: 20px; margin-right: 8px;" fill="currentColor" viewBox="0 0 20 20">
+  <!-- Call Reminder Details -->
+  <div style="background: #fef3c7; border-radius: 8px; border: 1px solid #fcd34d; overflow: hidden;">
+    <div style="background: #fcd34d; padding: 2px 8px; border-bottom: 1px solid #fbbf24;">
+      <h3 style="font-size: 12px; font-weight: 600; color: #92400e; margin: 0; display: flex; align-items: center;">
+        <svg style="width: 14px; height: 14px; margin-right: 6px;" fill="currentColor" viewBox="0 0 20 20">
           <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
         </svg>
         Call Reminder Details
       </h3>
     </div>
-    <div style="padding: 20px;">
-      <div style="display: flex; flex-direction: column; gap: 16px;">
+    <div style="padding: 8px;">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
         <!-- Calendar -->
         <div>
-          <label for="{{ form.calendar.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 8px; display: block; font-size: 14px;">
+          <label for="{{ form.calendar.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 2px; display: block; font-size: 12px;">
             Calendar *
           </label>
           {{ form.calendar }}
           {% if form.calendar.errors %}
-            <p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.calendar.errors.0 }}</p>
+            <p style="color: #dc2626; font-size: 10px; margin-top: 2px;">{{ form.calendar.errors.0 }}</p>
           {% endif %}
         </div>
         
         <!-- Reminder Date -->
         <div>
-          <label for="{{ form.reminder_date.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 8px; display: block; font-size: 14px;">
+          <label for="{{ form.reminder_date.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 2px; display: block; font-size: 12px;">
             Reminder Date (Sunday) *
           </label>
           {{ form.reminder_date }}
           {% if form.reminder_date.help_text %}
-            <p style="color: #6b7280; font-size: 12px; margin-top: 4px;">{{ form.reminder_date.help_text }}</p>
+            <p style="color: #6b7280; font-size: 10px; margin-top: 2px;">{{ form.reminder_date.help_text }}</p>
           {% endif %}
           {% if form.reminder_date.errors %}
-            <p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.reminder_date.errors.0 }}</p>
+            <p style="color: #dc2626; font-size: 10px; margin-top: 2px;">{{ form.reminder_date.errors.0 }}</p>
           {% endif %}
         </div>
         
         <!-- Notes -->
         <div>
-          <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 8px; display: block; font-size: 14px;">
+          <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 2px; display: block; font-size: 12px;">
             Notes
           </label>
           {{ form.notes }}
           {% if form.notes.help_text %}
-            <p style="color: #6b7280; font-size: 12px; margin-top: 4px;">{{ form.notes.help_text }}</p>
+            <p style="color: #6b7280; font-size: 10px; margin-top: 2px;">{{ form.notes.help_text }}</p>
           {% endif %}
           {% if form.notes.errors %}
-            <p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.notes.errors.0 }}</p>
+            <p style="color: #dc2626; font-size: 10px; margin-top: 2px;">{{ form.notes.errors.0 }}</p>
           {% endif %}
         </div>
       </div>
@@ -66,15 +80,15 @@
   </div>
   
   <!-- Form Actions -->
-  <div style="display: flex; justify-content: flex-end; gap: 12px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+  <div style="display: flex; justify-content: center; gap: 4px; padding-top: 4px; border-top: 1px solid #e5e7eb;">
     <button type="button" 
             onclick="if(window.JobPanel && window.JobPanel.close) { window.JobPanel.close(); }"
-            style="padding: 10px 20px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+            style="padding: 6px 12px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer; transition: all 0.2s;">
       Cancel
     </button>
     <button type="submit" 
-            style="padding: 10px 20px; background: #f59e0b; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
-      <svg style="width: 16px; height: 16px; display: inline-block; margin-right: 6px; vertical-align: text-bottom;" fill="currentColor" viewBox="0 0 20 20">
+            style="padding: 6px 12px; background: #f59e0b; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+      <svg style="width: 14px; height: 14px; display: inline-block; margin-right: 4px; vertical-align: text-bottom;" fill="currentColor" viewBox="0 0 20 20">
         <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
       </svg>
       Create Call Reminder
@@ -88,6 +102,7 @@ if (window.JobPanel && window.JobPanel.trackFormChanges) {
     window.JobPanel.trackFormChanges();
 }
 </script>
+
 
 
 

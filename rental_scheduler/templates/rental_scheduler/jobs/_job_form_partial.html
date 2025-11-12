@@ -2,57 +2,54 @@
 <form hx-post="{% url 'rental_scheduler:job_create_submit' %}"
       hx-swap="none"
       hx-on::after-request="if(event.detail.successful) { if(window.JobPanel) { if(window.JobPanel.clearUnsavedChanges) { window.JobPanel.clearUnsavedChanges(); } if(!window.JobPanel.isSwitchingJobs) { const currentJobId = window.JobPanel.currentJobId; if(currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(currentJobId)) { window.JobWorkspace.closeJob(currentJobId); } else { window.JobPanel.close(true); } } } if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
-      style="display: flex; flex-direction: column; gap: 24px;">
+      style="display: flex; flex-direction: column; gap: 8px;">
   {% csrf_token %}
   {% if form.instance.pk %}
     <input type="hidden" name="job_id" value="{{ form.instance.pk }}">
   {% endif %}
   
   {% if form.non_field_errors %}
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; color: #dc2626;">
+    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 4px; color: #dc2626; font-size: 12px;">
       {{ form.non_field_errors }}
     </div>
   {% endif %}
   
-  <!-- Calendar Selection (Top) -->
-  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-    <div style="padding: 16px 20px;">
-      <label for="{{ form.calendar.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 8px; display: block; font-size: 14px;">Calendar *</label>
-      {{ form.calendar }}
-    </div>
+  <!-- Calendar Selection - Cloned to header but kept here for form submission -->
+  <div id="calendar-field-container" style="display: none;">
+    {{ form.calendar }}
   </div>
   
   <!-- Customer Information Section -->
   <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-    <div style="background: #e2e8f0; padding: 6px 12px; border-bottom: 1px solid #cbd5e1;">
-      <h3 style="font-size: 13px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-        <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
+    <div style="background: #e2e8f0; padding: 2px 8px; border-bottom: 1px solid #cbd5e1;">
+      <h3 style="font-size: 12px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
+        <svg style="width: 14px; height: 14px; margin-right: 6px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
           <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
         </svg>
         Customer Information
       </h3>
     </div>
-    <div style="padding: 24px;">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-        <div>
-          <label for="{{ form.business_name.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Business Name *</label>
-          {{ form.business_name }}
-          {% if form.business_name.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.business_name.errors.0 }}</p>{% endif %}
+    <div style="padding: 8px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="{{ form.business_name.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Business Name *</label>
+          <div style="flex: 1;">{{ form.business_name }}</div>
+          {% if form.business_name.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.business_name.errors.0 }}</p>{% endif %}
         </div>
-        <div>
-          <label for="{{ form.contact_name.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Contact Name</label>
-          {{ form.contact_name }}
-          {% if form.contact_name.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.contact_name.errors.0 }}</p>{% endif %}
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="{{ form.contact_name.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Contact Name</label>
+          <div style="flex: 1;">{{ form.contact_name }}</div>
+          {% if form.contact_name.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.contact_name.errors.0 }}</p>{% endif %}
         </div>
-        <div>
-          <label for="{{ form.phone.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Phone</label>
-          {{ form.phone }}
-          {% if form.phone.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.phone.errors.0 }}</p>{% endif %}
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="{{ form.phone.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Phone</label>
+          <div style="flex: 1;">{{ form.phone }}</div>
+          {% if form.phone.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.phone.errors.0 }}</p>{% endif %}
         </div>
-        <div>
-          <label for="{{ form.date_call_received.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Date Call Received</label>
-          <input type="date" id="{{ form.date_call_received.id_for_label }}" name="{{ form.date_call_received.html_name }}" value="{{ form.date_call_received.value|date:'Y-m-d'|default:'' }}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-          {% if form.date_call_received.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.date_call_received.errors.0 }}</p>{% endif %}
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="{{ form.date_call_received.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Date Call Received</label>
+          <input type="date" id="{{ form.date_call_received.id_for_label }}" name="{{ form.date_call_received.html_name }}" value="{{ form.date_call_received.value|date:'Y-m-d'|default:'' }}" style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px;">
+          {% if form.date_call_received.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.date_call_received.errors.0 }}</p>{% endif %}
         </div>
       </div>
     </div>
@@ -60,136 +57,139 @@
 
   <!-- Schedule Information Section -->
   <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-    <div style="background: #e2e8f0; padding: 6px 12px; border-bottom: 1px solid #cbd5e1;">
-      <h3 style="font-size: 13px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-        <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
+    <div style="background: #e2e8f0; padding: 2px 8px; border-bottom: 1px solid #cbd5e1; display: flex; align-items: center; gap: 12px;">
+      <h3 style="font-size: 12px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
+        <svg style="width: 14px; height: 14px; margin-right: 6px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
           <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
         </svg>
         Schedule Information
       </h3>
+      <label style="font-weight: 600; color: #374151; display: flex; align-items: center; font-size: 12px; white-space: nowrap; margin: 0;">
+        <input type="checkbox" name="all_day" id="{{ form.all_day.id_for_label }}" 
+               style="width: 14px; height: 14px; margin-right: 6px;"
+               {% if not form.instance.pk or form.instance.all_day %}checked{% endif %}>
+        All Day
+      </label>
     </div>
-    <div style="padding: 24px;">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-        <div style="grid-column: 1 / -1;">
-          <label style="font-weight: 600; color: #374151; display: flex; align-items: center; font-size: 14px;">
-            <input type="checkbox" name="all_day" id="{{ form.all_day.id_for_label }}" 
-                   class="h-4 w-4 rounded border-gray-300 mr-2"
-                   {% if not form.instance.pk or form.instance.all_day %}checked{% endif %}>
-            <span style="margin-left: 8px;">All Day Event</span>
-          </label>
-        </div>
-        <div>
-          <label for="{{ form.start_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">
-            {% if not form.instance.pk or form.instance.all_day %}Start Date *{% else %}Start Date & Time *{% endif %}
-          </label>
-          <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
-                 name="start_dt" 
-                 id="{{ form.start_dt.id_for_label }}"
-                 value="{% if form.data.start_dt %}{{ form.data.start_dt }}{% elif form.instance.pk and form.instance.start_dt %}{{ form.instance.start_dt|date:'Y-m-d' }}{% else %}{{ form.initial.start_dt }}{% endif %}"
-                 required
-                 class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none">
-          {% if form.start_dt.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.start_dt.errors.0 }}</p>{% endif %}
-        </div>
-        <div>
-          <label for="{{ form.end_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">
-            {% if not form.instance.pk or form.instance.all_day %}End Date *{% else %}End Date & Time *{% endif %}
-          </label>
-          <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
-                 name="end_dt" 
-                 id="{{ form.end_dt.id_for_label }}"
-                 value="{% if form.data.end_dt %}{{ form.data.end_dt }}{% elif form.instance.pk and form.instance.end_dt %}{{ form.instance.end_dt|date:'Y-m-d' }}{% else %}{{ form.initial.end_dt }}{% endif %}"
-                 required
-                 class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none">
-          {% if form.end_dt.errors %}<p style="color: #dc2626; font-size: 12px; margin-top: 4px;">{{ form.end_dt.errors.0 }}</p>{% endif %}
-        </div>
-        <!-- Call Reminder Section -->
-        <div style="grid-column: 1 / -1; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-          <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; margin-bottom: 12px; cursor: pointer;">
-            <input type="checkbox" id="call-reminder-enabled" name="has_call_reminder" style="width: 18px; height: 18px; accent-color: #f59e0b;" {% if form.instance.has_call_reminder %}checked{% endif %}>
-            <svg style="width: 18px; height: 18px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
-            </svg>
-            Set a call reminder for this job
-          </label>
-          
-          <div id="call-reminder-options" class="{% if form.instance.has_call_reminder %}call-reminder-visible{% else %}call-reminder-hidden{% endif %}" style="display: flex; flex-direction: column; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label for="call-reminder-weeks" style="font-weight: 600; color: #374151; font-size: 14px;">Reminder:</label>
-              <select id="call-reminder-weeks" name="call_reminder_weeks_prior" style="padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff; flex: 1;">
-                <option value="2" {% if form.instance.call_reminder_weeks_prior == 2 or not form.instance.call_reminder_weeks_prior %}selected{% endif %}>1 week prior</option>
-                <option value="3" {% if form.instance.call_reminder_weeks_prior == 3 %}selected{% endif %}>2 weeks prior</option>
-              </select>
-            </div>
-            
-            <div>
-              <label for="call-reminder-notes" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Call Reminder Notes</label>
-              <textarea id="call-reminder-notes" name="call_reminder_notes" rows="3" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical; font-family: inherit;" placeholder="Notes for this call reminder...">{{ call_reminder_notes }}</textarea>
-            </div>
-            
-            {% if form.instance.pk and form.instance.has_call_reminder %}
-            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 8px; background-color: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;">
-              <input type="checkbox" id="call-reminder-completed" name="call_reminder_completed" style="width: 16px; height: 16px; accent-color: #10b981;" {% if form.instance.call_reminder_completed %}checked{% endif %}>
-              <span style="font-size: 14px; color: #374151;">
-                <svg style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 4px; color: #10b981;" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                </svg>
-                Call reminder completed
-              </span>
+    <div style="padding: 8px;">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label for="{{ form.start_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap;">
+              {% if not form.instance.pk or form.instance.all_day %}Start *{% else %}Start *{% endif %}
             </label>
+            <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
+                   name="start_dt" 
+                   id="{{ form.start_dt.id_for_label }}"
+                   value="{% if form.data.start_dt %}{{ form.data.start_dt }}{% elif form.instance.pk and form.instance.start_dt %}{{ form.instance.start_dt|date:'Y-m-d' }}{% else %}{{ form.initial.start_dt }}{% endif %}"
+                   required
+                   style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px;">
+            {% if form.start_dt.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.start_dt.errors.0 }}</p>{% endif %}
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label for="{{ form.end_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap;">
+              {% if not form.instance.pk or form.instance.all_day %}End *{% else %}End *{% endif %}
+            </label>
+            <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
+                   name="end_dt" 
+                   id="{{ form.end_dt.id_for_label }}"
+                   value="{% if form.data.end_dt %}{{ form.data.end_dt }}{% elif form.instance.pk and form.instance.end_dt %}{{ form.instance.end_dt|date:'Y-m-d' }}{% else %}{{ form.initial.end_dt }}{% endif %}"
+                   required
+                   style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px;">
+            {% if form.end_dt.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.end_dt.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+        <!-- Call Reminder and Recurring Event in 2 columns -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+          <!-- Call Reminder Section -->
+          <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 6px;">
+            <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; color: #374151; margin-bottom: 6px; cursor: pointer; font-size: 12px;">
+              <input type="checkbox" id="call-reminder-enabled" name="has_call_reminder" style="width: 14px; height: 14px; accent-color: #f59e0b;" {% if form.instance.has_call_reminder %}checked{% endif %}>
+              <svg style="width: 14px; height: 14px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
+              </svg>
+              Set a call reminder for this job
+            </label>
+            
+            <div id="call-reminder-options" class="{% if form.instance.has_call_reminder %}call-reminder-visible{% else %}call-reminder-hidden{% endif %}" style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="call-reminder-weeks" style="font-weight: 600; color: #374151; font-size: 12px; min-width: 80px;">Reminder:</label>
+                <select id="call-reminder-weeks" name="call_reminder_weeks_prior" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff; flex: 1;">
+                  <option value="2" {% if form.instance.call_reminder_weeks_prior == 2 or not form.instance.call_reminder_weeks_prior %}selected{% endif %}>1 week prior</option>
+                  <option value="3" {% if form.instance.call_reminder_weeks_prior == 3 %}selected{% endif %}>2 weeks prior</option>
+                </select>
+              </div>
+              
+              <div>
+                <label for="call-reminder-notes" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Call Reminder Notes</label>
+                <textarea id="call-reminder-notes" name="call_reminder_notes" rows="2" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; resize: vertical; font-family: inherit;" placeholder="Notes for this call reminder...">{{ call_reminder_notes }}</textarea>
+              </div>
+              
+              {% if form.instance.pk and form.instance.has_call_reminder %}
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px; background-color: #f9fafb; border-radius: 4px; border: 1px solid #e5e7eb;">
+                <input type="checkbox" id="call-reminder-completed" name="call_reminder_completed" style="width: 14px; height: 14px; accent-color: #10b981;" {% if form.instance.call_reminder_completed %}checked{% endif %}>
+                <span style="font-size: 12px; color: #374151;">
+                  <svg style="width: 12px; height: 12px; display: inline-block; vertical-align: middle; margin-right: 3px; color: #10b981;" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                  </svg>
+                  Call reminder completed
+                </span>
+              </label>
+              {% endif %}
+            </div>
+          </div>
+          
+          <!-- Recurring Event Section -->
+          <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 6px;">
+            <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; color: #374151; margin-bottom: 6px; cursor: pointer; font-size: 12px;">
+              <input type="checkbox" id="recurrence-enabled" name="recurrence_enabled" style="width: 14px; height: 14px; accent-color: #3b82f6;" {% if form.instance.pk %}{% if form.instance.recurrence_parent or form.instance.recurrence_rule %}checked{% endif %} {% if form.instance.recurrence_parent %}disabled{% endif %}{% endif %}>
+              <svg style="width: 14px; height: 14px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+              </svg>
+              Make this a recurring event
+            </label>
+            
+            {% if form.instance.pk and form.instance.recurrence_parent %}
+            <!-- For recurring instances, show info message -->
+            <div style="background: #e0f2fe; border: 1px solid #7dd3fc; border-radius: 4px; padding: 6px; margin-top: 4px;">
+              <p style="margin: 0; color: #0369a1; font-size: 12px;">
+                This is part of a recurring series. 
+                <a href="#" onclick="event.preventDefault(); JobPanel.load('{% url 'rental_scheduler:job_create_partial' %}?edit={{ form.instance.recurrence_parent.id }}');" style="text-decoration: underline; font-weight: 600;">Edit the entire series</a>
+              </p>
+            </div>
+            {% else %}
+            <div id="recurrence-options" class="{% if form.instance.pk and form.instance.recurrence_rule %}recurrence-visible{% else %}recurrence-hidden{% endif %}" style="grid-template-columns: 1fr 1fr; gap: 4px;">
+              <div>
+                <label for="recurrence-type" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Repeats</label>
+                <select id="recurrence-type" name="recurrence_type" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
+                  <option value="monthly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'monthly' %}selected{% endif %}>Monthly</option>
+                  <option value="yearly" {% if not form.instance.recurrence_rule or form.instance.recurrence_rule.type == 'yearly' %}selected{% endif %}>Yearly</option>
+                  <option value="weekly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'weekly' %}selected{% endif %}>Weekly</option>
+                  <option value="daily" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'daily' %}selected{% endif %}>Daily</option>
+                </select>
+              </div>
+              
+              <div>
+                <label for="recurrence-interval" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Every</label>
+                <input type="number" id="recurrence-interval" name="recurrence_interval" min="1" max="12" value="{% if form.instance.recurrence_rule %}{{ form.instance.recurrence_rule.interval|default:'1' }}{% else %}1{% endif %}" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
+              </div>
+              
+              <div>
+                <label for="recurrence-count" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Number of occurrences</label>
+                <input type="number" id="recurrence-count" name="recurrence_count" min="1" max="500" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}{{ form.instance.recurrence_rule.count }}{% else %}50{% endif %}" placeholder="50" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
+              </div>
+              
+              <div>
+                <label for="recurrence-until" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Or end by date</label>
+                <input type="date" id="recurrence-until" name="recurrence_until" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}{% endif %}" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
+              </div>
+            </div>
             {% endif %}
           </div>
         </div>
-        
-        <!-- Recurring Event Section -->
-        <div style="grid-column: 1 / -1; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px;">
-          <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; margin-bottom: 12px; cursor: pointer;">
-            <input type="checkbox" id="recurrence-enabled" name="recurrence_enabled" style="width: 18px; height: 18px; accent-color: #3b82f6;" {% if form.instance.pk %}{% if form.instance.recurrence_parent or form.instance.recurrence_rule %}checked{% endif %} {% if form.instance.recurrence_parent %}disabled{% endif %}{% endif %}>
-            <svg style="width: 18px; height: 18px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
-            </svg>
-            Make this a recurring event
-          </label>
-          
-          {% if form.instance.pk and form.instance.recurrence_parent %}
-          <!-- For recurring instances, show info message -->
-          <div style="background: #e0f2fe; border: 1px solid #7dd3fc; border-radius: 6px; padding: 12px; margin-top: 8px;">
-            <p style="margin: 0; color: #0369a1; font-size: 14px;">
-              This is part of a recurring series. 
-              <a href="#" onclick="event.preventDefault(); JobPanel.load('{% url 'rental_scheduler:job_create_partial' %}?edit={{ form.instance.recurrence_parent.id }}');" style="text-decoration: underline; font-weight: 600;">Edit the entire series</a>
-            </p>
-          </div>
-          {% else %}
-          <div id="recurrence-options" class="{% if form.instance.pk and form.instance.recurrence_rule %}recurrence-visible{% else %}recurrence-hidden{% endif %}" style="grid-template-columns: 1fr 1fr; gap: 12px;">
-            <div>
-              <label for="recurrence-type" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repeats</label>
-              <select id="recurrence-type" name="recurrence_type" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-                <option value="monthly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'monthly' %}selected{% endif %}>Monthly</option>
-                <option value="yearly" {% if not form.instance.recurrence_rule or form.instance.recurrence_rule.type == 'yearly' %}selected{% endif %}>Yearly</option>
-                <option value="weekly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'weekly' %}selected{% endif %}>Weekly</option>
-                <option value="daily" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'daily' %}selected{% endif %}>Daily</option>
-              </select>
-            </div>
-            
-            <div>
-              <label for="recurrence-interval" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Every</label>
-              <input type="number" id="recurrence-interval" name="recurrence_interval" min="1" max="12" value="{% if form.instance.recurrence_rule %}{{ form.instance.recurrence_rule.interval|default:'1' }}{% else %}1{% endif %}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-            </div>
-            
-            <div>
-              <label for="recurrence-count" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Number of occurrences</label>
-              <input type="number" id="recurrence-count" name="recurrence_count" min="1" max="500" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}{{ form.instance.recurrence_rule.count }}{% else %}50{% endif %}" placeholder="50" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-            </div>
-            
-            <div>
-              <label for="recurrence-until" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Or end by date</label>
-              <input type="date" id="recurrence-until" name="recurrence_until" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}{% endif %}" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: #ffffff;">
-            </div>
-          </div>
-          {% endif %}
-        </div>
-        <div style="grid-column: 1 / -1;">
-          <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">General Notes</label>
-          {{ form.notes }}
+        <div style="display: flex; align-items: flex-start; gap: 8px;">
+          <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap; padding-top: 4px;">General Notes</label>
+          <div style="flex: 1;">{{ form.notes }}</div>
         </div>
       </div>
     </div>
@@ -197,75 +197,75 @@
 
   <!-- Trailer Information Section -->
   <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
-    <div style="background: #e2e8f0; padding: 6px 12px; border-bottom: 1px solid #cbd5e1;">
-      <h3 style="font-size: 13px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
-        <svg style="width: 18px; height: 18px; margin-right: 8px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
+    <div style="background: #e2e8f0; padding: 2px 8px; border-bottom: 1px solid #cbd5e1;">
+      <h3 style="font-size: 12px; font-weight: 600; color: #374151; margin: 0; display: flex; align-items: center;">
+        <svg style="width: 14px; height: 14px; margin-right: 6px; color: #6b7280;" fill="currentColor" viewBox="0 0 20 20">
           <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"></path>
           <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1V8a1 1 0 00-1-1h-3z"></path>
         </svg>
         Trailer Information
       </h3>
     </div>
-    <div style="padding: 24px;">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-        <div style="grid-column: 1 / -1;">
-          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Description</label>
-          {{ form.trailer_details }}
+    <div style="padding: 8px;">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; align-items: flex-start; gap: 8px;">
+          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap; padding-top: 4px; min-width: 90px;">Description</label>
+          <div style="flex: 1;">{{ form.trailer_details }}</div>
         </div>
-        <div>
-          <label for="{{ form.trailer_color.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Color</label>
-          {{ form.trailer_color }}
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="{{ form.trailer_color.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Color</label>
+          <div style="flex: 1;">{{ form.trailer_color }}</div>
         </div>
-        <div>
-          <label for="{{ form.trailer_serial.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Serial Number</label>
-          {{ form.trailer_serial }}
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="{{ form.trailer_serial.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Serial Number</label>
+          <div style="flex: 1;">{{ form.trailer_serial }}</div>
         </div>
-        <div style="grid-column: 1 / -1;">
-          <label for="{{ form.repair_notes.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Repair Notes</label>
-          {{ form.repair_notes }}
+        <div style="display: flex; align-items: flex-start; gap: 8px;">
+          <label for="{{ form.repair_notes.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap; padding-top: 4px; min-width: 90px;">Repair Notes</label>
+          <div style="flex: 1;">{{ form.repair_notes }}</div>
         </div>
-        <div>
-          <label for="{{ form.quote.id_for_label }}" style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 14px;">Quote Amount</label>
-          {{ form.quote }}
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="{{ form.quote.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Quote Amount</label>
+          <div style="flex: 1;">{{ form.quote }}</div>
         </div>
       </div>
     </div>
   </div>
 
   <!-- Action Buttons -->
-  <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 8px;">
+  <div style="display: flex; flex-direction: column; gap: 4px; padding-top: 4px;">
     <!-- First row: Print buttons -->
-    <div style="display: flex; gap: 12px;">
-      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
+    <div style="display: flex; gap: 4px; justify-content: center;">
+      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
         Print WO
       </button>
-      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo-customer" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
-        Print Customer Copy WO
+      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo-customer" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
+        Print Customer WO
       </button>
-      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="invoice" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
+      <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="invoice" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
         Print Invoice
       </button>
     </div>
     <!-- Second row: Action buttons -->
-    <div style="display: flex; gap: 12px; justify-content: flex-end;">
-      <button type="button" onclick="JobPanel.close()" style="padding: 12px 24px; border: 1px solid #d1d5db; border-radius: 8px; background: #ffffff; color: #374151; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
+    <div style="display: flex; gap: 4px; justify-content: center;">
+      <button type="button" onclick="JobPanel.close()" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
         Cancel
       </button>
       {% if form.instance.pk and form.instance.status == 'completed' %}
-        <button type="button" class="uncomplete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 12px 24px; border: none; border-radius: 8px; background: #f59e0b; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#d97706'" onmouseout="this.style.backgroundColor='#f59e0b'">
+        <button type="button" class="uncomplete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 4px 12px; border: none; border-radius: 6px; background: #f59e0b; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#d97706'" onmouseout="this.style.backgroundColor='#f59e0b'">
           Mark as Uncompleted
         </button>
       {% elif form.instance.pk and form.instance.status == 'uncompleted' %}
-        <button type="button" class="complete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 12px 24px; border: none; border-radius: 8px; background: #16a34a; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#15803d'" onmouseout="this.style.backgroundColor='#16a34a'">
+        <button type="button" class="complete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 4px 12px; border: none; border-radius: 6px; background: #16a34a; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#15803d'" onmouseout="this.style.backgroundColor='#16a34a'">
           Mark as Complete
         </button>
       {% endif %}
       {% if form.instance.pk %}
-        <button type="button" class="delete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 12px 24px; border: none; border-radius: 8px; background: #dc2626; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#b91c1c'" onmouseout="this.style.backgroundColor='#dc2626'">
+        <button type="button" class="delete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 4px 12px; border: none; border-radius: 6px; background: #dc2626; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#b91c1c'" onmouseout="this.style.backgroundColor='#dc2626'">
           Delete
         </button>
       {% endif %}
-      <button type="submit" style="padding: 12px 24px; border: none; border-radius: 8px; background: #3b82f6; color: #ffffff; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
+      <button type="submit" style="padding: 4px 12px; border: none; border-radius: 6px; background: #3b82f6; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
         Save Job
       </button>
     </div>
@@ -273,6 +273,20 @@
 </form>
 
 <style>
+  /* Make all form inputs compact */
+  form input[type="text"],
+  form input[type="email"],
+  form input[type="tel"],
+  form input[type="number"],
+  form input[type="date"],
+  form input[type="datetime-local"],
+  form select,
+  form textarea {
+    font-size: 12px !important;
+    padding: 4px 8px !important;
+    border-radius: 6px !important;
+  }
+  
   .recurrence-visible {
     display: grid !important;
   }
@@ -294,6 +308,32 @@
 <script src="{% static 'rental_scheduler/js/all_day_toggle.js' %}"></script>
 <script>
   (function() {
+    // Clone calendar selector to panel header (keep original in form for submission)
+    const calendarField = document.querySelector('#calendar-field-container select');
+    const panelCalendarSelector = document.getElementById('panel-calendar-selector');
+    const panelCalendarContainer = document.getElementById('panel-calendar-container');
+    
+    if (calendarField && panelCalendarSelector && panelCalendarContainer) {
+      // Clone the select element for the header (visual display)
+      const clonedSelect = calendarField.cloneNode(true);
+      clonedSelect.id = 'calendar-header-select';
+      clonedSelect.removeAttribute('name'); // Remove name to avoid duplicate submission
+      
+      // Clear any existing content in the selector container first
+      panelCalendarSelector.innerHTML = '';
+      // Add the cloned select to the header
+      panelCalendarSelector.appendChild(clonedSelect);
+      
+      // Add event listener to sync changes from header dropdown to original field
+      clonedSelect.addEventListener('change', function() {
+        // Update the original hidden field so it gets submitted with the form
+        calendarField.value = this.value;
+      });
+      
+      // Show the container
+      panelCalendarContainer.style.display = 'flex';
+    }
+    
     // Function to initialize all toggles
     function initializeFormToggles() {
       // Try Tempus Dominus first

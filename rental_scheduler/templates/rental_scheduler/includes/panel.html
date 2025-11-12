@@ -136,7 +136,7 @@
       display: flex; 
       align-items: center; 
       justify-content: space-between;
-      padding: 20px 24px; 
+      padding: 8px 12px; 
       background: #ffffff;
       border-bottom: 1px solid #e5e7eb;
       cursor: move; 
@@ -148,8 +148,8 @@
     }
     
     #job-panel #job-panel-title {
-      font-size: 24px;
-      font-weight: 700;
+      font-size: 16px;
+      font-weight: 600;
       color: #111827;
       margin: 0;
     }
@@ -157,7 +157,7 @@
     #job-panel .panel-body { 
       flex: 1;
       overflow-y: auto;
-      padding: 32px;
+      padding: 12px;
       background: #ffffff;
       min-height: 0;
     }
@@ -180,11 +180,11 @@
     }
     
     #job-panel .btn { 
-      font-size: 14px; 
+      font-size: 12px; 
       font-weight: 500;
-      padding: 8px 10px; 
+      padding: 6px 8px; 
       border: 1px solid #d1d5db;
-      border-radius: 8px; 
+      border-radius: 6px; 
       background: #ffffff;
       color: #374151;
       cursor: pointer;
@@ -192,8 +192,8 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 36px;
-      height: 36px;
+      min-width: 28px;
+      height: 28px;
     }
     
     #job-panel .btn:hover { 
@@ -286,6 +286,15 @@
       padding: 40px 20px;
       font-size: 14px;
     }
+    
+    /* Calendar selector in header */
+    #panel-calendar-selector select {
+      font-size: 12px !important;
+      padding: 4px 8px !important;
+      border-radius: 6px !important;
+      border: 1px solid #d1d5db !important;
+      background: white !important;
+    }
   </style>
 
   <div class="panel-frame">
@@ -293,8 +302,14 @@
     <div class="panel-resize-handle-bottom" id="panel-resize-handle-bottom"></div>
     <div class="panel-resize-handle-corner" id="panel-resize-handle-corner"></div>
     <div class="panel-header">
-      <h2 id="job-panel-title" class="font-semibold text-gray-800">Job</h2>
-      <div class="space-x-2" style="display: flex; align-items: center;">
+      <div style="flex: 1;">
+        <h2 id="job-panel-title" class="font-semibold text-gray-800">Job</h2>
+      </div>
+      <div id="panel-calendar-container" style="display: none; align-items: center; gap: 8px; flex: 1; justify-content: center;">
+        <label style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap;">Calendar</label>
+        <div id="panel-calendar-selector" style="min-width: 180px;"></div>
+      </div>
+      <div class="space-x-2" style="display: flex; align-items: center; flex: 1; justify-content: flex-end;">
         <button class="btn btn-delete" id="panel-delete-btn" style="display: none;">Delete</button>
         <button class="btn" id="panel-workspace-minimize-btn" title="Minimize to workspace" style="display: none;">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">

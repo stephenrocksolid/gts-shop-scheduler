@@ -21,6 +21,48 @@
             this.lastClickDate = null;
             this.lastClickTime = null;
             
+            // Day number click timer for popover delay
+            this.dayNumberClickTimer = null;
+            
+            // Double-click detection threshold (ms)
+            this.doubleClickThreshold = 650;
+            
+            // Track last opened date when creating new items to prevent duplicate loads
+            this.lastOpenedDateByDoubleClick = null;
+            this.lastOpenedDateTimestamp = 0;
+            
+            // Tooltip hover delay tracking
+            this.tooltipTimeout = null;
+            
+            // Search panel state - load from localStorage
+            const savedSearchPanelState = localStorage.getItem('gts-calendar-search-open');
+            this.searchPanelOpen = savedSearchPanelState === 'true';
+            
+            // Initialize search panel state on page load
+            if (this.searchPanelOpen) {
+                setTimeout(() => {
+                    const searchPanel = document.getElementById('calendar-search-panel');
+                    const calendarShell = document.getElementById('calendar-shell');
+                    const searchInput = document.getElementById('calendar-search-input');
+                    const searchButton = document.querySelector('.fc-searchButton-button');
+                    
+                    if (searchPanel && calendarShell) {
+                        searchPanel.style.height = '50vh';
+                        calendarShell.style.height = 'calc(50vh - 45px)';
+                        
+                        // Add active class to button
+                        if (searchButton) {
+                            searchButton.classList.add('active');
+                        }
+                        
+                        // Focus search input if panel is open
+                        if (searchInput) {
+                            searchInput.focus();
+                        }
+                    }
+                }, 0);
+            }
+            
             // State management
             this.currentFilters = {
                 calendar: '',
@@ -77,7 +119,7 @@
                 headerToolbar: {
                     left: 'prev title next',
                     center: '',
-                    right: 'jobsButton settingsButton'
+                    right: 'searchButton jobsButton settingsButton'
                 },
                 buttonText: {
                     today: 'Today'
@@ -97,6 +139,13 @@
                     }
                 },
                 customButtons: {
+                    searchButton: {
+                        text: '🔍',
+                        hint: 'Toggle Search',
+                        click: () => {
+                            this.toggleSearchPanel();
+                        }
+                    },
                     jobsButton: {
                         text: 'Jobs',
                         click: function() {
@@ -122,8 +171,8 @@
                         }
                     }
                 },
-                height: 'auto',        // auto height based on content
-                expandRows: false,     // fixed height rows
+                height: '100%',        // Fill parent container
+                expandRows: true,      // Allow rows to expand to fill space
                 windowResizeDelay: 50, // better resizing behavior
                 events: this.fetchEvents.bind(this),
                 dateClick: this.handleDateClick.bind(this),
@@ -145,10 +194,12 @@
                 // Hook calendar events to update Today panel and save position
                 eventsSet: () => {
                     this.renderTodayPanel();
+                    this.forceEqualWeekHeights();
                 },
                 datesSet: () => {
                     this.renderTodayPanel();
                     this.saveCurrentDate();
+                    this.forceEqualWeekHeights();
                 },
                 loading: (isLoading) => {
                     if (!isLoading) {
@@ -163,6 +214,9 @@
             });
 
             this.calendar.render();
+            
+            // Force equal week heights after render
+            this.forceEqualWeekHeights();
             
             // Style the custom buttons after render
             this.styleCustomButtons();
@@ -193,6 +247,15 @@
             
             // Make calendar instance globally available
             window.jobCalendar = this;
+            
+            // Add window resize listener to maintain equal heights
+            let resizeTimeout;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => {
+                    this.forceEqualWeekHeights();
+                }, 150);
+            });
         }
         
         /**
@@ -214,15 +277,14 @@
             `;
             document.head.appendChild(style);
             
-            // Use event delegation on the calendar element
+            // Handle single clicks on day numbers - show popover with events
             this.calendarEl.addEventListener('click', (e) => {
                 // Check if clicked element is a day number
                 const dayNumber = e.target.closest('.fc-daygrid-day-number');
                 if (!dayNumber) return;
                 
-                // Prevent default behavior and event propagation
+                // Prevent default browser navigation (day number is an anchor)
                 e.preventDefault();
-                e.stopPropagation();
                 
                 // Get the day cell
                 const dayCell = dayNumber.closest('.fc-daygrid-day');
@@ -232,34 +294,142 @@
                 const dateStr = dayCell.getAttribute('data-date');
                 if (!dateStr) return;
                 
+                // Clear any existing timer
+                if (this.dayNumberClickTimer) {
+                    clearTimeout(this.dayNumberClickTimer);
+                }
+                
+                // Set timer to show popover after threshold + 150ms (allows time for double-click)
+                this.dayNumberClickTimer = setTimeout(() => {
+                    // Get all events for this date
+                    const events = this.calendar.getEvents().filter(event => {
+                        // Get date in YYYY-MM-DD format without timezone conversion
+                        const getLocalDateStr = (d) => {
+                            const year = d.getFullYear();
+                            const month = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            return `${year}-${month}-${day}`;
+                        };
+                        
+                        const eventStartDate = getLocalDateStr(event.start);
+                        const clickedDate = dateStr; // Already in YYYY-MM-DD format
+                        
+                        // Check if event starts on this day
+                        return eventStartDate === clickedDate;
+                    });
+                    
+                    // If there are events, show the popover
+                    if (events.length > 0) {
+                        // Parse the date for popover
+                        const date = new Date(dateStr + 'T00:00:00');
+                        this.showDayEventsPopover(events, dayNumber, date);
+                    }
+                }, this.doubleClickThreshold + 150);
+            });
+            
+            // Handle double-clicks anywhere in a day cell - open new job/reminder form
+            this.calendarEl.addEventListener('dblclick', (e) => {
+                // Ignore double-clicks on events themselves (let event click handlers handle those)
+                if (e.target.closest('.fc-event')) {
+                    return;
+                }
+                
+                // Find the day cell that was double-clicked
+                const dayCell = e.target.closest('.fc-daygrid-day');
+                if (!dayCell) return;
+                
+                // Prevent default navigation
+                e.preventDefault();
+                
+                // Cancel the single-click timer
+                if (this.dayNumberClickTimer) {
+                    clearTimeout(this.dayNumberClickTimer);
+                    this.dayNumberClickTimer = null;
+                }
+                
+                // Get the date from the day cell's data attribute
+                const dateStr = dayCell.getAttribute('data-date');
+                if (!dateStr) return;
+                
                 // Parse the date
                 const date = new Date(dateStr + 'T00:00:00');
+                const now = Date.now();
+                const dateMs = date.getTime();
                 
-                // Get all events for this date
-                const events = this.calendar.getEvents().filter(event => {
-                    // Get date in YYYY-MM-DD format without timezone conversion
-                    const getLocalDateStr = (d) => {
-                        const year = d.getFullYear();
-                        const month = String(d.getMonth() + 1).padStart(2, '0');
-                        const day = String(d.getDate()).padStart(2, '0');
-                        return `${year}-${month}-${day}`;
-                    };
-                    
-                    const eventStartDate = getLocalDateStr(event.start);
-                    const clickedDate = dateStr; // Already in YYYY-MM-DD format
-                    
-                    // Check if event starts on this day
-                    // (Our split multi-day events have start dates matching the day they appear on)
-                    return eventStartDate === clickedDate;
-                });
-                
-                // If there are events, show the popover
-                if (events.length > 0) {
-                    // Create a mock "more link" click to trigger the popover
-                    // FullCalendar's popover API requires specific parameters
-                    this.showDayEventsPopover(events, dayNumber, date);
+                // If this double-click was already handled via dateClick logic, skip duplicate load
+                if (this.lastOpenedDateByDoubleClick === dateMs && (now - this.lastOpenedDateTimestamp) < (this.doubleClickThreshold + 150)) {
+                    return;
                 }
+                
+                // Record this handled double click
+                this.lastOpenedDateByDoubleClick = dateMs;
+                this.lastOpenedDateTimestamp = now;
+                
+                // Open the appropriate form
+                this.openCreateFormForDate(date);
             });
+        }
+        
+        /**
+         * Open the create job or call reminder form for the provided date
+         */
+        openCreateFormForDate(date) {
+            try {
+                if (!window.JobPanel) {
+                    console.error('JobPanel not available');
+                    this.showError('Job panel functionality not available. Please refresh the page.');
+                    return;
+                }
+                
+                const isSunday = date.getDay() === 0;
+                const dateStr = date.toISOString().split('T')[0];
+                
+                const loadForm = () => {
+                    // Close any open day popovers before loading the form
+                    document.querySelectorAll('.fc-more-popover').forEach(pop => pop.remove());
+                    
+                    if (isSunday) {
+                        let url = `/call-reminders/new/partial/?date=${dateStr}`;
+                        if (this.defaultCalendar) {
+                            url += `&calendar=${this.defaultCalendar}`;
+                        }
+                        window.JobPanel.setTitle('New Call Reminder');
+                        window.JobPanel.load(url);
+                    } else {
+                        let url = `/jobs/new/partial/?date=${dateStr}`;
+                        if (this.defaultCalendar) {
+                            url += `&calendar=${this.defaultCalendar}`;
+                        }
+                        window.JobPanel.setTitle('New Job');
+                        window.JobPanel.load(url);
+                    }
+                };
+                
+                if (window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
+                    window.JobPanel.saveForm(() => {
+                        const currentJobId = window.JobPanel.currentJobId;
+                        if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
+                            const form = document.querySelector('#job-panel .panel-body form');
+                            const businessName = form?.querySelector('input[name="business_name"]')?.value || 
+                                               form?.querySelector('input[name="contact_name"]')?.value || 
+                                               'Unnamed Job';
+                            const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
+                            
+                            window.JobWorkspace.addJobMinimized(currentJobId, {
+                                customerName: businessName,
+                                trailerColor: trailerColor,
+                                calendarColor: '#3B82F6'
+                            });
+                        }
+                        loadForm();
+                    });
+                } else {
+                    loadForm();
+                }
+            } catch (error) {
+                console.error('JobCalendar: Error opening form for date', error);
+                this.showError('Unable to open form. Please try again.');
+            }
         }
         
         /**
@@ -337,13 +507,25 @@
             
             // Add events to list
             events.forEach(event => {
+                // Get calendar color and apply lighter shade for completed events
+                const calendarColor = event.extendedProps?.calendar_color || '#3788d8';
+                const isCompleted = event.extendedProps?.status === 'completed';
+                
+                let finalColor = calendarColor;
+                if (isCompleted) {
+                    finalColor = this.lightenColor(calendarColor, 0.3);
+                }
+                
+                const backgroundColor = event.backgroundColor || finalColor;
+                const textDecoration = isCompleted ? 'text-decoration: line-through;' : '';
+                
                 const eventEl = document.createElement('div');
                 eventEl.style.cssText = `
                     padding: 2px 4px;
                     margin-bottom: 2px;
                     border-radius: 2px;
                     cursor: pointer;
-                    background: ${event.backgroundColor || '#3788d8'};
+                    background: ${backgroundColor};
                     color: white;
                     font-size: 12px;
                     line-height: 1.3;
@@ -354,6 +536,7 @@
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
+                    ${textDecoration}
                 `;
                 
                 // Format time
@@ -368,14 +551,26 @@
                 
                 eventEl.innerHTML = `<strong style="margin-right: 4px;">${timeStr}</strong><span>${event.title}</span>`;
                 
-                // Add hover effect and tooltip
+                // Add hover tooltip
                 eventEl.addEventListener('mouseenter', (e) => {
-                    eventEl.style.opacity = '0.8';
-                    // Show tooltip
-                    this.showEventTooltip(event, eventEl);
+                    // Clear any existing timeout
+                    if (this.tooltipTimeout) {
+                        clearTimeout(this.tooltipTimeout);
+                    }
+                    
+                    // Set a 500ms delay before showing the tooltip
+                    this.tooltipTimeout = setTimeout(() => {
+                        this.showEventTooltip(event, eventEl);
+                        this.tooltipTimeout = null;
+                    }, 500);
                 });
                 eventEl.addEventListener('mouseleave', () => {
-                    eventEl.style.opacity = '1';
+                    // Clear the timeout if user stops hovering before delay completes
+                    if (this.tooltipTimeout) {
+                        clearTimeout(this.tooltipTimeout);
+                        this.tooltipTimeout = null;
+                    }
+                    
                     // Hide tooltip
                     this.hideEventTooltip();
                 });
@@ -489,6 +684,49 @@
                 const currentDate = this.calendar.getDate();
                 localStorage.setItem('gts-calendar-current-date', currentDate.toISOString());
             }
+        }
+
+        /**
+         * Force all week rows to have equal height (25% each)
+         */
+        forceEqualWeekHeights() {
+            // Use multiple timeouts to catch different render stages
+            const applyHeights = () => {
+                // Find the daygrid body
+                const daygridBody = document.querySelector('.fc-daygrid-body');
+                if (!daygridBody) return;
+                
+                // Get the total available height
+                const totalHeight = daygridBody.offsetHeight;
+                const weekHeight = Math.floor(totalHeight / 4); // Exact pixel height for each week
+                
+                // Find all week rows
+                const weekRows = document.querySelectorAll('.fc-daygrid-body table tbody tr');
+                
+                if (weekRows.length === 4 && weekHeight > 0) {
+                    weekRows.forEach((row) => {
+                        // Set explicit pixel heights
+                        row.style.setProperty('height', `${weekHeight}px`, 'important');
+                        row.style.setProperty('max-height', `${weekHeight}px`, 'important');
+                        row.style.setProperty('min-height', `${weekHeight}px`, 'important');
+                        row.style.setProperty('overflow', 'hidden', 'important');
+                        
+                        // Also set on the cells within the row
+                        const cells = row.querySelectorAll('td');
+                        cells.forEach(cell => {
+                            cell.style.setProperty('height', `${weekHeight}px`, 'important');
+                            cell.style.setProperty('max-height', `${weekHeight}px`, 'important');
+                            cell.style.setProperty('overflow', 'hidden', 'important');
+                        });
+                    });
+                }
+            };
+            
+            // Apply immediately
+            setTimeout(applyHeights, 10);
+            // Apply again after a delay to catch late renders
+            setTimeout(applyHeights, 100);
+            setTimeout(applyHeights, 250);
         }
 
         /**
@@ -615,7 +853,19 @@
 
                 // Get calendar color from extendedProps or use default
                 const calendarColor = ev.extendedProps?.calendar_color || '#3B82F6';
-                const backgroundColor = ev.backgroundColor || calendarColor;
+                
+                // Check if job is completed for strikethrough styling and lighter color
+                const isCompleted = ev.extendedProps?.status === 'completed';
+                const textDecoration = isCompleted ? 'text-decoration: line-through;' : '';
+                
+                // Apply lighter shade for completed events (same as calendar events)
+                let finalColor = calendarColor;
+                if (isCompleted) {
+                    finalColor = this.lightenColor(calendarColor, 0.3);
+                }
+                
+                // Use event's backgroundColor if available, otherwise use the calculated color
+                const backgroundColor = ev.backgroundColor || finalColor;
 
                 const item = document.createElement('div');
                 item.className = 'today-item';
@@ -623,7 +873,7 @@
                 item.style.backgroundColor = backgroundColor;
                 item.style.borderLeft = `4px solid ${backgroundColor}`;
                 item.innerHTML = `
-                    <div><span class="today-item-time">${timeStr}</span>
+                    <div style="${textDecoration}"><span class="today-item-time">${timeStr}</span>
                     <span class="today-item-title">${ev.title || '(no title)'}</span></div>
                 `;
                 
@@ -719,10 +969,25 @@
                 
                 // Add hover tooltip for today sidebar items
                 item.addEventListener('mouseenter', (e) => {
-                    this.showEventTooltip(ev, e.target);
+                    // Clear any existing timeout
+                    if (this.tooltipTimeout) {
+                        clearTimeout(this.tooltipTimeout);
+                    }
+                    
+                    // Set a 500ms delay before showing the tooltip
+                    this.tooltipTimeout = setTimeout(() => {
+                        this.showEventTooltip(ev, e.target);
+                        this.tooltipTimeout = null;
+                    }, 500);
                 });
                 
                 item.addEventListener('mouseleave', () => {
+                    // Clear the timeout if user stops hovering before delay completes
+                    if (this.tooltipTimeout) {
+                        clearTimeout(this.tooltipTimeout);
+                        this.tooltipTimeout = null;
+                    }
+                    
                     this.hideEventTooltip();
                 });
                 
@@ -1460,16 +1725,51 @@
             const calendarEl = this.calendarEl;
             if (!calendarEl) return;
             
-            // Allow normal scrolling within day cells only
+            // Wheel/scroll navigation for weeks
+            let wheelTimeout = null;
             calendarEl.addEventListener('wheel', (e) => {
+                // Check if we're scrolling inside a day events container
                 const dayEventsContainer = e.target.closest('.fc-daygrid-day-events');
                 
                 if (dayEventsContainer) {
-                    // We're inside a day events container - allow scrolling
-                    e.stopPropagation();
-                    // Don't preventDefault - let browser handle the scroll naturally
+                    // Check if the container can actually scroll
+                    const canScroll = dayEventsContainer.scrollHeight > dayEventsContainer.clientHeight;
+                    
+                    if (canScroll) {
+                        // We're inside a scrollable day events container - allow normal scrolling
+                        e.stopPropagation();
+                        // Don't preventDefault - let browser handle the scroll
+                        return;
+                    }
                 }
-            }, { passive: true });
+                
+                // Navigate weeks with scroll wheel
+                e.preventDefault();
+                
+                // Debounce the wheel events to prevent too-fast navigation
+                if (wheelTimeout) return;
+                
+                wheelTimeout = setTimeout(() => {
+                    wheelTimeout = null;
+                }, 150);
+                
+                // Get current date from calendar
+                const currentDate = this.calendar.getDate();
+                
+                // Calculate new date (scroll down = next week, scroll up = prev week)
+                const newDate = new Date(currentDate);
+                if (e.deltaY > 0) {
+                    // Scroll down - next week
+                    newDate.setDate(newDate.getDate() + 7);
+                } else {
+                    // Scroll up - previous week
+                    newDate.setDate(newDate.getDate() - 7);
+                }
+                
+                // Navigate to new date
+                this.calendar.gotoDate(newDate);
+                this.saveCurrentDate();
+            }, { passive: false });
         }
 
         /**
@@ -1974,13 +2274,29 @@
          * Handle event mouse enter for tooltip
          */
         handleEventMouseEnter(info) {
-            this.showEventTooltip(info.event, info.el);
+            // Clear any existing timeout
+            if (this.tooltipTimeout) {
+                clearTimeout(this.tooltipTimeout);
+            }
+            
+            // Set a 500ms delay before showing the tooltip
+            this.tooltipTimeout = setTimeout(() => {
+                this.showEventTooltip(info.event, info.el);
+                this.tooltipTimeout = null;
+            }, 500);
         }
 
         /**
          * Handle event mouse leave to hide tooltip
          */
         handleEventMouseLeave(info) {
+            // Clear the timeout if user stops hovering before delay completes
+            if (this.tooltipTimeout) {
+                clearTimeout(this.tooltipTimeout);
+                this.tooltipTimeout = null;
+            }
+            
+            // Hide the tooltip if it's already showing
             this.hideEventTooltip();
         }
 
@@ -2284,23 +2600,23 @@
             const jobId = props.job_id;
             const reminderId = props.reminder_id;
             
-            let html = `<div style="padding: 20px;">`;
+            let html = `<div style="padding: 8px;">`;
             
             // Header
             html += `
-                <div style="margin-bottom: 20px;">
-                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                        <div style="width: 48px; height: 48px; background-color: ${event.backgroundColor}; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                <div style="margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <div style="width: 32px; height: 32px; background-color: ${event.backgroundColor}; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px;">
                             📞
                         </div>
                         <div style="flex: 1;">
-                            <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Call Reminder</h3>`;
+                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">Call Reminder</h3>`;
             
             if (!isStandalone && props.weeks_prior) {
                 const weeksText = props.weeks_prior === 2 ? '1 week' : '2 weeks';
-                html += `<p style="margin: 4px 0 0 0; font-size: 14px; color: #6b7280;">${weeksText} before job</p>`;
+                html += `<p style="margin: 2px 0 0 0; font-size: 12px; color: #6b7280;">${weeksText} before job</p>`;
             } else if (props.reminder_date) {
-                html += `<p style="margin: 4px 0 0 0; font-size: 14px; color: #6b7280;">${props.reminder_date}</p>`;
+                html += `<p style="margin: 2px 0 0 0; font-size: 12px; color: #6b7280;">${props.reminder_date}</p>`;
             }
             
             html += `</div></div>`;
@@ -2315,54 +2631,54 @@
                 });
                 
                 html += `
-                    <div style="background-color: #f9fafb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                        <div style="margin-bottom: 12px;">
-                            <div style="font-weight: 600; color: #374151; margin-bottom: 4px;">Job Details</div>
-                            <div style="color: #6b7280; font-size: 14px;">
+                    <div style="background-color: #f9fafb; border-radius: 6px; padding: 8px; margin-bottom: 8px;">
+                        <div style="margin-bottom: 6px;">
+                            <div style="font-weight: 600; color: #374151; margin-bottom: 2px; font-size: 12px;">Job Details</div>
+                            <div style="color: #6b7280; font-size: 12px;">
                                 <strong style="color: #111827;">${props.business_name || 'No business name'}</strong>
                                 ${props.contact_name ? `<br>${props.contact_name}` : ''}
                                 ${props.phone ? `<br>📱 ${props.phone}` : ''}
                             </div>
                         </div>
-                        <div style="padding-top: 12px; border-top: 1px solid #e5e7eb;">
-                            <div style="font-weight: 600; color: #374151; margin-bottom: 4px;">Job Date</div>
-                            <div style="color: #6b7280; font-size: 14px;">${formattedDate}</div>
+                        <div style="padding-top: 6px; border-top: 1px solid #e5e7eb;">
+                            <div style="font-weight: 600; color: #374151; margin-bottom: 2px; font-size: 12px;">Job Date</div>
+                            <div style="color: #6b7280; font-size: 12px;">${formattedDate}</div>
                         </div>
                     </div>`;
             }
             
             // Notes section
             html += `
-                <div style="margin-bottom: 16px;">
-                    <label style="font-weight: 600; color: #374151; margin-bottom: 8px; display: block;">
+                <div style="margin-bottom: 8px;">
+                    <label style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 12px;">
                         Notes
                     </label>
                     <textarea id="reminder-notes" 
-                              style="width: 100%; min-height: 100px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; font-size: 14px; resize: vertical;"
+                              style="width: 100%; min-height: 60px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; font-size: 12px; resize: vertical;"
                               placeholder="Add notes about this call reminder...">${props.notes || ''}</textarea>
                 </div>
                 </div>`;
             
             // Action buttons
-            html += `<div style="display: flex; gap: 12px;">`;
+            html += `<div style="display: flex; gap: 4px; justify-content: center;">`;
             
             if (isStandalone && reminderId) {
                 // Standalone reminder buttons
                 html += `
                     <button onclick="jobCalendar.saveStandaloneReminderNotes(${reminderId})" 
-                            style="flex: 1; padding: 12px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            style="flex: 1; padding: 6px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#2563eb'" 
                             onmouseout="this.style.backgroundColor='#3b82f6'">
                         💾 Save & Close
                     </button>
                     <button onclick="jobCalendar.markStandaloneReminderComplete(${reminderId})" 
-                            style="flex: 1; padding: 12px 20px; background-color: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            style="flex: 1; padding: 6px 12px; background-color: #10b981; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#059669'" 
                             onmouseout="this.style.backgroundColor='#10b981'">
                         ✓ Complete
                     </button>
                     <button onclick="jobCalendar.deleteStandaloneReminder(${reminderId})" 
-                            style="padding: 12px 20px; background-color: #ef4444; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            style="padding: 6px 12px; background-color: #ef4444; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#dc2626'" 
                             onmouseout="this.style.backgroundColor='#ef4444'">
                         🗑️
@@ -2371,19 +2687,19 @@
                 // Job-related reminder buttons
                 html += `
                     <button onclick="jobCalendar.saveJobReminderNotes(${jobId})" 
-                            style="flex: 1; padding: 12px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            style="flex: 1; padding: 6px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#2563eb'" 
                             onmouseout="this.style.backgroundColor='#3b82f6'">
                         💾 Save & Close
                     </button>
                     <button onclick="jobCalendar.markCallReminderComplete(${jobId})" 
-                            style="flex: 1; padding: 12px 20px; background-color: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            style="flex: 1; padding: 6px 12px; background-color: #10b981; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#059669'" 
                             onmouseout="this.style.backgroundColor='#10b981'">
                         ✓ Mark Complete
                     </button>
                     <button onclick="jobCalendar.openJobFromReminder(${jobId})" 
-                            style="flex: 1; padding: 12px 20px; background-color: #6b7280; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;"
+                            style="flex: 1; padding: 6px 12px; background-color: #6b7280; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#4b5563'" 
                             onmouseout="this.style.backgroundColor='#6b7280'">
                         View Job
@@ -2595,13 +2911,34 @@
          */
         handleDateClick(info) {
             try {
+                // Check if click is on or near a scrollbar (only if scrollbar is present)
+                if (info.jsEvent) {
+                    const dayEventsContainer = info.jsEvent.target.closest('.fc-daygrid-day-events');
+                    if (dayEventsContainer) {
+                        // Only check for scrollbar clicks if there's actually a scrollbar
+                        const hasScrollbar = dayEventsContainer.scrollHeight > dayEventsContainer.clientHeight;
+                        
+                        if (hasScrollbar) {
+                            const rect = dayEventsContainer.getBoundingClientRect();
+                            const clickX = info.jsEvent.clientX;
+                            const rightEdge = rect.right;
+                            const isScrollbarClick = (rightEdge - clickX) <= 18;
+                            
+                            if (isScrollbarClick) {
+                                // Click is on scrollbar - ignore it
+                                return;
+                            }
+                        }
+                    }
+                }
+                
                 const currentTime = Date.now();
                 const currentDate = info.date.getTime();
                 
-                // Check if this is a double-click (same date within 500ms)
+                // Check if this is a double-click (same date within threshold)
                 if (this.lastClickDate === currentDate && 
                     this.lastClickTime && 
-                    (currentTime - this.lastClickTime) < 500) {
+                    (currentTime - this.lastClickTime) < this.doubleClickThreshold) {
                     
                     // Double click detected - clear timer
                     if (this.clickTimer) {
@@ -2609,68 +2946,13 @@
                         this.clickTimer = null;
                     }
                     
-                    // Check if clicked date is Sunday (0 = Sunday)
-                    const isSunday = info.date.getDay() === 0;
+                    // Record handled double click to prevent duplicate handling from dblclick listener
+                    const dateMs = info.date.getTime();
+                    this.lastOpenedDateByDoubleClick = dateMs;
+                    this.lastOpenedDateTimestamp = currentTime;
                     
-                    if (window.JobPanel) {
-                        const dateStr = info.date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-                        
-                        // Define the load operation
-                        const loadForm = () => {
-                            if (isSunday) {
-                                // Open call reminder form for Sunday
-                                let url = `/call-reminders/new/partial/?date=${dateStr}`;
-                                // Add default calendar if set
-                                if (this.defaultCalendar) {
-                                    url += `&calendar=${this.defaultCalendar}`;
-                                }
-                                window.JobPanel.setTitle('New Call Reminder');
-                                window.JobPanel.load(url);
-                            } else {
-                                // Open job form for other days
-                                let url = `/jobs/new/partial/?date=${dateStr}`;
-                                // Add default calendar if set
-                                if (this.defaultCalendar) {
-                                    url += `&calendar=${this.defaultCalendar}`;
-                                }
-                                window.JobPanel.setTitle('New Job');
-                                window.JobPanel.load(url);
-                            }
-                        };
-                        
-                        // Check for unsaved changes before loading new form
-                        if (window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
-                            // Save the form first
-                            window.JobPanel.saveForm(() => {
-                                // After saving, add to workspace if it has a job ID
-                                const currentJobId = window.JobPanel.currentJobId;
-                                if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
-                                    // Get job details from the form
-                                    const form = document.querySelector('#job-panel .panel-body form');
-                                    const businessName = form?.querySelector('input[name="business_name"]')?.value || 
-                                                       form?.querySelector('input[name="contact_name"]')?.value || 
-                                                       'Unnamed Job';
-                                    const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-                                    
-                                    // Add to workspace as minimized
-                                    window.JobWorkspace.addJobMinimized(currentJobId, {
-                                        customerName: businessName,
-                                        trailerColor: trailerColor,
-                                        calendarColor: '#3B82F6'
-                                    });
-                                }
-                                
-                                // Now load the new form
-                                loadForm();
-                            });
-                        } else {
-                            // No unsaved changes, load directly
-                            loadForm();
-                        }
-                    } else {
-                        console.error('JobPanel not available');
-                        this.showError('Job panel functionality not available. Please refresh the page.');
-                    }
+                    // Open the appropriate form
+                    this.openCreateFormForDate(info.date);
                     
                     // Reset tracking
                     this.lastClickDate = null;
@@ -2686,12 +2968,12 @@
                         clearTimeout(this.clickTimer);
                     }
                     
-                    // Set timer to reset after 500ms if no second click
+                    // Set timer to reset after threshold if no second click
                     this.clickTimer = setTimeout(() => {
                         this.lastClickDate = null;
                         this.lastClickTime = null;
                         this.clickTimer = null;
-                    }, 500);
+                    }, this.doubleClickThreshold);
                 }
                 
             } catch (error) {
@@ -2738,16 +3020,22 @@
                 }, 100);
             }
             
-            // Apply completion styling
-            if (props.is_completed) {
-                event.setProp('textDecoration', 'line-through');
-                event.setProp('opacity', '0.7');
+            // Apply completion styling (only to DOM element, not as event property)
+            if (props.is_completed || (props.completed && (props.type === 'call_reminder' || props.type === 'standalone_call_reminder'))) {
+                if (info.el) {
+                    info.el.style.textDecoration = 'line-through';
+                    info.el.style.textDecorationColor = 'white';
+                    info.el.style.color = 'white';
+                    info.el.style.opacity = '0.7';
+                }
             }
             
-            // Apply canceled styling
+            // Apply canceled styling (only to DOM element, not as event property)
             if (props.is_canceled) {
-                event.setProp('textDecoration', 'line-through');
-                event.setProp('opacity', '0.5');
+                if (info.el) {
+                    info.el.style.textDecoration = 'line-through';
+                    info.el.style.opacity = '0.5';
+                }
             }
         }
 
@@ -3041,6 +3329,58 @@
         }
 
         /**
+         * Toggle search panel visibility
+         */
+        toggleSearchPanel() {
+            this.searchPanelOpen = !this.searchPanelOpen;
+            const searchPanel = document.getElementById('calendar-search-panel');
+            const calendarShell = document.getElementById('calendar-shell');
+            const searchInput = document.getElementById('calendar-search-input');
+            const searchButton = document.querySelector('.fc-searchButton-button');
+            
+            if (!searchPanel || !calendarShell) {
+                console.error('Search panel or calendar shell not found');
+                return;
+            }
+            
+            if (this.searchPanelOpen) {
+                searchPanel.style.height = '50vh';
+                calendarShell.style.height = 'calc(50vh - 45px)';
+                
+                // Add active class to button
+                if (searchButton) {
+                    searchButton.classList.add('active');
+                }
+                
+                // Focus search input after transition
+                setTimeout(() => {
+                    if (searchInput) {
+                        searchInput.focus();
+                    }
+                }, 350);
+            } else {
+                searchPanel.style.height = '0';
+                calendarShell.style.height = 'calc(100vh - 45px)';
+                
+                // Remove active class from button
+                if (searchButton) {
+                    searchButton.classList.remove('active');
+                }
+            }
+            
+            // Save state to localStorage
+            localStorage.setItem('gts-calendar-search-open', this.searchPanelOpen);
+            
+            // Update calendar size after transition completes
+            setTimeout(() => {
+                if (this.calendar) {
+                    this.calendar.updateSize();
+                    this.forceEqualWeekHeights();
+                }
+            }, 350);
+        }
+
+        /**
          * Cleanup method for removing event listeners and resetting state
          */
         destroy() {
@@ -3053,10 +3393,10 @@
     // Initialize when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
-            new JobCalendar();
+            window.jobCalendar = new JobCalendar();
         });
     } else {
-        new JobCalendar();
+        window.jobCalendar = new JobCalendar();
     }
 
 })();

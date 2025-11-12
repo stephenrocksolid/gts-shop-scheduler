@@ -215,6 +215,12 @@
         @media print {
             .no-print { display: none; }
         }
+
+        /* Hide the workspace bar if the base layout injected it */
+        #workspace-bar,
+        .workspace-bar {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -266,10 +272,24 @@
                 <div class="job-label">Customer:</div>
                 <div class="job-value">{{ work_order.job.display_name }}</div>
             </div>
+            {% if work_order.job.trailer_details %}
             <div class="job-row">
-                <div class="job-label">Trailer:</div>
-                <div class="job-value">{{ work_order.job.trailer.number }} - {{ work_order.job.trailer.model }}</div>
+                <div class="job-label">Trailer Description:</div>
+                <div class="job-value">{{ work_order.job.trailer_details }}</div>
             </div>
+            {% endif %}
+            {% if work_order.job.trailer_serial %}
+            <div class="job-row">
+                <div class="job-label">Trailer Serial:</div>
+                <div class="job-value">{{ work_order.job.trailer_serial }}</div>
+            </div>
+            {% endif %}
+            {% if work_order.job.trailer_color %}
+            <div class="job-row">
+                <div class="job-label">Trailer Color:</div>
+                <div class="job-value">{{ work_order.job.trailer_color }}</div>
+            </div>
+            {% endif %}
             <div class="job-row">
                 <div class="job-label">Scheduled Date:</div>
                 <div class="job-value">{{ work_order.job.start_dt|date:"F j, Y" }}</div>
@@ -368,6 +388,26 @@
             Close
         </button>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            function removeWorkspaceBar() {
+                const workspaceBar = document.getElementById('workspace-bar');
+                if (workspaceBar && workspaceBar.parentNode) {
+                    workspaceBar.parentNode.removeChild(workspaceBar);
+                }
+            }
+
+            removeWorkspaceBar();
+            window.addEventListener('load', removeWorkspaceBar);
+
+            const observer = new MutationObserver(() => {
+                removeWorkspaceBar();
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+    </script>
 </body>
 </html>
 
