@@ -13,8 +13,9 @@
   function formatPhone(digits) {
     if (!digits) return '';
     
-    // Handle 11 digits starting with 1 (country code)
-    if (digits.length === 11 && digits[0] === '1') {
+    // Handle 11+ digits starting with 1 (country code) - truncate to 11
+    if (digits.length >= 11 && digits[0] === '1') {
+      digits = digits.substring(0, 11);
       return '1-' + digits.substring(1, 4) + '-' + digits.substring(4, 7) + '-' + digits.substring(7, 11);
     }
     
