@@ -15,29 +15,33 @@
             this.statusFilter = null;
             this.searchFilter = null;
             this.loadingEl = null;
-            
+
             // Click tracking for double-click detection
             this.clickTimer = null;
             this.lastClickDate = null;
             this.lastClickTime = null;
-            
+
             // Day number click timer for popover delay
             this.dayNumberClickTimer = null;
-            
+
             // Double-click detection threshold (ms)
             this.doubleClickThreshold = 650;
-            
+
             // Track last opened date when creating new items to prevent duplicate loads
             this.lastOpenedDateByDoubleClick = null;
             this.lastOpenedDateTimestamp = 0;
-            
+
             // Tooltip hover delay tracking
             this.tooltipTimeout = null;
-            
+
+            // Debounced refetch tracking - prevents rapid successive refetches
+            this.refetchDebounceTimer = null;
+            this.refetchDebounceMs = 150; // Debounce refetch calls within this window
+
             // Search panel state - load from localStorage
             const savedSearchPanelState = localStorage.getItem('gts-calendar-search-open');
             this.searchPanelOpen = savedSearchPanelState === 'true';
-            
+
             // Initialize search panel state on page load
             if (this.searchPanelOpen) {
                 setTimeout(() => {
@@ -45,16 +49,16 @@
                     const calendarShell = document.getElementById('calendar-shell');
                     const searchInput = document.getElementById('calendar-search-input');
                     const searchButton = document.querySelector('.fc-searchButton-button');
-                    
+
                     if (searchPanel && calendarShell) {
                         searchPanel.style.height = '50vh';
                         calendarShell.style.height = 'calc(50vh - 45px)';
-                        
+
                         // Add active class to button
                         if (searchButton) {
                             searchButton.classList.add('active');
                         }
-                        
+
                         // Focus search input if panel is open
                         if (searchInput) {
                             searchInput.focus();
@@ -62,7 +66,7 @@
                     }
                 }, 0);
             }
-            
+
             // State management
             this.currentFilters = {
                 calendar: '',
@@ -71,13 +75,13 @@
                 month: new Date().getMonth() + 1,
                 year: new Date().getFullYear()
             };
-            
+
             // Load saved filters from localStorage
             this.loadSavedFilters();
-            
+
             // Initialize selected calendars BEFORE calendar is set up
             this.initializeSelectedCalendars();
-            
+
             this.initialize();
         }
 
@@ -148,25 +152,25 @@
                     },
                     jobsButton: {
                         text: 'Jobs',
-                        click: function() {
+                        click: function () {
                             window.location.href = '/jobs/';
                         }
                     },
                     settingsButton: {
                         text: 'Settings',
-                        click: function() {
+                        click: function () {
                             window.location.href = '/calendars/';
                         }
                     },
                     calendarFilterButton: {
                         text: 'Calendar',
-                        click: function() {
+                        click: function () {
                             // This will be replaced with a dropdown after render
                         }
                     },
                     statusFilterButton: {
                         text: 'Status',
-                        click: function() {
+                        click: function () {
                             // This will be replaced with a dropdown after render
                         }
                     }
@@ -214,20 +218,20 @@
             });
 
             this.calendar.render();
-            
+
             // Force equal week heights after render
             this.forceEqualWeekHeights();
-            
+
             // Style the custom buttons after render
             this.styleCustomButtons();
-            
+
             // Ensure calendar content is visible
             setTimeout(() => {
                 this.ensureCalendarVisible();
             }, 100);
-            
+
             // Initial render will happen after events are loaded via eventsSet/loading hooks
-            
+
             // Hook Today button to update Today panel and save position
             const todayBtn = document.querySelector('.fc-today-button');
             if (todayBtn) {
@@ -238,16 +242,16 @@
                     }, 100);
                 });
             }
-            
+
             // Initialize date picker controls
             this.initializeDatePickerControls();
-            
+
             // Setup day number clicks to show event list
             this.setupDayNumberClicks();
-            
+
             // Make calendar instance globally available
             window.jobCalendar = this;
-            
+
             // Add window resize listener to maintain equal heights
             let resizeTimeout;
             window.addEventListener('resize', () => {
@@ -257,7 +261,7 @@
                 }, 150);
             });
         }
-        
+
         /**
          * Setup click handlers for day numbers to show event list popover
          */
@@ -276,29 +280,29 @@
                 }
             `;
             document.head.appendChild(style);
-            
+
             // Handle single clicks on day numbers - show popover with events
             this.calendarEl.addEventListener('click', (e) => {
                 // Check if clicked element is a day number
                 const dayNumber = e.target.closest('.fc-daygrid-day-number');
                 if (!dayNumber) return;
-                
+
                 // Prevent default browser navigation (day number is an anchor)
                 e.preventDefault();
-                
+
                 // Get the day cell
                 const dayCell = dayNumber.closest('.fc-daygrid-day');
                 if (!dayCell) return;
-                
+
                 // Get the date from the day cell's data attribute
                 const dateStr = dayCell.getAttribute('data-date');
                 if (!dateStr) return;
-                
+
                 // Clear any existing timer
                 if (this.dayNumberClickTimer) {
                     clearTimeout(this.dayNumberClickTimer);
                 }
-                
+
                 // Set timer to show popover after threshold + 150ms (allows time for double-click)
                 this.dayNumberClickTimer = setTimeout(() => {
                     // Get all events for this date
@@ -310,14 +314,14 @@
                             const day = String(d.getDate()).padStart(2, '0');
                             return `${year}-${month}-${day}`;
                         };
-                        
+
                         const eventStartDate = getLocalDateStr(event.start);
                         const clickedDate = dateStr; // Already in YYYY-MM-DD format
-                        
+
                         // Check if event starts on this day
                         return eventStartDate === clickedDate;
                     });
-                    
+
                     // If there are events, show the popover
                     if (events.length > 0) {
                         // Parse the date for popover
@@ -326,50 +330,50 @@
                     }
                 }, this.doubleClickThreshold + 150);
             });
-            
+
             // Handle double-clicks anywhere in a day cell - open new job/reminder form
             this.calendarEl.addEventListener('dblclick', (e) => {
                 // Ignore double-clicks on events themselves (let event click handlers handle those)
                 if (e.target.closest('.fc-event')) {
                     return;
                 }
-                
+
                 // Find the day cell that was double-clicked
                 const dayCell = e.target.closest('.fc-daygrid-day');
                 if (!dayCell) return;
-                
+
                 // Prevent default navigation
                 e.preventDefault();
-                
+
                 // Cancel the single-click timer
                 if (this.dayNumberClickTimer) {
                     clearTimeout(this.dayNumberClickTimer);
                     this.dayNumberClickTimer = null;
                 }
-                
+
                 // Get the date from the day cell's data attribute
                 const dateStr = dayCell.getAttribute('data-date');
                 if (!dateStr) return;
-                
+
                 // Parse the date
                 const date = new Date(dateStr + 'T00:00:00');
                 const now = Date.now();
                 const dateMs = date.getTime();
-                
+
                 // If this double-click was already handled via dateClick logic, skip duplicate load
                 if (this.lastOpenedDateByDoubleClick === dateMs && (now - this.lastOpenedDateTimestamp) < (this.doubleClickThreshold + 150)) {
                     return;
                 }
-                
+
                 // Record this handled double click
                 this.lastOpenedDateByDoubleClick = dateMs;
                 this.lastOpenedDateTimestamp = now;
-                
+
                 // Open the appropriate form
                 this.openCreateFormForDate(date);
             });
         }
-        
+
         /**
          * Open the create job or call reminder form for the provided date
          */
@@ -380,14 +384,14 @@
                     this.showError('Job panel functionality not available. Please refresh the page.');
                     return;
                 }
-                
+
                 const isSunday = date.getDay() === 0;
                 const dateStr = date.toISOString().split('T')[0];
-                
+
                 const loadForm = () => {
                     // Close any open day popovers before loading the form
                     document.querySelectorAll('.fc-more-popover').forEach(pop => pop.remove());
-                    
+
                     if (isSunday) {
                         let url = `/call-reminders/new/partial/?date=${dateStr}`;
                         if (this.defaultCalendar) {
@@ -404,17 +408,17 @@
                         window.JobPanel.load(url);
                     }
                 };
-                
+
                 if (window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
                     window.JobPanel.saveForm(() => {
                         const currentJobId = window.JobPanel.currentJobId;
                         if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
                             const form = document.querySelector('#job-panel .panel-body form');
-                            const businessName = form?.querySelector('input[name="business_name"]')?.value || 
-                                               form?.querySelector('input[name="contact_name"]')?.value || 
-                                               'Unnamed Job';
+                            const businessName = form?.querySelector('input[name="business_name"]')?.value ||
+                                form?.querySelector('input[name="contact_name"]')?.value ||
+                                'Unnamed Job';
                             const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-                            
+
                             window.JobWorkspace.addJobMinimized(currentJobId, {
                                 customerName: businessName,
                                 trailerColor: trailerColor,
@@ -431,7 +435,7 @@
                 this.showError('Unable to open form. Please try again.');
             }
         }
-        
+
         /**
          * Show a popover with all events for a specific day
          */
@@ -453,14 +457,14 @@
                 display: flex;
                 flex-direction: column;
             `;
-            
+
             // Format date for header
             const dateStr = this.calendar.formatDate(date, {
                 month: 'long',
                 day: 'numeric',
                 year: 'numeric'
             });
-            
+
             // Create header
             const header = document.createElement('div');
             header.style.cssText = `
@@ -489,7 +493,7 @@
                     line-height: 1;
                 ">&times;</button>
             `;
-            
+
             // Create event list container
             const eventList = document.createElement('div');
             eventList.style.cssText = `
@@ -497,28 +501,28 @@
                 overflow-y: auto;
                 max-height: 550px;
             `;
-            
+
             // Sort events by start time
             events.sort((a, b) => {
                 if (a.allDay && !b.allDay) return -1;
                 if (!a.allDay && b.allDay) return 1;
                 return a.start - b.start;
             });
-            
+
             // Add events to list
             events.forEach(event => {
                 // Get calendar color and apply lighter shade for completed events
                 const calendarColor = event.extendedProps?.calendar_color || '#3788d8';
                 const isCompleted = event.extendedProps?.status === 'completed';
-                
+
                 let finalColor = calendarColor;
                 if (isCompleted) {
                     finalColor = this.lightenColor(calendarColor, 0.3);
                 }
-                
+
                 const backgroundColor = event.backgroundColor || finalColor;
                 const textDecoration = isCompleted ? 'text-decoration: line-through;' : '';
-                
+
                 const eventEl = document.createElement('div');
                 eventEl.style.cssText = `
                     padding: 2px 4px;
@@ -538,7 +542,7 @@
                     white-space: nowrap;
                     ${textDecoration}
                 `;
-                
+
                 // Format time
                 let timeStr = '';
                 if (!event.allDay) {
@@ -548,16 +552,16 @@
                         meridiem: 'short'
                     }) + ' ';
                 }
-                
+
                 eventEl.innerHTML = `<strong style="margin-right: 4px;">${timeStr}</strong><span>${event.title}</span>`;
-                
+
                 // Add hover tooltip
                 eventEl.addEventListener('mouseenter', (e) => {
                     // Clear any existing timeout
                     if (this.tooltipTimeout) {
                         clearTimeout(this.tooltipTimeout);
                     }
-                    
+
                     // Set a 500ms delay before showing the tooltip
                     this.tooltipTimeout = setTimeout(() => {
                         this.showEventTooltip(event, eventEl);
@@ -570,75 +574,87 @@
                         clearTimeout(this.tooltipTimeout);
                         this.tooltipTimeout = null;
                     }
-                    
+
                     // Hide tooltip
                     this.hideEventTooltip();
                 });
-                
+
                 // Add click handler to open the event
                 eventEl.addEventListener('click', (e) => {
                     e.stopPropagation();
                     // Hide tooltip
                     this.hideEventTooltip();
-                    // Close popover
-                    document.body.removeChild(popover);
+                    // Close popover (using idempotent close function)
+                    closePopover();
                     // Trigger event click
                     this.handleEventClick({ event });
                 });
-                
+
                 eventList.appendChild(eventEl);
             });
-            
+
             // Assemble popover
             popover.appendChild(header);
             popover.appendChild(eventList);
-            
+
+            // Idempotent close function - safe to call multiple times
+            let outsideClickHandler = null;
+            const closePopover = () => {
+                // Remove document click listener first
+                if (outsideClickHandler) {
+                    document.removeEventListener('click', outsideClickHandler);
+                    outsideClickHandler = null;
+                }
+                // Only remove from DOM if still attached
+                if (popover.isConnected) {
+                    this.hideEventTooltip();
+                    popover.remove();
+                }
+            };
+
             // Add close button handler
             const closeBtn = header.querySelector('.fc-popover-close');
             closeBtn.addEventListener('click', () => {
-                this.hideEventTooltip();
-                document.body.removeChild(popover);
+                closePopover();
             });
-            
+
             // Add to body
             document.body.appendChild(popover);
-            
+
             // Position the popover near the anchor element
             const anchorRect = anchorEl.getBoundingClientRect();
             const popoverRect = popover.getBoundingClientRect();
-            
+
             // Calculate position (try to show below, but above if no room)
             let top = anchorRect.bottom + 5;
             let left = anchorRect.left;
-            
+
             // Check if popover goes off bottom of screen
             if (top + popoverRect.height > window.innerHeight) {
                 top = anchorRect.top - popoverRect.height - 5;
             }
-            
+
             // Check if popover goes off right of screen
             if (left + popoverRect.width > window.innerWidth) {
                 left = window.innerWidth - popoverRect.width - 10;
             }
-            
+
             // Ensure popover doesn't go off left of screen
             if (left < 10) {
                 left = 10;
             }
-            
+
             popover.style.top = top + 'px';
             popover.style.left = left + 'px';
-            
+
             // Close popover when clicking outside
-            const closeOnOutsideClick = (e) => {
+            outsideClickHandler = (e) => {
                 if (!popover.contains(e.target)) {
-                    this.hideEventTooltip();
-                    document.body.removeChild(popover);
-                    document.removeEventListener('click', closeOnOutsideClick);
+                    closePopover();
                 }
             };
             setTimeout(() => {
-                document.addEventListener('click', closeOnOutsideClick);
+                document.addEventListener('click', outsideClickHandler);
             }, 0);
         }
 
@@ -653,7 +669,7 @@
                 dayNumber.style.visibility = 'visible';
                 dayNumber.style.opacity = '1';
             });
-            
+
             // Adjust header column widths to match content
             this.adjustHeaderColumnWidths();
         }
@@ -665,7 +681,7 @@
             // Find the header row
             const headerRow = document.querySelector('.fc-col-header');
             if (!headerRow) return;
-            
+
             // Find all header cells and make them all equal width
             const headerCells = headerRow.querySelectorAll('th');
             headerCells.forEach((cell) => {
@@ -695,14 +711,14 @@
                 // Find the daygrid body
                 const daygridBody = document.querySelector('.fc-daygrid-body');
                 if (!daygridBody) return;
-                
+
                 // Get the total available height
                 const totalHeight = daygridBody.offsetHeight;
                 const weekHeight = Math.floor(totalHeight / 4); // Exact pixel height for each week
-                
+
                 // Find all week rows
                 const weekRows = document.querySelectorAll('.fc-daygrid-body table tbody tr');
-                
+
                 if (weekRows.length === 4 && weekHeight > 0) {
                     weekRows.forEach((row) => {
                         // Set explicit pixel heights
@@ -710,7 +726,7 @@
                         row.style.setProperty('max-height', `${weekHeight}px`, 'important');
                         row.style.setProperty('min-height', `${weekHeight}px`, 'important');
                         row.style.setProperty('overflow', 'hidden', 'important');
-                        
+
                         // Also set on the cells within the row
                         const cells = row.querySelectorAll('td');
                         cells.forEach(cell => {
@@ -721,7 +737,7 @@
                     });
                 }
             };
-            
+
             // Apply immediately
             setTimeout(applyHeights, 10);
             // Apply again after a delay to catch late renders
@@ -769,8 +785,8 @@
 
         isSameDay(a, b) {
             return a.getFullYear() === b.getFullYear() &&
-                   a.getMonth() === b.getMonth() &&
-                   a.getDate() === b.getDate();
+                a.getMonth() === b.getMonth() &&
+                a.getDate() === b.getDate();
         }
 
         /**
@@ -806,16 +822,16 @@
             const labelEl = document.getElementById('todayDateLabel');
             const titleEl = document.getElementById('todayPanelTitle');
             const datePicker = document.getElementById('todayDatePicker');
-            
+
             if (!listEl || !labelEl || !titleEl) return;
 
             const targetDate = selectedDate || new Date(); // Use provided date or today
             const today = new Date();
             const isToday = targetDate.toDateString() === today.toDateString();
-            
+
             // Update title
             titleEl.textContent = isToday ? 'Today' : 'Events';
-            
+
             // Update date label
             labelEl.textContent = this.calendar.formatDate(targetDate, {
                 weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
@@ -853,17 +869,17 @@
 
                 // Get calendar color from extendedProps or use default
                 const calendarColor = ev.extendedProps?.calendar_color || '#3B82F6';
-                
+
                 // Check if job is completed for strikethrough styling and lighter color
                 const isCompleted = ev.extendedProps?.status === 'completed';
                 const textDecoration = isCompleted ? 'text-decoration: line-through;' : '';
-                
+
                 // Apply lighter shade for completed events (same as calendar events)
                 let finalColor = calendarColor;
                 if (isCompleted) {
                     finalColor = this.lightenColor(calendarColor, 0.3);
                 }
-                
+
                 // Use event's backgroundColor if available, otherwise use the calculated color
                 const backgroundColor = ev.backgroundColor || finalColor;
 
@@ -876,13 +892,13 @@
                     <div style="${textDecoration}"><span class="today-item-time">${timeStr}</span>
                     <span class="today-item-title">${ev.title || '(no title)'}</span></div>
                 `;
-                
+
                 // Add click handler
                 item.addEventListener('click', () => {
                     // Open job edit form when clicking on today sidebar event
                     const extendedProps = ev.extendedProps || {};
                     const jobId = extendedProps.job_id;
-                    
+
                     if (jobId && window.JobPanel) {
                         // Check if there are unsaved changes
                         if (window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
@@ -895,11 +911,11 @@
                                 if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
                                     // Get job details from the form
                                     const form = document.querySelector('#job-panel .panel-body form');
-                                    const businessName = form?.querySelector('input[name="business_name"]')?.value || 
-                                                       form?.querySelector('input[name="contact_name"]')?.value || 
-                                                       'Unnamed Job';
+                                    const businessName = form?.querySelector('input[name="business_name"]')?.value ||
+                                        form?.querySelector('input[name="contact_name"]')?.value ||
+                                        'Unnamed Job';
                                     const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-                                    
+
                                     // Add to workspace as minimized
                                     window.JobWorkspace.addJobMinimized(currentJobId, {
                                         customerName: businessName,
@@ -907,7 +923,7 @@
                                         calendarColor: '#3B82F6'
                                     });
                                 }
-                                
+
                                 // Now open the new job
                                 if (window.JobWorkspace) {
                                     // Check if the clicked job is already in the workspace
@@ -927,7 +943,7 @@
                                     // Fallback to direct panel opening if workspace not available
                                     this.openJobInPanel(ev, jobId);
                                 }
-                                
+
                                 // Clear the switching flag after a delay to allow new form to load
                                 setTimeout(() => {
                                     window.JobPanel.isSwitchingJobs = false;
@@ -961,36 +977,36 @@
                         // optional: highlight after render
                         setTimeout(() => {
                             const el = this.calendar.el.querySelector('[data-event-id="' + (ev.id || '') + '"]');
-                            el?.classList.add('ring-2'); 
+                            el?.classList.add('ring-2');
                             setTimeout(() => el?.classList.remove('ring-2'), 1200);
                         }, 30);
                     }
                 });
-                
+
                 // Add hover tooltip for today sidebar items
                 item.addEventListener('mouseenter', (e) => {
                     // Clear any existing timeout
                     if (this.tooltipTimeout) {
                         clearTimeout(this.tooltipTimeout);
                     }
-                    
+
                     // Set a 500ms delay before showing the tooltip
                     this.tooltipTimeout = setTimeout(() => {
                         this.showEventTooltip(ev, e.target);
                         this.tooltipTimeout = null;
                     }, 500);
                 });
-                
+
                 item.addEventListener('mouseleave', () => {
                     // Clear the timeout if user stops hovering before delay completes
                     if (this.tooltipTimeout) {
                         clearTimeout(this.tooltipTimeout);
                         this.tooltipTimeout = null;
                     }
-                    
+
                     this.hideEventTooltip();
                 });
-                
+
                 listEl.appendChild(item);
             }
         }
@@ -1004,7 +1020,7 @@
             const todayBtn = document.getElementById('todayBtn');
             const datePicker = document.getElementById('todayDatePicker');
             const titleBtn = document.getElementById('todayPanelTitle');
-            
+
             if (!prevDayBtn || !nextDayBtn || !todayBtn || !datePicker || !titleBtn) {
                 console.warn('Date picker controls not found');
                 return;
@@ -1013,7 +1029,7 @@
             // Set initial date to today
             const today = new Date();
             datePicker.value = this.formatDateForInput(today);
-            
+
             // Initial render with today's date
             this.renderTodayPanel(today);
 
@@ -1067,7 +1083,7 @@
         focusEventInCalendar(ev) {
             // Jump to the event's start week inside our sliding 4-week view
             this.calendar.gotoDate(ev.start || new Date());
-            
+
             // Save the new position
             this.saveCurrentDate();
         }
@@ -1079,10 +1095,10 @@
             // Find the table body
             const tableBody = document.querySelector('.fc-daygrid-body');
             if (!tableBody) return;
-            
+
             // Find all rows in the table
             const rows = tableBody.querySelectorAll('tr');
-            
+
             rows.forEach(row => {
                 const cells = row.querySelectorAll('td');
                 cells.forEach((cell) => {
@@ -1092,7 +1108,7 @@
                     cell.style.maxWidth = '14.29%';
                 });
             });
-            
+
             // Also target the day columns directly
             const dayColumns = document.querySelectorAll('.fc-daygrid-day');
             dayColumns.forEach(column => {
@@ -1111,19 +1127,19 @@
             setTimeout(() => {
                 // Adjust Sunday column width
                 this.adjustSundayColumnWidth();
-                
+
                 // Hide the original calendar filter button since we moved it
                 const calendarFilterBtn = document.querySelector('.fc-calendarFilterButton-button');
                 if (calendarFilterBtn) {
                     calendarFilterBtn.style.display = 'none';
                 }
-                
+
                 // Hide the original status filter button since we moved it
                 const statusFilterBtn = document.querySelector('.fc-statusFilterButton-button');
                 if (statusFilterBtn) {
                     statusFilterBtn.style.display = 'none';
                 }
-                
+
                 // Add Jump to Date control
                 this.addJumpToDateControl();
             }, 100);
@@ -1248,14 +1264,14 @@
             todayButton.addEventListener('click', () => {
                 const today = new Date();
                 this.calendar.gotoDate(today);
-                
+
                 // Update the date input
                 const fmt = (d) => {
                     const pad = (n) => String(n).padStart(2, '0');
-                    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+                    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
                 };
                 dateInput.value = fmt(today);
-                
+
                 // Update URL param
                 const sp = new URLSearchParams(window.location.search);
                 sp.set('date', fmt(today));
@@ -1341,7 +1357,7 @@
             calendarSection.appendChild(calendarMultiSelect);
             // statusSection.appendChild(statusLabel); // Label removed
             statusSection.appendChild(statusDropdown);
-            
+
             controlsContainer.appendChild(jumpToDateSection);
             controlsContainer.appendChild(calendarSection);
             controlsContainer.appendChild(statusSection);
@@ -1364,7 +1380,7 @@
         createCalendarMultiSelect() {
             const container = document.createElement('div');
             container.style.cssText = 'position: relative; display: inline-block;';
-            
+
             // Create button
             const button = document.createElement('button');
             button.id = 'calendar-multi-select-button';
@@ -1384,7 +1400,7 @@
                 position: relative;
                 white-space: nowrap;
             `;
-            
+
             // Add dropdown arrow
             button.innerHTML = `
                 <span id="calendar-button-text">All Calendars</span>
@@ -1392,7 +1408,7 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                 </svg>
             `;
-            
+
             // Create popover
             const popover = document.createElement('div');
             popover.id = 'calendar-multi-select-popover';
@@ -1411,14 +1427,14 @@
                 display: none;
                 padding: 8px;
             `;
-            
+
             // selectedCalendars and defaultCalendar are already initialized in the constructor
             // Just get the list of available calendars
             const calendars = window.calendarConfig?.calendars || [];
-            
+
             // Build checkboxes
             let checkboxesHTML = '';
-            
+
             // Add "All" checkbox
             const allChecked = this.selectedCalendars.size === calendars.length;
             checkboxesHTML += `
@@ -1430,13 +1446,13 @@
                 </label>
                 <div style="border-top: 1px solid #e5e7eb; margin: 4px 0;"></div>
             `;
-            
+
             // Add individual calendar checkboxes with clickable name areas
             calendars.forEach(cal => {
                 const isChecked = this.selectedCalendars.has(cal.id);
                 const isDefault = this.defaultCalendar === cal.id;
                 const backgroundColor = isDefault ? '#e0f2fe' : 'transparent';
-                
+
                 checkboxesHTML += `
                     <div class="calendar-item" data-calendar-id="${cal.id}" 
                          style="display: flex; align-items: center; padding: 8px; border-radius: 4px; transition: background 0.15s; background: ${backgroundColor};">
@@ -1450,38 +1466,38 @@
                     </div>
                 `;
             });
-            
+
             popover.innerHTML = checkboxesHTML;
-            
+
             // Prevent scroll events from propagating to calendar (prevents week navigation)
             popover.addEventListener('wheel', (e) => {
                 e.stopPropagation();
             }, { passive: false });
-            
+
             // Toggle popover on button click
             button.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isVisible = popover.style.display === 'block';
                 popover.style.display = isVisible ? 'none' : 'block';
             });
-            
+
             // Close popover when clicking outside
             document.addEventListener('click', (e) => {
                 if (!container.contains(e.target)) {
                     popover.style.display = 'none';
                 }
             });
-            
+
             // Handle calendar name clicks (set as default)
             popover.addEventListener('click', (e) => {
                 const nameArea = e.target.closest('.calendar-name-area');
                 if (nameArea) {
                     e.stopPropagation();
                     const calendarId = parseInt(nameArea.dataset.calendarId);
-                    
+
                     // Set as default calendar
                     this.defaultCalendar = calendarId;
-                    
+
                     // Auto-check the checkbox if not already checked
                     if (!this.selectedCalendars.has(calendarId)) {
                         this.selectedCalendars.add(calendarId);
@@ -1489,11 +1505,11 @@
                         if (checkbox) {
                             checkbox.checked = true;
                         }
-                        
+
                         // Update "All" checkbox
                         const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
                         allCheckbox.checked = this.selectedCalendars.size === calendars.length;
-                        
+
                         // Save selected calendars
                         try {
                             localStorage.setItem('gts-selected-calendars', JSON.stringify(Array.from(this.selectedCalendars)));
@@ -1501,38 +1517,38 @@
                             console.warn('Error saving calendar selection:', error);
                         }
                     }
-                    
+
                     // Update visual highlighting
                     popover.querySelectorAll('.calendar-item').forEach(item => {
                         const itemId = parseInt(item.dataset.calendarId);
                         item.style.background = itemId === calendarId ? '#e0f2fe' : 'transparent';
                     });
-                    
+
                     // Save default calendar to localStorage
                     try {
                         localStorage.setItem('gts-default-calendar', calendarId.toString());
                     } catch (error) {
                         console.warn('Error saving default calendar:', error);
                     }
-                    
+
                     // Update button text
                     this.updateCalendarButtonText();
-                    
-                    // Refresh calendar
-                    this.calendar.refetchEvents();
+
+                    // Refresh calendar (debounced to prevent rapid successive calls)
+                    this.debouncedRefetch();
                 }
             });
-            
+
             // Handle checkbox changes
             popover.addEventListener('change', (e) => {
                 if (e.target.type === 'checkbox') {
                     const calendarId = e.target.dataset.calendarId;
-                    
+
                     if (calendarId === 'all') {
                         // Toggle all calendars
                         const allCheckbox = e.target;
                         const checkboxes = popover.querySelectorAll('input[type="checkbox"][data-calendar-id]:not([data-calendar-id="all"])');
-                        
+
                         if (allCheckbox.checked) {
                             // Select all
                             this.selectedCalendars = new Set(calendars.map(cal => cal.id));
@@ -1550,46 +1566,46 @@
                         } else {
                             this.selectedCalendars.delete(id);
                         }
-                        
+
                         // Update "All" checkbox
                         const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
                         allCheckbox.checked = this.selectedCalendars.size === calendars.length;
                     }
-                    
+
                     // Update button text
                     this.updateCalendarButtonText();
-                    
+
                     // Save to localStorage
                     try {
                         localStorage.setItem('gts-selected-calendars', JSON.stringify(Array.from(this.selectedCalendars)));
                     } catch (error) {
                         console.warn('Error saving calendar selection:', error);
                     }
-                    
-                    // Refresh calendar
-                    this.calendar.refetchEvents();
+
+                    // Refresh calendar (debounced to prevent rapid successive calls)
+                    this.debouncedRefetch();
                 }
             });
-            
+
             // Note: Button text will be updated after the element is added to the DOM
             // See updateCalendarButtonText() call in addJumpToDateControl()
-            
+
             container.appendChild(button);
             container.appendChild(popover);
-            
+
             return container;
         }
-        
+
         /**
          * Update calendar button text based on selection
          */
         updateCalendarButtonText() {
             const buttonText = document.getElementById('calendar-button-text');
             if (!buttonText) return;
-            
+
             const calendars = window.calendarConfig?.calendars || [];
             const selectedCount = this.selectedCalendars.size;
-            
+
             if (selectedCount === 0) {
                 buttonText.textContent = 'No Calendars';
             } else if (selectedCount === calendars.length) {
@@ -1610,7 +1626,7 @@
             // Helper: format Date -> YYYY-MM-DD (local)
             const fmt = (d) => {
                 const pad = (n) => String(n).padStart(2, '0');
-                return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
             };
 
             // Pick initial date from URL (?date=YYYY-MM-DD) or today
@@ -1623,8 +1639,8 @@
 
             // If a date was provided via URL, navigate calendar there
             if (urlDate) {
-                try { 
-                    this.calendar.gotoDate(initialDate); 
+                try {
+                    this.calendar.gotoDate(initialDate);
                 } catch (e) {
                     console.warn('Failed to navigate to URL date:', e);
                 }
@@ -1676,28 +1692,28 @@
          * Initialize the moved calendar dropdown functionality
          */
         initializeMovedCalendarDropdown(dropdown) {
-                    // Store reference for event handling
-                    this.calendarFilter = dropdown;
-                    dropdown.addEventListener('change', this.handleFilterChange.bind(this));
-                    
-                    // Set initial value from saved filters
-                    if (this.currentFilters.calendar) {
-                        dropdown.value = this.currentFilters.calendar;
-                    }
-                }
-                
+            // Store reference for event handling
+            this.calendarFilter = dropdown;
+            dropdown.addEventListener('change', this.handleFilterChange.bind(this));
+
+            // Set initial value from saved filters
+            if (this.currentFilters.calendar) {
+                dropdown.value = this.currentFilters.calendar;
+            }
+        }
+
         /**
          * Initialize the moved status dropdown functionality
          */
         initializeMovedStatusDropdown(dropdown) {
-                    // Store reference for event handling
-                    this.statusFilter = dropdown;
-                    dropdown.addEventListener('change', this.handleFilterChange.bind(this));
-                    
-                    // Set initial value from saved filters
-                    if (this.currentFilters.status) {
-                        dropdown.value = this.currentFilters.status;
-                    }
+            // Store reference for event handling
+            this.statusFilter = dropdown;
+            dropdown.addEventListener('change', this.handleFilterChange.bind(this));
+
+            // Set initial value from saved filters
+            if (this.currentFilters.status) {
+                dropdown.value = this.currentFilters.status;
+            }
         }
 
         /**
@@ -1713,28 +1729,28 @@
             if (this.searchFilter) {
                 this.searchFilter.addEventListener('input', this.debounce(this.handleFilterChange.bind(this), 300));
             }
-            
+
             // Enable scrolling within day cells
             this.enableDayCellScrolling();
         }
-        
+
         /**
          * Enable scrolling within day event containers
          */
         enableDayCellScrolling() {
             const calendarEl = this.calendarEl;
             if (!calendarEl) return;
-            
+
             // Wheel/scroll navigation for weeks
             let wheelTimeout = null;
             calendarEl.addEventListener('wheel', (e) => {
                 // Check if we're scrolling inside a day events container
                 const dayEventsContainer = e.target.closest('.fc-daygrid-day-events');
-                
+
                 if (dayEventsContainer) {
                     // Check if the container can actually scroll
                     const canScroll = dayEventsContainer.scrollHeight > dayEventsContainer.clientHeight;
-                    
+
                     if (canScroll) {
                         // We're inside a scrollable day events container - allow normal scrolling
                         e.stopPropagation();
@@ -1742,20 +1758,20 @@
                         return;
                     }
                 }
-                
+
                 // Navigate weeks with scroll wheel
                 e.preventDefault();
-                
+
                 // Debounce the wheel events to prevent too-fast navigation
                 if (wheelTimeout) return;
-                
+
                 wheelTimeout = setTimeout(() => {
                     wheelTimeout = null;
                 }, 150);
-                
+
                 // Get current date from calendar
                 const currentDate = this.calendar.getDate();
-                
+
                 // Calculate new date (scroll down = next week, scroll up = prev week)
                 const newDate = new Date(currentDate);
                 if (e.deltaY > 0) {
@@ -1765,7 +1781,7 @@
                     // Scroll up - previous week
                     newDate.setDate(newDate.getDate() - 7);
                 }
-                
+
                 // Navigate to new date
                 this.calendar.gotoDate(newDate);
                 this.saveCurrentDate();
@@ -1774,22 +1790,23 @@
 
         /**
          * Fetch events from the server
+         * Hardened to handle empty/non-JSON responses gracefully
          */
         fetchEvents(info, successCallback, failureCallback) {
             this.showLoading();
-            
+
             // Build params with selected calendars
             const params = new URLSearchParams({
                 start: info.startStr,
                 end: info.endStr
             });
-            
+
             // Add selected calendars as comma-separated string
             if (this.selectedCalendars && this.selectedCalendars.size > 0) {
                 const calendarIds = Array.from(this.selectedCalendars).join(',');
                 params.append('calendar', calendarIds);
             }
-            
+
             // Add other filters
             if (this.currentFilters.status) {
                 params.append('status', this.currentFilters.status);
@@ -1800,29 +1817,83 @@
 
             // Use the correct API endpoint from calendarConfig
             const apiUrl = window.calendarConfig?.eventsUrl || '/api/job-calendar-data/';
-            
+
             // Add cache-busting parameter
             params.append('_t', Date.now());
-            
+
             const fullUrl = `${apiUrl}?${params}`;
-            
-            fetch(fullUrl)
-                .then(response => response.json())
+
+            fetch(fullUrl, {
+                headers: {
+                    'Accept': 'application/json'
+                }
+            })
+                .then(async (response) => {
+                    // Read response as text first to handle empty/non-JSON safely
+                    const text = await response.text();
+                    const contentType = response.headers.get('content-type') || '';
+
+                    // Check for non-OK status
+                    if (!response.ok) {
+                        const snippet = text.substring(0, 200);
+                        console.error(`JobCalendar: HTTP ${response.status} from ${fullUrl}`);
+                        console.error(`  Content-Type: ${contentType}`);
+                        console.error(`  Body snippet: ${snippet}`);
+                        throw new Error(`Server returned HTTP ${response.status}`);
+                    }
+
+                    // Check for empty body
+                    if (!text || text.trim() === '') {
+                        console.error(`JobCalendar: Empty response from ${fullUrl}`);
+                        console.error(`  Content-Type: ${contentType}`);
+                        // Return empty events rather than failing
+                        return { status: 'success', events: [] };
+                    }
+
+                    // Try to parse JSON
+                    try {
+                        return JSON.parse(text);
+                    } catch (parseError) {
+                        const snippet = text.substring(0, 200);
+                        console.error(`JobCalendar: JSON parse failed for ${fullUrl}`);
+                        console.error(`  Content-Type: ${contentType}`);
+                        console.error(`  Body snippet: ${snippet}`);
+                        console.error(`  Parse error: ${parseError.message}`);
+                        throw new Error('Invalid JSON response from server');
+                    }
+                })
                 .then(data => {
                     if (data.status === 'success') {
-                        successCallback(data.events);
+                        successCallback(data.events || []);
                     } else {
-                        console.error('JobCalendar: Error fetching events', data.error);
-                        failureCallback(data.error);
+                        console.error('JobCalendar: API error', data.error);
+                        failureCallback(data.error || 'Unknown API error');
                     }
                 })
                 .catch(error => {
-                    console.error('JobCalendar: Network error', error);
-                    failureCallback(error);
+                    console.error('JobCalendar: Fetch failed', error);
+                    // Return empty events so calendar doesn't break completely
+                    successCallback([]);
                 })
                 .finally(() => {
                     this.hideLoading();
                 });
+        }
+
+        /**
+         * Debounced refetch - prevents rapid successive refetch calls
+         * Use this instead of direct calendar.refetchEvents() for filter changes
+         */
+        debouncedRefetch() {
+            if (this.refetchDebounceTimer) {
+                clearTimeout(this.refetchDebounceTimer);
+            }
+            this.refetchDebounceTimer = setTimeout(() => {
+                this.refetchDebounceTimer = null;
+                if (this.calendar) {
+                    this.calendar.refetchEvents();
+                }
+            }, this.refetchDebounceMs);
         }
 
         /**
@@ -1835,7 +1906,7 @@
                 const urlCalendar = urlParams.get('calendar') || '';
                 const urlStatus = urlParams.get('status') || '';
                 const urlSearch = urlParams.get('search') || '';
-                
+
                 // If URL has parameters, use them (they take priority)
                 if (urlCalendar || urlStatus || urlSearch) {
                     this.currentFilters.calendar = urlCalendar;
@@ -1863,7 +1934,7 @@
          */
         initializeSelectedCalendars() {
             let selectedCalendars = [];
-            
+
             // Load selected calendars from storage
             try {
                 const saved = localStorage.getItem('gts-selected-calendars');
@@ -1873,16 +1944,16 @@
             } catch (error) {
                 console.warn('Error loading saved calendar selection:', error);
             }
-            
+
             // If nothing saved, default to all calendars selected
             const calendars = window.calendarConfig?.calendars || [];
             if (selectedCalendars.length === 0 && calendars.length > 0) {
                 selectedCalendars = calendars.map(cal => cal.id);
             }
-            
+
             // Store selected calendars
             this.selectedCalendars = new Set(selectedCalendars);
-            
+
             // Load default calendar from storage
             let defaultCalendar = null;
             try {
@@ -1893,7 +1964,7 @@
             } catch (error) {
                 console.warn('Error loading default calendar:', error);
             }
-            
+
             this.defaultCalendar = defaultCalendar;
         }
 
@@ -1920,26 +1991,26 @@
             try {
                 const url = new URL(window.location);
                 const params = url.searchParams;
-                
+
                 // Update or remove filter parameters
                 if (this.currentFilters.calendar) {
                     params.set('calendar', this.currentFilters.calendar);
                 } else {
                     params.delete('calendar');
                 }
-                
+
                 if (this.currentFilters.status) {
                     params.set('status', this.currentFilters.status);
                 } else {
                     params.delete('status');
                 }
-                
+
                 if (this.currentFilters.search) {
                     params.set('search', this.currentFilters.search);
                 } else {
                     params.delete('search');
                 }
-                
+
                 // Update URL without page reload
                 const newURL = url.pathname + (params.toString() ? '?' + params.toString() : '');
                 window.history.replaceState({}, '', newURL);
@@ -1955,7 +2026,7 @@
             this.currentFilters.calendar = '';
             this.currentFilters.status = '';
             this.currentFilters.search = '';
-            
+
             // Update dropdowns
             if (this.calendarFilter) {
                 this.calendarFilter.value = '';
@@ -1966,7 +2037,7 @@
             if (this.searchFilter) {
                 this.searchFilter.value = '';
             }
-            
+
             // Save and update URL
             this.saveFilters();
             this.updateURLParams();
@@ -1980,11 +2051,11 @@
             this.currentFilters.calendar = this.calendarFilter?.value || '';
             this.currentFilters.status = this.statusFilter?.value || '';
             this.currentFilters.search = this.searchFilter?.value || '';
-            
+
             // Save filters and update URL
             this.saveFilters();
             this.updateURLParams();
-            
+
             this.refreshCalendar();
         }
 
@@ -2001,7 +2072,7 @@
          */
         showEventTooltip(event, targetElement) {
             const props = event.extendedProps || {};
-            
+
             // Create tooltip if it doesn't exist
             let tooltip = document.getElementById('event-tooltip');
             if (!tooltip) {
@@ -2023,7 +2094,7 @@
                 `;
                 document.body.appendChild(tooltip);
             }
-            
+
             // Format dates
             const formatDate = (date) => {
                 if (!date) return 'N/A';
@@ -2036,7 +2107,7 @@
                     meridiem: event.allDay ? undefined : 'short'
                 });
             };
-            
+
             // For multi-day events, use the full job date range instead of the split day
             let startDate, endDate;
             if (props.is_multi_day && props.job_start_date && props.job_end_date) {
@@ -2051,7 +2122,7 @@
                 startDate = formatDate(event.start);
                 endDate = formatDate(event.end || event.start);
             }
-            
+
             // Build tooltip content
             let content = `
                 <div style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 8px;">
@@ -2064,13 +2135,13 @@
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 6px;">
             `;
-            
+
             // Date/Time
             if (event.allDay || (props.is_multi_day && props.job_start_date)) {
                 // For all-day and multi-day events, show date range
                 const isSingleDay = startDate === endDate;
                 const dateRange = isSingleDay ? startDate : `${startDate} - ${endDate}`;
-                
+
                 content += `
                     <div style="display: flex; align-items: start;">
                         <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
@@ -2095,7 +2166,7 @@
                     </div>
                 `;
             }
-            
+
             // Business/Contact
             if (props.business_name) {
                 content += `
@@ -2110,7 +2181,7 @@
                     </div>
                 `;
             }
-            
+
             // Phone
             if (props.phone) {
                 content += `
@@ -2122,7 +2193,7 @@
                     </div>
                 `;
             }
-            
+
             // Trailer Information
             if (props.trailer_details || props.trailer_color || props.trailer_serial) {
                 content += `
@@ -2139,7 +2210,7 @@
                     </div>
                 `;
             }
-            
+
             // Repair Notes
             if (props.repair_notes) {
                 const truncatedRepairNotes = props.repair_notes.length > 100 ? props.repair_notes.substring(0, 100) + '...' : props.repair_notes;
@@ -2155,7 +2226,7 @@
                     </div>
                 `;
             }
-            
+
             // Status
             if (props.status) {
                 const statusColors = {
@@ -2168,7 +2239,7 @@
                 };
                 const statusColor = statusColors[props.status] || '#6b7280';
                 const statusText = props.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-                
+
                 content += `
                     <div style="display: flex; align-items: start;">
                         <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
@@ -2182,7 +2253,7 @@
                     </div>
                 `;
             }
-            
+
             // Notes
             if (props.notes) {
                 const truncatedNotes = props.notes.length > 100 ? props.notes.substring(0, 100) + '...' : props.notes;
@@ -2195,7 +2266,7 @@
                     </div>
                 `;
             }
-            
+
             // Recurring indicator
             if (props.is_recurring_parent || props.is_recurring_instance) {
                 content += `
@@ -2207,55 +2278,55 @@
                     </div>
                 `;
             }
-            
+
             content += `</div>`;
-            
+
             tooltip.innerHTML = content;
             tooltip.style.display = 'block';
-            
+
             // Position tooltip near the event
             const rect = targetElement.getBoundingClientRect();
             const tooltipRect = tooltip.getBoundingClientRect();
-            
+
             const margin = 10; // Margin from edges and target element
             const viewportWidth = window.innerWidth;
             const viewportHeight = window.innerHeight;
-            
+
             let left = rect.right + margin;
             let top = rect.top;
-            
+
             // Adjust horizontal position if tooltip goes off right edge
             if (left + tooltipRect.width > viewportWidth - margin) {
                 // Try positioning to the left of the target
                 left = rect.left - tooltipRect.width - margin;
-                
+
                 // If it still goes off the left edge, clamp it to the viewport
                 if (left < margin) {
                     left = margin;
                 }
             }
-            
+
             // Ensure tooltip doesn't go off left edge (in case target is very close to left side)
             if (left < margin) {
                 left = margin;
             }
-            
+
             // Ensure tooltip doesn't go off right edge (in case it's still too wide)
             if (left + tooltipRect.width > viewportWidth - margin) {
                 left = viewportWidth - tooltipRect.width - margin;
             }
-            
+
             // Adjust vertical position if tooltip goes off bottom edge
             if (top + tooltipRect.height > viewportHeight - margin) {
                 // Position tooltip above the bottom edge
                 top = viewportHeight - tooltipRect.height - margin;
             }
-            
+
             // Adjust if tooltip goes off top edge
             if (top < margin) {
                 top = margin;
             }
-            
+
             tooltip.style.left = left + 'px';
             tooltip.style.top = top + 'px';
         }
@@ -2278,7 +2349,7 @@
             if (this.tooltipTimeout) {
                 clearTimeout(this.tooltipTimeout);
             }
-            
+
             // Set a 500ms delay before showing the tooltip
             this.tooltipTimeout = setTimeout(() => {
                 this.showEventTooltip(info.event, info.el);
@@ -2295,7 +2366,7 @@
                 clearTimeout(this.tooltipTimeout);
                 this.tooltipTimeout = null;
             }
-            
+
             // Hide the tooltip if it's already showing
             this.hideEventTooltip();
         }
@@ -2308,7 +2379,7 @@
                 const extendedProps = info.event.extendedProps || {};
                 const eventType = extendedProps.type;
                 const jobId = extendedProps.job_id;
-                
+
                 // Check if this is a call reminder event (job-related or standalone)
                 if (eventType === 'call_reminder' || eventType === 'standalone_call_reminder') {
                     this.showCallReminderPanel(info.event);
@@ -2329,11 +2400,11 @@
                             if (currentJobId && window.JobWorkspace && !window.JobWorkspace.hasJob(currentJobId)) {
                                 // Get job details from the form
                                 const form = document.querySelector('#job-panel .panel-body form');
-                                const businessName = form?.querySelector('input[name="business_name"]')?.value || 
-                                                   form?.querySelector('input[name="contact_name"]')?.value || 
-                                                   'Unnamed Job';
+                                const businessName = form?.querySelector('input[name="business_name"]')?.value ||
+                                    form?.querySelector('input[name="contact_name"]')?.value ||
+                                    'Unnamed Job';
                                 const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-                                
+
                                 console.log('Adding job to workspace (minimized):', currentJobId, businessName);
                                 // Add to workspace as minimized (don't make it active)
                                 window.JobWorkspace.addJobMinimized(currentJobId, {
@@ -2342,7 +2413,7 @@
                                     calendarColor: '#3B82F6'
                                 });
                             }
-                            
+
                             // Now open the new job
                             console.log('Opening clicked job:', jobId);
                             if (window.JobWorkspace) {
@@ -2363,7 +2434,7 @@
                                 // Fallback to direct panel opening if workspace not available
                                 this.openJobInPanel(info.event, jobId);
                             }
-                            
+
                             // Clear the switching flag after a delay to allow new form to load
                             setTimeout(() => {
                                 window.JobPanel.isSwitchingJobs = false;
@@ -2400,24 +2471,24 @@
                 this.showError('Unable to open event for editing. Please try again.');
             }
         }
-        
+
         /**
          * Open a job in the panel
          */
         openJobInPanel(event, jobId) {
             console.log('openJobInPanel called for job:', jobId);
             const props = event.extendedProps;
-            
+
             // Load job edit form in panel
             console.log('Loading job form for:', jobId);
             window.JobPanel.setTitle('Edit Job');
             window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
-            
+
             // Track current job ID for workspace integration
             if (window.JobPanel.setCurrentJobId) {
                 window.JobPanel.setCurrentJobId(jobId);
             }
-            
+
             // Update minimize button after a short delay to ensure panel is ready
             setTimeout(() => {
                 if (window.JobPanel.updateMinimizeButton) {
@@ -2425,7 +2496,7 @@
                 }
             }, 100);
         }
-        
+
         /**
          * Show dialog for unsaved changes with options to save, minimize, or cancel
          */
@@ -2444,7 +2515,7 @@
                 z-index: 10000;
                 animation: fadeIn 0.2s ease;
             `;
-            
+
             const dialog = document.createElement('div');
             dialog.style.cssText = `
                 background: white;
@@ -2455,7 +2526,7 @@
                 box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
                 animation: slideUp 0.2s ease;
             `;
-            
+
             dialog.innerHTML = `
                 <div style="display: flex; align-items: start; margin-bottom: 16px;">
                     <svg style="width: 24px; height: 24px; color: #f59e0b; margin-right: 12px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2481,7 +2552,7 @@
                     </button>
                 </div>
             `;
-            
+
             // Add animations
             const style = document.createElement('style');
             style.textContent = `
@@ -2495,25 +2566,25 @@
                 }
             `;
             document.head.appendChild(style);
-            
+
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
-            
+
             // Button hover effects
             const saveBtn = dialog.querySelector('#dialog-save-btn');
             const minimizeBtn = dialog.querySelector('#dialog-minimize-btn');
             const discardBtn = dialog.querySelector('#dialog-discard-btn');
             const cancelBtn = dialog.querySelector('#dialog-cancel-btn');
-            
+
             saveBtn.addEventListener('mouseenter', () => saveBtn.style.background = '#2563eb');
             saveBtn.addEventListener('mouseleave', () => saveBtn.style.background = '#3b82f6');
-            
+
             minimizeBtn.addEventListener('mouseenter', () => minimizeBtn.style.background = '#e5e7eb');
             minimizeBtn.addEventListener('mouseleave', () => minimizeBtn.style.background = '#f3f4f6');
-            
+
             discardBtn.addEventListener('mouseenter', () => discardBtn.style.background = '#fecaca');
             discardBtn.addEventListener('mouseleave', () => discardBtn.style.background = '#fee2e2');
-            
+
             cancelBtn.addEventListener('mouseenter', () => {
                 cancelBtn.style.background = '#f9fafb';
                 cancelBtn.style.borderColor = '#9ca3af';
@@ -2522,13 +2593,13 @@
                 cancelBtn.style.background = 'white';
                 cancelBtn.style.borderColor = '#d1d5db';
             });
-            
+
             // Close dialog function
             const closeDialog = () => {
                 overlay.remove();
                 style.remove();
             };
-            
+
             // Save and proceed
             saveBtn.addEventListener('click', () => {
                 if (window.JobPanel.saveForm) {
@@ -2541,7 +2612,7 @@
                     onProceed();
                 }
             });
-            
+
             // Minimize to workspace
             minimizeBtn.addEventListener('click', () => {
                 const currentJobId = window.JobPanel.currentJobId;
@@ -2564,16 +2635,16 @@
                     onProceed();
                 }
             });
-            
+
             // Discard changes and proceed
             discardBtn.addEventListener('click', () => {
                 closeDialog();
                 onProceed();
             });
-            
+
             // Cancel - don't open new job
             cancelBtn.addEventListener('click', closeDialog);
-            
+
             // ESC key to cancel
             const escHandler = (e) => {
                 if (e.key === 'Escape') {
@@ -2582,7 +2653,7 @@
                 }
             };
             document.addEventListener('keydown', escHandler);
-            
+
             // Click overlay to cancel
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
@@ -2590,7 +2661,7 @@
                 }
             });
         }
-        
+
         /**
          * Show call reminder panel with options
          */
@@ -2599,9 +2670,9 @@
             const isStandalone = props.type === 'standalone_call_reminder';
             const jobId = props.job_id;
             const reminderId = props.reminder_id;
-            
+
             let html = `<div style="padding: 8px;">`;
-            
+
             // Header
             html += `
                 <div style="margin-bottom: 8px;">
@@ -2611,16 +2682,16 @@
                         </div>
                         <div style="flex: 1;">
                             <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #111827;">Call Reminder</h3>`;
-            
+
             if (!isStandalone && props.weeks_prior) {
                 const weeksText = props.weeks_prior === 2 ? '1 week' : '2 weeks';
                 html += `<p style="margin: 2px 0 0 0; font-size: 12px; color: #6b7280;">${weeksText} before job</p>`;
             } else if (props.reminder_date) {
                 html += `<p style="margin: 2px 0 0 0; font-size: 12px; color: #6b7280;">${props.reminder_date}</p>`;
             }
-            
+
             html += `</div></div>`;
-            
+
             // Job details (only for job-related reminders)
             if (!isStandalone && jobId) {
                 const jobDate = new Date(props.job_date);
@@ -2629,7 +2700,7 @@
                     day: 'numeric',
                     year: 'numeric'
                 });
-                
+
                 html += `
                     <div style="background-color: #f9fafb; border-radius: 6px; padding: 8px; margin-bottom: 8px;">
                         <div style="margin-bottom: 6px;">
@@ -2646,7 +2717,7 @@
                         </div>
                     </div>`;
             }
-            
+
             // Notes section
             html += `
                 <div style="margin-bottom: 8px;">
@@ -2658,10 +2729,10 @@
                               placeholder="Add notes about this call reminder...">${props.notes || ''}</textarea>
                 </div>
                 </div>`;
-            
+
             // Action buttons
             html += `<div style="display: flex; gap: 4px; justify-content: center;">`;
-            
+
             if (isStandalone && reminderId) {
                 // Standalone reminder buttons
                 html += `
@@ -2705,15 +2776,15 @@
                         View Job
                     </button>`;
             }
-            
+
             html += `</div></div>`;
-            
+
             if (window.JobPanel) {
                 window.JobPanel.setTitle('📞 Call Reminder');
                 window.JobPanel.showContent(html);
             }
         }
-        
+
         /**
          * Mark call reminder as complete
          */
@@ -2726,16 +2797,16 @@
                         'X-CSRFToken': this.getCSRFToken()
                     }
                 });
-                
+
                 if (response.ok) {
                     // Close the panel
                     if (window.JobPanel) {
                         window.JobPanel.close();
                     }
-                    
+
                     // Refresh calendar to remove the reminder
                     this.calendar.refetchEvents();
-                    
+
                     // Show success message
                     this.showSuccess('Call reminder marked as complete');
                 } else {
@@ -2747,13 +2818,13 @@
                 this.showError('Failed to mark reminder as complete');
             }
         }
-        
+
         /**
          * Save notes for job-related call reminder and close the dialog
          */
         async saveJobReminderNotes(jobId) {
             const notes = document.getElementById('reminder-notes')?.value || '';
-            
+
             try {
                 const response = await fetch(`/jobs/${jobId}/call-reminder/update/`, {
                     method: 'POST',
@@ -2765,18 +2836,18 @@
                         notes: notes
                     })
                 });
-                
+
                 if (response.ok) {
                     // Clear unsaved changes flag before closing
                     if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
                         window.JobPanel.clearUnsavedChanges();
                     }
-                    
+
                     // Close the panel (skip unsaved check since we just saved)
                     if (window.JobPanel) {
                         window.JobPanel.close(true);
                     }
-                    
+
                     // Refresh calendar to show updated notes
                     this.calendar.refetchEvents();
                 } else {
@@ -2788,7 +2859,7 @@
                 this.showError('Failed to save notes. Please try again.');
             }
         }
-        
+
         /**
          * Open the job detail/edit from a call reminder
          */
@@ -2798,14 +2869,14 @@
                 window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
             }
         }
-        
+
         /**
          * Save notes for standalone call reminder
          */
         async saveStandaloneReminderNotes(reminderId) {
             try {
                 const notes = document.getElementById('reminder-notes')?.value || '';
-                
+
                 const response = await fetch(`/call-reminders/${reminderId}/update/`, {
                     method: 'POST',
                     headers: {
@@ -2814,7 +2885,7 @@
                     },
                     body: JSON.stringify({ notes })
                 });
-                
+
                 if (response.ok) {
                     // Clear unsaved changes flag and close panel
                     if (window.JobPanel) {
@@ -2832,7 +2903,7 @@
                 this.showError('Failed to save notes');
             }
         }
-        
+
         /**
          * Mark standalone call reminder as complete
          */
@@ -2846,16 +2917,16 @@
                     },
                     body: JSON.stringify({ completed: true })
                 });
-                
+
                 if (response.ok) {
                     // Close the panel
                     if (window.JobPanel) {
                         window.JobPanel.close();
                     }
-                    
+
                     // Refresh calendar to remove the reminder
                     this.calendar.refetchEvents();
-                    
+
                     // Show success message
                     this.showSuccess('Call reminder marked as complete');
                 } else {
@@ -2867,7 +2938,7 @@
                 this.showError('Failed to mark reminder as complete');
             }
         }
-        
+
         /**
          * Delete standalone call reminder
          */
@@ -2875,7 +2946,7 @@
             if (!confirm('Are you sure you want to delete this call reminder?')) {
                 return;
             }
-            
+
             try {
                 const response = await fetch(`/call-reminders/${reminderId}/delete/`, {
                     method: 'POST',
@@ -2884,16 +2955,16 @@
                         'X-CSRFToken': this.getCSRFToken()
                     }
                 });
-                
+
                 if (response.ok) {
                     // Close the panel
                     if (window.JobPanel) {
                         window.JobPanel.close();
                     }
-                    
+
                     // Refresh calendar to remove the reminder
                     this.calendar.refetchEvents();
-                    
+
                     // Show success message
                     this.showSuccess('Call reminder deleted successfully');
                 } else {
@@ -2917,13 +2988,13 @@
                     if (dayEventsContainer) {
                         // Only check for scrollbar clicks if there's actually a scrollbar
                         const hasScrollbar = dayEventsContainer.scrollHeight > dayEventsContainer.clientHeight;
-                        
+
                         if (hasScrollbar) {
                             const rect = dayEventsContainer.getBoundingClientRect();
                             const clickX = info.jsEvent.clientX;
                             const rightEdge = rect.right;
                             const isScrollbarClick = (rightEdge - clickX) <= 18;
-                            
+
                             if (isScrollbarClick) {
                                 // Click is on scrollbar - ignore it
                                 return;
@@ -2931,43 +3002,43 @@
                         }
                     }
                 }
-                
+
                 const currentTime = Date.now();
                 const currentDate = info.date.getTime();
-                
+
                 // Check if this is a double-click (same date within threshold)
-                if (this.lastClickDate === currentDate && 
-                    this.lastClickTime && 
+                if (this.lastClickDate === currentDate &&
+                    this.lastClickTime &&
                     (currentTime - this.lastClickTime) < this.doubleClickThreshold) {
-                    
+
                     // Double click detected - clear timer
                     if (this.clickTimer) {
                         clearTimeout(this.clickTimer);
                         this.clickTimer = null;
                     }
-                    
+
                     // Record handled double click to prevent duplicate handling from dblclick listener
                     const dateMs = info.date.getTime();
                     this.lastOpenedDateByDoubleClick = dateMs;
                     this.lastOpenedDateTimestamp = currentTime;
-                    
+
                     // Open the appropriate form
                     this.openCreateFormForDate(info.date);
-                    
+
                     // Reset tracking
                     this.lastClickDate = null;
                     this.lastClickTime = null;
-                    
+
                 } else {
                     // First click or too much time has passed - set up for potential double-click
                     this.lastClickDate = currentDate;
                     this.lastClickTime = currentTime;
-                    
+
                     // Clear any existing timer
                     if (this.clickTimer) {
                         clearTimeout(this.clickTimer);
                     }
-                    
+
                     // Set timer to reset after threshold if no second click
                     this.clickTimer = setTimeout(() => {
                         this.lastClickDate = null;
@@ -2975,7 +3046,7 @@
                         this.clickTimer = null;
                     }, this.doubleClickThreshold);
                 }
-                
+
             } catch (error) {
                 console.error('JobCalendar: Error handling date click', error);
                 this.showError('Unable to create new job. Please try again.');
@@ -2989,28 +3060,28 @@
         handleEventMount(info) {
             const event = info.event;
             const props = event.extendedProps;
-            
+
             // Force apply calendar colors if they exist
             if (props?.calendar_color) {
                 const calendarColor = props.calendar_color;
                 const isCompleted = props.status === 'completed';
-                
+
                 // Apply lighter shade for completed events
                 let finalColor = calendarColor;
                 if (isCompleted) {
                     finalColor = this.lightenColor(calendarColor, 0.3);
                 }
-                
+
                 // Force set the colors
                 event.setProp('backgroundColor', finalColor);
                 event.setProp('borderColor', finalColor);
-                
+
                 // Also set on the DOM element directly
                 if (info.el) {
                     info.el.style.backgroundColor = finalColor;
                     info.el.style.borderColor = finalColor;
                 }
-                
+
                 // Use setTimeout to ensure colors are applied after FullCalendar finishes
                 setTimeout(() => {
                     if (info.el) {
@@ -3019,7 +3090,7 @@
                     }
                 }, 100);
             }
-            
+
             // Apply completion styling (only to DOM element, not as event property)
             if (props.is_completed || (props.completed && (props.type === 'call_reminder' || props.type === 'standalone_call_reminder'))) {
                 if (info.el) {
@@ -3029,7 +3100,7 @@
                     info.el.style.opacity = '0.7';
                 }
             }
-            
+
             // Apply canceled styling (only to DOM element, not as event property)
             if (props.is_canceled) {
                 if (info.el) {
@@ -3045,17 +3116,17 @@
         lightenColor(hexColor, factor) {
             // Remove # if present
             hexColor = hexColor.replace('#', '');
-            
+
             // Convert to RGB
             const r = parseInt(hexColor.substr(0, 2), 16);
             const g = parseInt(hexColor.substr(2, 2), 16);
             const b = parseInt(hexColor.substr(4, 2), 16);
-            
+
             // Lighten by mixing with white
             const newR = Math.round(r + (255 - r) * factor);
             const newG = Math.round(g + (255 - g) * factor);
             const newB = Math.round(b + (255 - b) * factor);
-            
+
             // Convert back to hex
             return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
         }
@@ -3066,14 +3137,14 @@
         getEventClassNames(info) {
             const classes = ['job-event'];
             const props = info.event.extendedProps;
-            
+
             if (props.is_completed) {
                 classes.push('job-completed');
             }
             if (props.is_canceled) {
                 classes.push('job-canceled');
             }
-            
+
             return classes;
         }
 
@@ -3083,16 +3154,16 @@
         renderEventContent(info) {
             const event = info.event;
             const props = event.extendedProps;
-            
+
             // Add strikethrough styling for completed jobs
             const isCompleted = props.status === 'completed';
             const titleClass = isCompleted ? 'job-title job-title-completed' : 'job-title';
-            
+
             // Add recurring event icon
-            const recurringIcon = (props.is_recurring_parent || props.is_recurring_instance) 
-                ? '<svg style="width: 12px; height: 12px; display: inline-block; margin-right: 4px; vertical-align: middle;" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path></svg>' 
+            const recurringIcon = (props.is_recurring_parent || props.is_recurring_instance)
+                ? '<svg style="width: 12px; height: 12px; display: inline-block; margin-right: 4px; vertical-align: middle;" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path></svg>'
                 : '';
-            
+
             // Add multi-day indicator
             let multiDayIndicator = '';
             if (props.is_multi_day) {
@@ -3100,7 +3171,7 @@
                 const totalDays = props.multi_day_total + 1;   // Convert count to 1-indexed total
                 multiDayIndicator = ` <span style="font-size: 0.85em; opacity: 0.8;">(Day ${dayNumber}/${totalDays})</span>`;
             }
-            
+
             return {
                 html: `
                     <div class="job-event-content">
@@ -3115,11 +3186,11 @@
          */
         renderDayCellContent(info) {
             const dayOfMonth = info.date.getDate();
-            
+
             // Only show month name for first 7 days of the month
             if (dayOfMonth >= 1 && dayOfMonth <= 7) {
                 const monthName = info.date.toLocaleDateString('en-US', { month: 'short' });
-                
+
                 return {
                     html: `
                         <div class="fc-daygrid-day-top">
@@ -3131,7 +3202,7 @@
                     `
                 };
             }
-            
+
             // Default rendering for other days
             return {
                 html: `
@@ -3159,28 +3230,28 @@
                 },
                 body: JSON.stringify({ status: newStatus })
             })
-            .then(response => {
-                if (!response.ok) {
-                    // Read and log the response body for debugging
-                    return response.text().then(text => {
-                        console.error('JobCalendar: Status update failed', response.status, text);
-                        throw new Error(`HTTP ${response.status}: ${text}`);
-                    });
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    this.refreshCalendar();
-                    this.showToast('Job status updated successfully', 'success');
-                } else {
+                .then(response => {
+                    if (!response.ok) {
+                        // Read and log the response body for debugging
+                        return response.text().then(text => {
+                            console.error('JobCalendar: Status update failed', response.status, text);
+                            throw new Error(`HTTP ${response.status}: ${text}`);
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        this.refreshCalendar();
+                        this.showToast('Job status updated successfully', 'success');
+                    } else {
+                        this.showToast('Error updating job status', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('JobCalendar: Error updating status', error);
                     this.showToast('Error updating job status', 'error');
-                }
-            })
-            .catch(error => {
-                console.error('JobCalendar: Error updating status', error);
-                this.showToast('Error updating job status', 'error');
-            });
+                });
         }
 
         /**
@@ -3223,10 +3294,9 @@
         showToast(message, type = 'info') {
             // Create toast element
             const toast = document.createElement('div');
-            toast.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white ${
-                type === 'success' ? 'bg-green-600' : 
+            toast.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white ${type === 'success' ? 'bg-green-600' :
                 type === 'error' ? 'bg-red-600' : 'bg-blue-600'
-            }`;
+                }`;
             toast.textContent = message;
 
             document.body.appendChild(toast);
@@ -3298,7 +3368,7 @@
             if (typeof window.getCookie === 'function') {
                 return window.getCookie('csrftoken');
             }
-            
+
             // Fallback implementation
             const name = 'csrftoken';
             let cookieValue = null;
@@ -3337,21 +3407,21 @@
             const calendarShell = document.getElementById('calendar-shell');
             const searchInput = document.getElementById('calendar-search-input');
             const searchButton = document.querySelector('.fc-searchButton-button');
-            
+
             if (!searchPanel || !calendarShell) {
                 console.error('Search panel or calendar shell not found');
                 return;
             }
-            
+
             if (this.searchPanelOpen) {
                 searchPanel.style.height = '50vh';
                 calendarShell.style.height = 'calc(50vh - 45px)';
-                
+
                 // Add active class to button
                 if (searchButton) {
                     searchButton.classList.add('active');
                 }
-                
+
                 // Focus search input after transition
                 setTimeout(() => {
                     if (searchInput) {
@@ -3361,16 +3431,16 @@
             } else {
                 searchPanel.style.height = '0';
                 calendarShell.style.height = 'calc(100vh - 45px)';
-                
+
                 // Remove active class from button
                 if (searchButton) {
                     searchButton.classList.remove('active');
                 }
             }
-            
+
             // Save state to localStorage
             localStorage.setItem('gts-calendar-search-open', this.searchPanelOpen);
-            
+
             // Update calendar size after transition completes
             setTimeout(() => {
                 if (this.calendar) {

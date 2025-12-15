@@ -301,15 +301,15 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='invoiceline',
-            constraint=models.CheckConstraint(check=models.Q(('qty__gt', 0)), name='invoice_line_positive_qty'),
+            constraint=models.CheckConstraint(condition=models.Q(('qty__gt', 0)), name='invoice_line_positive_qty'),
         ),
         migrations.AddConstraint(
             model_name='invoiceline',
-            constraint=models.CheckConstraint(check=models.Q(('price__gte', 0)), name='invoice_line_non_negative_price'),
+            constraint=models.CheckConstraint(condition=models.Q(('price__gte', 0)), name='invoice_line_non_negative_price'),
         ),
         migrations.AddConstraint(
             model_name='invoiceline',
-            constraint=models.CheckConstraint(check=models.Q(('total__gte', 0)), name='invoice_line_non_negative_total'),
+            constraint=models.CheckConstraint(condition=models.Q(('total__gte', 0)), name='invoice_line_non_negative_total'),
         ),
         migrations.AddIndex(
             model_name='job',
@@ -391,14 +391,14 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='workorderline',
-            constraint=models.CheckConstraint(check=models.Q(('qty__gte', 0)), name='work_order_line_qty_non_negative'),
+            constraint=models.CheckConstraint(condition=models.Q(('qty__gte', 0)), name='work_order_line_qty_non_negative'),
         ),
         migrations.AddConstraint(
             model_name='workorderline',
-            constraint=models.CheckConstraint(check=models.Q(('rate__gte', 0)), name='work_order_line_rate_non_negative'),
+            constraint=models.CheckConstraint(condition=models.Q(('rate__gte', 0)), name='work_order_line_rate_non_negative'),
         ),
         migrations.AddConstraint(
             model_name='workorderline',
-            constraint=models.CheckConstraint(check=models.Q(('total__gte', 0)), name='work_order_line_total_non_negative'),
+            constraint=models.CheckConstraint(condition=models.Q(('total__gte', 0)), name='work_order_line_total_non_negative'),
         ),
     ]

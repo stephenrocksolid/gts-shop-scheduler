@@ -55,6 +55,10 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+# Disable Cross-Origin-Opener-Policy header for LAN HTTP access
+# (Security not a concern for offline local LAN usage)
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
+
 ROOT_URLCONF = 'gts_django.urls'
 
 TEMPLATES = [

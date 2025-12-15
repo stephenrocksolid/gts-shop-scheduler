@@ -1,37 +1,53 @@
-from django.shortcuts import render, redirect, get_object_or_404
-from django.views.generic import UpdateView, TemplateView, ListView, CreateView, DeleteView, DetailView
-from django.contrib import messages
-from django.urls import reverse_lazy
-from django.core.exceptions import ValidationError
-from django.db.models import ProtectedError
-from django.http import JsonResponse, HttpResponse
-from django.views.decorators.http import require_http_methods
-from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.clickjacking import xframe_options_exempt
-from django.utils.decorators import method_decorator
-from django.utils import timezone
-from .models import Calendar, Job, WorkOrder, WorkOrderLine, Invoice, InvoiceLine, StatusChange
-from .forms import JobForm, WorkOrderForm, WorkOrderLineForm, CalendarImportForm
-import os
-from django.http import HttpResponse
+"""
+Views for the rental scheduler application.
+
+Optimized for performance:
+- Queries use select_related/prefetch_related to avoid N+1
+- Calendar feed endpoint is read-only (no DB writes)
+- Payloads minimized with .only() where appropriate
+"""
 import json
-from django.db import models, transaction
-from datetime import datetime, timedelta, date
-from decimal import Decimal
-from django import forms
+import logging
 import re
+from datetime import date, datetime, timedelta
+
+from django import forms
+from django.contrib import messages
+from django.db import models, transaction
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
+from django.urls import reverse_lazy
+from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_http_methods
+from django.views.generic import (
+    CreateView,
+    DeleteView,
+    DetailView,
+    ListView,
+    TemplateView,
+    UpdateView,
+)
+
+from rental_scheduler.utils.ai_parser import parse_description_with_ai
+from rental_scheduler.utils.events import (
+    event_to_calendar_json,
+    get_call_reminder_sunday,
+    normalize_event_datetimes,
+)
+
+from .forms import CalendarImportForm, JobForm, WorkOrderForm, WorkOrderLineForm
+from .models import Calendar, Invoice, Job, WorkOrder
+
+logger = logging.getLogger(__name__)
 
 # HTML5 datetime-local format constant
 DATETIME_LOCAL_FMT = "%Y-%m-%dT%H:%M"
 # HTML5 date-only format (used when All Day is checked)
 DATE_ONLY_FMT = "%Y-%m-%d"
-import logging
-from django.template.loader import render_to_string
-from rental_scheduler.utils.datetime import format_local, to_local
-from rental_scheduler.utils.events import normalize_event_datetimes, event_to_calendar_json, get_call_reminder_sunday
-from rental_scheduler.utils.ai_parser import parse_description_with_ai
-
-logger = logging.getLogger(__name__)
 
 class HomeView(TemplateView):
     template_name = 'rental_scheduler/home.html'
@@ -58,8 +74,11 @@ class CalendarView(TemplateView):
         ]
         
         # Also add as JSON string for debugging
-        import json
         context['calendars_json'] = json.dumps(context['calendars'])
+        
+        # Add guardrails for frontend date validation (single source of truth)
+        from rental_scheduler.constants import get_guardrails_for_frontend
+        context['guardrails_json'] = json.dumps(get_guardrails_for_frontend())
         
         # Add timestamp for cache busting
         import time
@@ -455,24 +474,63 @@ def lighten_color(hex_color, factor):
 
 def get_job_calendar_data(request):
     """API endpoint to get job data for calendar display"""
+    from rental_scheduler.constants import MAX_MULTI_DAY_EXPANSION_DAYS
+    
     try:
         # Get date range from request
         start_date = request.GET.get('start')
         end_date = request.GET.get('end')
+        
+        # Parse request window dates for clamping multi-day expansions
+        request_start_date = None
+        request_end_date = None
+        if start_date:
+            try:
+                # Handle ISO format with timezone: "2025-01-01T00:00:00-05:00"
+                if 'T' in start_date:
+                    request_start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00')).date()
+                else:
+                    request_start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Could not parse start_date '{start_date}': {e}")
+        if end_date:
+            try:
+                if 'T' in end_date:
+                    request_end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00')).date()
+                else:
+                    request_end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Could not parse end_date '{end_date}': {e}")
         
         # Get filter parameters
         status_filter = request.GET.get('status')
         calendar_filter = request.GET.get('calendar')
         search_filter = request.GET.get('search')
         
-        # Build queryset
-        jobs = Job.objects.select_related('calendar').filter(is_deleted=False)
+        # Build queryset - optimized to select only necessary fields for calendar display
+        # Prefetch call_reminders to avoid N+1 queries
+        jobs = Job.objects.select_related('calendar').prefetch_related('call_reminders').filter(is_deleted=False).only(
+            'id', 'business_name', 'contact_name', 'phone', 'status',
+            'start_dt', 'end_dt', 'all_day', 'trailer_color',
+            'has_call_reminder', 'call_reminder_weeks_prior', 'call_reminder_completed',
+            'recurrence_rule', 'recurrence_parent_id',
+            'calendar__id', 'calendar__name', 'calendar__color', 'calendar__call_reminder_color'
+        )
         
-        # Apply date range filter
-        if start_date and end_date:
+        # Apply date range filter using timezone-aware datetime bounds
+        if request_start_date and request_end_date:
+            # Build aware datetime bounds in project timezone
+            # start of first day for end_dt comparison
+            filter_start_dt = timezone.make_aware(
+                datetime.combine(request_start_date, datetime.min.time())
+            )
+            # end of last day for start_dt comparison (use start of next day as exclusive bound)
+            filter_end_dt = timezone.make_aware(
+                datetime.combine(request_end_date + timedelta(days=1), datetime.min.time())
+            )
             jobs = jobs.filter(
-                start_dt__lte=end_date,
-                end_dt__gte=start_date
+                start_dt__lt=filter_end_dt,
+                end_dt__gte=filter_start_dt
             )
         
         # Apply status filter
@@ -554,11 +612,35 @@ def get_job_calendar_data(request):
             
             if is_multi_day:
                 # Break multi-day jobs into separate events for each day
-                current_date = job_start_date
-                day_number = 0
+                # CLAMP to request window to prevent runaway responses from bad data
                 total_days = (job_end_date - job_start_date).days
                 
-                while current_date <= job_end_date:
+                # Determine the visible portion of this job within the request window
+                if request_start_date and request_end_date:
+                    visible_start = max(job_start_date, request_start_date)
+                    visible_end = min(job_end_date, request_end_date)
+                else:
+                    # No window specified, but still apply safety cap
+                    visible_start = job_start_date
+                    visible_end = job_end_date
+                
+                # Safety cap: never expand more than MAX_MULTI_DAY_EXPANSION_DAYS
+                visible_span = (visible_end - visible_start).days
+                if visible_span > MAX_MULTI_DAY_EXPANSION_DAYS:
+                    logger.warning(
+                        f"Job {job.id} visible span ({visible_span} days) exceeds max; "
+                        f"capping to {MAX_MULTI_DAY_EXPANSION_DAYS} days"
+                    )
+                    visible_end = visible_start + timedelta(days=MAX_MULTI_DAY_EXPANSION_DAYS)
+                
+                # Skip if job is entirely outside the visible window
+                if visible_start > visible_end:
+                    continue
+                
+                current_date = visible_start
+                day_number = (visible_start - job_start_date).days  # Track actual day number in the job
+                
+                while current_date <= visible_end:
                     # For all-day events, use date strings
                     # For timed events, use the actual times on first/last day, full day for middle days
                     if job.all_day:
@@ -589,7 +671,7 @@ def get_job_calendar_data(request):
                             day_end = (current_date + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00')
                             is_all_day = False
                     
-                    # Create event for this day
+                    # Create event for this day - LEAN payload (details fetched on click)
                     day_event = {
                         'id': f"job-{job.id}-day-{day_number}",
                         'title': title,
@@ -604,22 +686,12 @@ def get_job_calendar_data(request):
                             'status': job.status,
                             'calendar_id': job.calendar.id,
                             'calendar_name': job.calendar.name,
-                            'calendar_color': job.calendar.color,
-                            'business_name': job.business_name,
-                            'contact_name': job.contact_name,
+                            # Minimal info for tooltip/display
                             'phone': job.get_phone(),
                             'trailer_color': job.trailer_color,
-                            'trailer_serial': job.trailer_serial,
-                            'trailer_details': job.trailer_details,
-                            'notes': job.notes,
-                            'repair_notes': job.repair_notes,
-                            # Recurring event info
+                            # Recurring flags only (not full rule object)
                             'is_recurring_parent': job.is_recurring_parent,
                             'is_recurring_instance': job.is_recurring_instance,
-                            'recurrence_parent_id': job.recurrence_parent_id,
-                            'recurrence_rule': job.recurrence_rule,
-                            'repeat_type': job.repeat_type,
-                            'repeat_n_months': job.repeat_n_months,
                             # Multi-day tracking
                             'is_multi_day': True,
                             'multi_day_number': day_number,
@@ -634,7 +706,7 @@ def get_job_calendar_data(request):
                     current_date += timedelta(days=1)
                     day_number += 1
             else:
-                # Single-day job: use the original approach
+                # Single-day job: use the original approach - LEAN payload (details fetched on click)
                 event = event_to_calendar_json(
                     job,
                     title=title,
@@ -646,22 +718,12 @@ def get_job_calendar_data(request):
                         'status': job.status,
                         'calendar_id': job.calendar.id,
                         'calendar_name': job.calendar.name,
-                        'calendar_color': job.calendar.color,
-                        'business_name': job.business_name,
-                        'contact_name': job.contact_name,
+                        # Minimal info for tooltip/display
                         'phone': job.get_phone(),
                         'trailer_color': job.trailer_color,
-                        'trailer_serial': job.trailer_serial,
-                        'trailer_details': job.trailer_details,
-                        'notes': job.notes,
-                        'repair_notes': job.repair_notes,
-                        # Recurring event info
+                        # Recurring flags only (not full rule object)
                         'is_recurring_parent': job.is_recurring_parent,
                         'is_recurring_instance': job.is_recurring_instance,
-                        'recurrence_parent_id': job.recurrence_parent_id,
-                        'recurrence_rule': job.recurrence_rule,
-                        'repeat_type': job.repeat_type,
-                        'repeat_n_months': job.repeat_n_months,
                         # Multi-day tracking
                         'is_multi_day': False,
                     }
@@ -684,13 +746,13 @@ def get_job_calendar_data(request):
                     # Format the reminder title
                     reminder_title = f"📞 {title}"
                     
-                    # Get the CallReminder notes if it exists (separate from job notes)
-                    from .models import CallReminder
+                    # Get the CallReminder notes from prefetched data (avoids N+1 query)
                     reminder_notes = ''
                     try:
-                        call_reminder = CallReminder.objects.filter(job=job).first()
-                        if call_reminder:
-                            reminder_notes = call_reminder.notes or ''
+                        # Use prefetched call_reminders to avoid extra DB query
+                        call_reminders = list(job.call_reminders.all())
+                        if call_reminders:
+                            reminder_notes = call_reminders[0].notes or ''
                     except Exception:
                         pass
                     
@@ -723,126 +785,95 @@ def get_job_calendar_data(request):
                     logger.error(f"Error creating call reminder for job {job.id}: {str(reminder_error)}")
         
         # Fetch standalone CallReminder records (not linked to jobs)
-        try:
-            from .models import CallReminder
-            from datetime import datetime
-            
-            # Parse start_date and end_date to date objects for DateField filtering
-            # They come as ISO datetime strings like "2025-10-05T00:00:00-06:00"
+        # Only query if we have valid date bounds (reuse already-parsed dates from top of function)
+        if request_start_date and request_end_date:
             try:
-                start_date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00')).date()
-                end_date_obj = datetime.fromisoformat(end_date.replace('Z', '+00:00')).date()
-            except (ValueError, AttributeError):
-                # If parsing fails, try just taking the date part and parse it
-                try:
-                    start_date_str = start_date.split('T')[0] if 'T' in start_date else start_date
-                    end_date_str = end_date.split('T')[0] if 'T' in end_date else end_date
-                    start_date_obj = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-                    end_date_obj = datetime.strptime(end_date_str, '%Y-%m-%d').date()
-                except Exception as date_error:
-                    logger.error(f"Failed to parse dates: {start_date}, {end_date} - {str(date_error)}")
-                    raise
-            
-            # Get the list of calendar IDs from the filter
-            calendar_ids = []
-            if calendar_filter:
-                if ',' in calendar_filter:
-                    calendar_ids = [int(cid.strip()) for cid in calendar_filter.split(',') if cid.strip().isdigit()]
-                else:
-                    try:
-                        calendar_ids = [int(calendar_filter)]
-                    except ValueError:
-                        pass
-            
-            # Fetch standalone reminders
-            if calendar_ids:
-                call_reminders = CallReminder.objects.filter(
-                    calendar_id__in=calendar_ids,
-                    reminder_date__range=[start_date_obj, end_date_obj],
-                    job__isnull=True,  # Only standalone reminders
-                ).select_related('calendar')
-            else:
-                # No filter, get all active calendars
-                call_reminders = CallReminder.objects.filter(
-                    reminder_date__range=[start_date_obj, end_date_obj],
-                    job__isnull=True,
-                    calendar__is_active=True
-                ).select_related('calendar')
-            
-            # Add standalone call reminders to events
-            for reminder in call_reminders:
-                try:
-                    # Ensure reminder_date is a date object, not datetime or string
-                    from datetime import datetime as dt, date
-                    from dateutil.parser import parse as parse_date
-                    reminder_date = reminder.reminder_date
-                    
-                    # Handle datetime objects
-                    if isinstance(reminder_date, dt):
-                        # Convert datetime to date if needed (shouldn't happen, but defensive)
-                        reminder_date = reminder_date.date()
-                        # Fix in database
-                        reminder.reminder_date = reminder_date
-                        reminder.save(update_fields=['reminder_date'])
-                        logger.warning(f"Fixed reminder {reminder.id}: converted datetime to date")
-                    # Handle string objects
-                    elif isinstance(reminder_date, str):
-                        # Parse string to date
+                from .models import CallReminder
+                
+                # Parse calendar_ids for filter (reuse logic)
+                reminder_calendar_ids = []
+                if calendar_filter:
+                    if ',' in calendar_filter:
+                        reminder_calendar_ids = [int(cid.strip()) for cid in calendar_filter.split(',') if cid.strip().isdigit()]
+                    else:
                         try:
-                            reminder_date = parse_date(reminder_date).date()
-                        except Exception:
-                            # Fallback to simple parsing
-                            reminder_date = dt.strptime(reminder_date, '%Y-%m-%d').date()
-                        # Fix in database
-                        reminder.reminder_date = reminder_date
-                        reminder.save(update_fields=['reminder_date'])
-                        logger.warning(f"Fixed reminder {reminder.id}: converted string to date")
-                    
-                    reminder_color = reminder.calendar.call_reminder_color or '#F59E0B'
-                    
-                    # Apply lighter shade for completed reminders
-                    if reminder.completed:
-                        reminder_color = lighten_color(reminder_color, 0.3)
-                    
-                    reminder_end_dt = reminder_date + timedelta(days=1)
-                    
-                    # Build title with notes if available
-                    reminder_title = "📞 Call Reminder"
-                    if reminder.notes:
-                        # Truncate notes if too long for display
-                        notes_preview = reminder.notes[:50] + '...' if len(reminder.notes) > 50 else reminder.notes
-                        reminder_title = f"📞 {notes_preview}"
-                    
-                    # Add completion indicator to title for completed reminders
-                    if reminder.completed:
-                        reminder_title = f"✓ {reminder_title}"
-                    
-                    reminder_event = {
-                        'id': f"call-reminder-{reminder.id}",
-                        'title': reminder_title,
-                        'start': f"{reminder_date.isoformat()}T12:00:00",
-                        'end': f"{reminder_end_dt.isoformat()}T12:00:00",  # Exclusive end for all-day event
-                        'backgroundColor': reminder_color,
-                        'borderColor': reminder_color,
-                        'allDay': True,
-                        'extendedProps': {
-                            'type': 'standalone_call_reminder',
-                            'reminder_id': reminder.id,
-                            'calendar_id': reminder.calendar.id,
-                            'calendar_name': reminder.calendar.name,
-                            'notes': reminder.notes,
-                            'completed': reminder.completed,
-                            'reminder_date': reminder_date.isoformat(),
+                            reminder_calendar_ids = [int(calendar_filter)]
+                        except ValueError:
+                            pass
+                
+                # Build optimized query with .only() for minimal payload
+                reminder_base_qs = CallReminder.objects.filter(
+                    reminder_date__range=[request_start_date, request_end_date],
+                    job__isnull=True,  # Only standalone reminders
+                ).select_related('calendar').only(
+                    'id', 'reminder_date', 'notes', 'completed',
+                    'calendar__id', 'calendar__name', 'calendar__call_reminder_color', 'calendar__is_active'
+                )
+                
+                if reminder_calendar_ids:
+                    call_reminders = reminder_base_qs.filter(calendar_id__in=reminder_calendar_ids)
+                else:
+                    # No filter, get all active calendars
+                    call_reminders = reminder_base_qs.filter(calendar__is_active=True)
+                
+                # Add standalone call reminders to events (read-only, no DB writes)
+                for reminder in call_reminders:
+                    try:
+                        # Normalize reminder_date to date object in-memory only (no DB writes)
+                        reminder_date = reminder.reminder_date
+                        
+                        # Handle datetime objects (defensive - shouldn't happen with DateField)
+                        if isinstance(reminder_date, datetime):
+                            reminder_date = reminder_date.date()
+                        # Handle string objects (defensive - shouldn't happen with DateField)
+                        elif isinstance(reminder_date, str):
+                            reminder_date = datetime.strptime(reminder_date[:10], '%Y-%m-%d').date()
+                        
+                        reminder_color = reminder.calendar.call_reminder_color or '#F59E0B'
+                        
+                        # Apply lighter shade for completed reminders
+                        if reminder.completed:
+                            reminder_color = lighten_color(reminder_color, 0.3)
+                        
+                        reminder_end_dt = reminder_date + timedelta(days=1)
+                        
+                        # Build title with notes if available
+                        reminder_title = "📞 Call Reminder"
+                        if reminder.notes:
+                            # Truncate notes if too long for display
+                            notes_preview = reminder.notes[:50] + '...' if len(reminder.notes) > 50 else reminder.notes
+                            reminder_title = f"📞 {notes_preview}"
+                        
+                        # Add completion indicator to title for completed reminders
+                        if reminder.completed:
+                            reminder_title = f"✓ {reminder_title}"
+                        
+                        reminder_event = {
+                            'id': f"call-reminder-{reminder.id}",
+                            'title': reminder_title,
+                            'start': f"{reminder_date.isoformat()}T12:00:00",
+                            'end': f"{reminder_end_dt.isoformat()}T12:00:00",  # Exclusive end for all-day event
+                            'backgroundColor': reminder_color,
+                            'borderColor': reminder_color,
+                            'allDay': True,
+                            'extendedProps': {
+                                'type': 'standalone_call_reminder',
+                                'reminder_id': reminder.id,
+                                'calendar_id': reminder.calendar.id,
+                                'calendar_name': reminder.calendar.name,
+                                'notes': reminder.notes,
+                                'completed': reminder.completed,
+                                'reminder_date': reminder_date.isoformat(),
+                            }
                         }
-                    }
-                    
-                    events.append(reminder_event)
-                except Exception as single_reminder_error:
-                    logger.error(f"Error processing call reminder {reminder.id}: {str(single_reminder_error)}")
-                    # Skip this reminder and continue with others
-        except Exception as reminder_fetch_error:
-            logger.error(f"Error fetching standalone call reminders: {str(reminder_fetch_error)}")
-            # Continue without standalone reminders if there's an error
+                        
+                        events.append(reminder_event)
+                    except Exception as single_reminder_error:
+                        logger.error(f"Error processing call reminder {reminder.id}: {str(single_reminder_error)}")
+                        # Skip this reminder and continue with others
+            except Exception as reminder_fetch_error:
+                logger.error(f"Error fetching standalone call reminders: {str(reminder_fetch_error)}")
+                # Continue without standalone reminders if there's an error
         
         return JsonResponse({
             'status': 'success',

@@ -15,6 +15,35 @@ from rental_scheduler.models import Job, Calendar
 from rental_scheduler.utils.events import normalize_event_datetimes
 
 
+# Date validation constants (match Job model)
+MIN_VALID_YEAR = 2000
+MAX_VALID_YEAR = 2100
+MAX_JOB_SPAN_DAYS = 365
+
+
+def validate_job_dates(start_dt, end_dt):
+    """
+    Validate job dates for API endpoints.
+    Returns (is_valid, error_message) tuple.
+    """
+    if not start_dt or not end_dt:
+        return True, None
+    
+    # Check year ranges
+    if start_dt.year < MIN_VALID_YEAR or start_dt.year > MAX_VALID_YEAR:
+        return False, f'Start year must be between {MIN_VALID_YEAR} and {MAX_VALID_YEAR}. Got: {start_dt.year}'
+    
+    if end_dt.year < MIN_VALID_YEAR or end_dt.year > MAX_VALID_YEAR:
+        return False, f'End year must be between {MIN_VALID_YEAR} and {MAX_VALID_YEAR}. Got: {end_dt.year}'
+    
+    # Check span
+    span_days = (end_dt - start_dt).days
+    if span_days > MAX_JOB_SPAN_DAYS:
+        return False, f'Job cannot span more than {MAX_JOB_SPAN_DAYS} days. Current span: {span_days} days.'
+    
+    return True, None
+
+
 @require_http_methods(["POST"])
 @csrf_protect
 def job_create_api_recurring(request):
@@ -108,6 +137,12 @@ def job_create_api_recurring(request):
                 )
                 job.start_dt = start_dt_utc
                 job.end_dt = end_dt_utc
+                
+                # Early validation to give better error messages
+                is_valid, error_msg = validate_job_dates(start_dt_utc, end_dt_utc)
+                if not is_valid:
+                    return JsonResponse({'error': error_msg}, status=400)
+                    
             except (ValueError, TypeError) as e:
                 return JsonResponse({'error': f'Invalid date format: {str(e)}'}, status=400)
         
@@ -306,6 +341,12 @@ def job_update_api_recurring(request, pk):
                     end_value,
                     job.all_day
                 )
+                
+                # Early validation to give better error messages
+                is_valid, error_msg = validate_job_dates(start_dt_utc, end_dt_utc)
+                if not is_valid:
+                    return JsonResponse({'error': error_msg}, status=400)
+                
                 job.start_dt = start_dt_utc
                 job.end_dt = end_dt_utc
             except (ValueError, TypeError) as e:

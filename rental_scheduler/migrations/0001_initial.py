@@ -100,7 +100,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'indexes': [models.Index(fields=['start_datetime'], name='rental_sche_start_d_4f3587_idx'), models.Index(fields=['end_datetime'], name='rental_sche_end_dat_55050e_idx'), models.Index(fields=['is_picked_up'], name='rental_sche_is_pick_60c7d6_idx'), models.Index(fields=['is_returned'], name='rental_sche_is_retu_87412a_idx')],
-                'constraints': [models.CheckConstraint(check=models.Q(end_datetime__gt=models.F('start_datetime')), name='end_after_start')],
+                'constraints': [models.CheckConstraint(condition=models.Q(end_datetime__gt=models.F('start_datetime')), name='end_after_start')],
             },
         ),
     ]

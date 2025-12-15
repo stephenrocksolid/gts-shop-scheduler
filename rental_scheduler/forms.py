@@ -135,6 +135,11 @@ class JobForm(forms.ModelForm):
                 return f"1 ({phone_digits[1:4]}) {phone_digits[4:7]}-{phone_digits[7:]}"
         return phone
     
+    # Date validation constants
+    MIN_VALID_YEAR = 2000
+    MAX_VALID_YEAR = 2100
+    MAX_JOB_SPAN_DAYS = 365  # Maximum allowed job span (can be overridden)
+    
     def clean(self):
         """Validate the form data"""
         cleaned_data = super().clean()
@@ -150,6 +155,21 @@ class JobForm(forms.ModelForm):
             cleaned_data['start_dt'] = start_dt
             cleaned_data['end_dt'] = end_dt
         
+        # Validate year ranges to prevent data corruption
+        if start_dt:
+            start_year = start_dt.year
+            if start_year < self.MIN_VALID_YEAR or start_year > self.MAX_VALID_YEAR:
+                raise ValidationError({
+                    'start_dt': f'Year must be between {self.MIN_VALID_YEAR} and {self.MAX_VALID_YEAR}'
+                })
+        
+        if end_dt:
+            end_year = end_dt.year
+            if end_year < self.MIN_VALID_YEAR or end_year > self.MAX_VALID_YEAR:
+                raise ValidationError({
+                    'end_dt': f'Year must be between {self.MIN_VALID_YEAR} and {self.MAX_VALID_YEAR}'
+                })
+        
         # Validate that end date is after (or equal for all-day events) start date
         if start_dt and end_dt:
             # For all-day events, allow same day (start_dt == end_dt)
@@ -164,6 +184,13 @@ class JobForm(forms.ModelForm):
                     raise ValidationError({
                         'end_dt': 'End date/time must be after start date/time'
                     })
+            
+            # Validate job span to prevent runaway multi-day expansion
+            span_days = (end_dt - start_dt).days
+            if span_days > self.MAX_JOB_SPAN_DAYS:
+                raise ValidationError({
+                    'end_dt': f'Job cannot span more than {self.MAX_JOB_SPAN_DAYS} days. Current span: {span_days} days.'
+                })
         
         return cleaned_data
 

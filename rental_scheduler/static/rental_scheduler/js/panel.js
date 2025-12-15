@@ -1,15 +1,15 @@
 // rental_scheduler/static/rental_scheduler/js/panel.js
 (function () {
-  function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+  function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
   const STORAGE_KEY = 'jobPanelState';
 
   // Initialize global API immediately
   let panelInstance = null;
   let isAlpineMode = false;
-  
+
   // Queue for operations before panel is ready
   let operationQueue = [];
-  
+
   function executeOperation(op) {
     if (panelInstance) {
       op();
@@ -17,14 +17,14 @@
       operationQueue.push(op);
     }
   }
-  
+
   function flushQueue() {
     while (operationQueue.length > 0) {
       const op = operationQueue.shift();
       op();
     }
   }
-  
+
   // Vanilla JS fallback implementation
   function createVanillaPanel() {
     const panelEl = document.getElementById('job-panel');
@@ -32,7 +32,7 @@
       console.error('Panel element not found');
       return null;
     }
-    
+
     const st = load() || {};
     const panel = {
       isOpen: st.isOpen || false,
@@ -47,7 +47,7 @@
       sy: 0,
       isSwitchingJobs: false,  // Flag to prevent auto-close when switching between jobs
       currentJobId: null, // Track current job for workspace integration
-      
+
       updateVisibility() {
         if (this.isOpen) {
           panelEl.classList.remove('hidden');
@@ -57,7 +57,7 @@
           panelEl.classList.remove('block');
         }
       },
-      
+
       updatePosition() {
         if (this.docked) {
           panelEl.style.top = '80px';
@@ -71,12 +71,12 @@
         }
         this.constrainToViewport();
       },
-      
+
       constrainToViewport() {
         const rect = panelEl.getBoundingClientRect();
         const viewportHeight = window.innerHeight;
         const viewportWidth = window.innerWidth;
-        
+
         // If panel extends beyond bottom of viewport, constrain its height
         if (rect.bottom > viewportHeight) {
           const availableHeight = viewportHeight - rect.top - 20; // 20px margin
@@ -90,7 +90,7 @@
             panelEl.style.transform = `translate(${this.x}px, ${this.y}px)`;
           }
         }
-        
+
         // Ensure panel doesn't exceed viewport width
         if (rect.right > viewportWidth) {
           const availableWidth = viewportWidth - rect.left - 20;
@@ -99,14 +99,14 @@
           }
         }
       },
-      
+
       open() {
         this.isOpen = true;
         this.updateVisibility();
         this.updateMinimizeButton();
         save(this);
       },
-      
+
       close(skipUnsavedCheck) {
         // Check for unsaved changes before closing (unless explicitly skipped)
         if (!skipUnsavedCheck && this.hasUnsavedChanges()) {
@@ -114,30 +114,30 @@
             return; // User cancelled, don't close
           }
         }
-        
+
         this.isOpen = false;
         this.updateVisibility();
         this.currentJobId = null; // Clear current job ID when closing
         this.updateMinimizeButton(); // Hide minimize button
         save(this);
       },
-      
+
       setTitle(t) {
         this.title = t || 'Job';
         const titleEl = document.getElementById('job-panel-title');
         if (titleEl) titleEl.textContent = this.title;
         save(this);
       },
-      
+
       setCurrentJobId(jobId) {
         this.currentJobId = jobId;
         this.updateMinimizeButton();
       },
-      
+
       updateMinimizeButton() {
         const minimizeBtn = document.getElementById('panel-workspace-minimize-btn');
         if (!minimizeBtn) return;
-        
+
         // Always show minimize button when panel is open
         if (this.isOpen) {
           minimizeBtn.style.display = 'inline-flex';
@@ -145,30 +145,30 @@
           minimizeBtn.style.display = 'none';
         }
       },
-      
+
       toggleDock() {
         this.docked = !this.docked;
         this.updatePosition();
         save(this);
       },
-      
+
       setupDragging() {
         const header = panelEl.querySelector('.panel-header');
         if (!header) return;
-        
+
         const onMouseDown = (e) => {
           if (this.docked) return;
           const p = e.touches?.[0] ?? e;
           this.dragging = true;
           this.sx = p.clientX - this.x;
           this.sy = p.clientY - this.y;
-          
+
           document.addEventListener('mousemove', onMouseMove);
           document.addEventListener('mouseup', onMouseUp);
-          document.addEventListener('touchmove', onMouseMove, {passive: false});
+          document.addEventListener('touchmove', onMouseMove, { passive: false });
           document.addEventListener('touchend', onMouseUp);
         };
-        
+
         const onMouseMove = (ev) => {
           if (!this.dragging) return;
           const p = ev.touches?.[0] ?? ev;
@@ -179,7 +179,7 @@
           this.updatePosition();
           ev.preventDefault();
         };
-        
+
         const onMouseUp = () => {
           this.dragging = false;
           document.removeEventListener('mousemove', onMouseMove);
@@ -188,28 +188,28 @@
           document.removeEventListener('touchend', onMouseUp);
           save(this);
         };
-        
+
         header.addEventListener('mousedown', onMouseDown);
-        header.addEventListener('touchstart', onMouseDown, {passive: true});
+        header.addEventListener('touchstart', onMouseDown, { passive: true });
       },
-      
+
       hasUnsavedChanges() {
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (!panelBody) {
           console.log('hasUnsavedChanges: No panel body found');
           return false;
         }
-        
+
         // Check for any form inputs that have been modified
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         console.log('hasUnsavedChanges: Checking', inputs.length, 'inputs');
-        
+
         for (const input of inputs) {
           // Skip hidden inputs and buttons
           if (input.type === 'hidden' || input.type === 'submit' || input.type === 'button') {
             continue;
           }
-          
+
           // Check if the current value differs from the original value
           if (input.hasAttribute('data-original-value')) {
             const originalValue = input.getAttribute('data-original-value');
@@ -225,18 +225,18 @@
             return true;
           }
         }
-        
+
         console.log('hasUnsavedChanges: No changes detected');
         return false;
       },
-      
+
       trackFormChanges() {
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (!panelBody) {
           console.log('trackFormChanges: No panel body found');
           return;
         }
-        
+
         // Store original values for all form inputs
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
@@ -246,12 +246,12 @@
           }
         });
       },
-      
+
       clearUnsavedChanges() {
         // Reset tracking by updating all original values to current values
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (!panelBody) return;
-        
+
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         inputs.forEach(input => {
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
@@ -259,7 +259,7 @@
           }
         });
       },
-      
+
       saveForm(callback) {
         // Find the form in the panel body and submit it
         const panelBody = document.querySelector('#job-panel .panel-body');
@@ -268,14 +268,14 @@
           if (callback) callback();
           return;
         }
-        
+
         const form = panelBody.querySelector('form');
         if (!form) {
           console.warn('Form not found in panel');
           if (callback) callback();
           return;
         }
-        
+
         // Trigger HTMX form submission if available
         if (typeof htmx !== 'undefined') {
           // Set up a one-time listener for after the request completes
@@ -283,7 +283,7 @@
             if (event.detail.successful) {
               // Clear unsaved changes tracking
               this.clearUnsavedChanges();
-              
+
               // Capture job ID from trigger event (available immediately)
               if (event.detail.xhr) {
                 const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
@@ -299,7 +299,7 @@
                   }
                 }
               }
-              
+
               // Fallback: try to get from DOM (for older responses)
               if (!this.currentJobId) {
                 const jobIdInput = form.querySelector('input[name="job_id"]');
@@ -308,7 +308,7 @@
                   console.log('Captured job ID from DOM fallback:', this.currentJobId);
                 }
               }
-              
+
               // Execute callback AFTER capturing job ID
               if (callback) callback();
             } else {
@@ -318,9 +318,9 @@
             // Remove the event listener
             form.removeEventListener('htmx:afterRequest', afterRequestHandler);
           };
-          
+
           form.addEventListener('htmx:afterRequest', afterRequestHandler);
-          
+
           // Trigger HTMX request
           htmx.trigger(form, 'submit');
         } else {
@@ -329,7 +329,7 @@
           if (callback) callback();
         }
       },
-      
+
       setupButtons() {
         // Close button
         const closeBtn = panelEl.querySelector('.panel-header .btn-close');
@@ -355,7 +355,7 @@
             }
           });
         }
-        
+
         // Workspace minimize button
         const workspaceMinimizeBtn = document.getElementById('panel-workspace-minimize-btn');
         if (workspaceMinimizeBtn) {
@@ -366,37 +366,37 @@
               const form = document.querySelector('#job-panel .panel-body form');
               const jobIdInput = form?.querySelector('input[name="job_id"]');
               let jobId = this.currentJobId || (jobIdInput ? jobIdInput.value : null);
-              
+
               if (jobId && window.JobWorkspace) {
                 // If job is not in workspace yet, add it
                 if (!window.JobWorkspace.hasJob(jobId)) {
                   // Get job details from the form
-                  const businessName = form?.querySelector('input[name="business_name"]')?.value || 
-                                     form?.querySelector('input[name="contact_name"]')?.value || 
-                                     'Unnamed Job';
+                  const businessName = form?.querySelector('input[name="business_name"]')?.value ||
+                    form?.querySelector('input[name="contact_name"]')?.value ||
+                    'Unnamed Job';
                   const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-                  
+
                   // Add to workspace
                   window.JobWorkspace.openJob(jobId, {
                     customerName: businessName,
                     trailerColor: trailerColor,
                     calendarColor: '#3B82F6'
                   });
-                  
+
                   // Update the panel's currentJobId
                   this.currentJobId = jobId;
                   this.setCurrentJobId(jobId);
                 }
-                
+
                 // Now minimize
                 window.JobWorkspace.minimizeJob(jobId);
               }
             });
           });
         }
-        
+
         // Delete button is handled by the global API via setDeleteCallback
-        
+
         // ESC key
         document.addEventListener('keydown', (e) => {
           if (e.key === 'Escape' && this.isOpen) {
@@ -420,38 +420,38 @@
             }
           }
         });
-        
+
         // Enter key navigation within panel
         document.addEventListener('keydown', (e) => {
           // Only apply when panel is open
           if (!panelEl || !this.isOpen) return;
-          
+
           // Check if the focused element is inside the panel
           if (!panelEl.contains(e.target)) return;
-          
+
           if (e.key === 'Enter') {
             const target = e.target;
-            
+
             // Allow normal Enter in textarea (for new lines) unless Shift is pressed
             if (target.tagName === 'TEXTAREA' && !e.shiftKey) {
               return;
             }
-            
+
             // Prevent default Enter behavior
             e.preventDefault();
-            
+
             // Get all focusable fields within the panel
             const fields = Array.from(panelEl.querySelectorAll('input, select, textarea, button'))
               .filter(el => {
                 // Filter out hidden, disabled, or invisible elements
-                return !el.disabled && 
-                       el.offsetParent !== null && 
-                       el.type !== 'hidden' &&
-                       !el.hasAttribute('readonly');
+                return !el.disabled &&
+                  el.offsetParent !== null &&
+                  el.type !== 'hidden' &&
+                  !el.hasAttribute('readonly');
               });
-            
+
             const idx = fields.indexOf(target);
-            
+
             if (idx > -1 && idx < fields.length - 1) {
               // Move to next field
               fields[idx + 1].focus();
@@ -462,7 +462,7 @@
           }
         });
       },
-      
+
       init() {
         this.updatePosition();
         this.updateVisibility();
@@ -470,11 +470,11 @@
         this.setupButtons();
       }
     };
-    
+
     panel.init();
     return panel;
   }
-  
+
   window.JobPanel = {
     open: () => {
       executeOperation(() => panelInstance.open());
@@ -508,8 +508,8 @@
       target.setAttribute('hx-get', url);
       target.setAttribute('hx-target', 'this');
       target.setAttribute('hx-swap', 'innerHTML');
-      htmx.ajax('GET', url, { 
-        target: target, 
+      htmx.ajax('GET', url, {
+        target: target,
         swap: 'innerHTML',
         'hx-on::after-settle': 'if(window.JobPanel && window.JobPanel.trackFormChanges) window.JobPanel.trackFormChanges(); if(window.JobPanel && window.JobPanel.updateMinimizeButton) window.JobPanel.updateMinimizeButton()'
       });
@@ -544,7 +544,7 @@
     }
   };
 
-  window.jobPanel = function jobPanel(){
+  window.jobPanel = function jobPanel() {
     return {
       isOpen: false,
       title: 'Job',
@@ -552,35 +552,35 @@
       docked: false,
       dragging: false, sx: 0, sy: 0,
       currentJobId: null, // Track current job for workspace integration
-      get panelStyle(){
-        if (this.docked){
+      get panelStyle() {
+        if (this.docked) {
           return `top:80px; right:16px; left:auto; transform:none;`;
         }
         return `top:0; left:0; transform: translate(${this.x}px, ${this.y}px);`;
       },
-      open(){ this.isOpen = true; this.updateMinimizeButton(); save(this); },
-      close(skipUnsavedCheck){ 
+      open() { this.isOpen = true; this.updateMinimizeButton(); save(this); },
+      close(skipUnsavedCheck) {
         // Check for unsaved changes before closing (unless explicitly skipped)
         if (!skipUnsavedCheck && this.hasUnsavedChanges()) {
           if (!confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
             return; // User cancelled, don't close
           }
         }
-        
+
         this.isOpen = false;
         this.currentJobId = null; // Clear current job ID when closing
         this.updateMinimizeButton(); // Hide minimize button
-        save(this); 
+        save(this);
       },
-      setTitle(t){ this.title = t || 'Job'; save(this); },
-      setCurrentJobId(jobId){ 
+      setTitle(t) { this.title = t || 'Job'; save(this); },
+      setCurrentJobId(jobId) {
         this.currentJobId = jobId;
         this.updateMinimizeButton();
       },
       updateMinimizeButton() {
         const minimizeBtn = document.getElementById('panel-workspace-minimize-btn');
         if (!minimizeBtn) return;
-        
+
         // Always show minimize button when panel is open
         if (this.isOpen) {
           minimizeBtn.style.display = 'inline-flex';
@@ -588,11 +588,11 @@
           minimizeBtn.style.display = 'none';
         }
       },
-      toggleDock(){ this.docked = !this.docked; save(this); },
+      toggleDock() { this.docked = !this.docked; save(this); },
       hasUnsavedChanges() {
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (!panelBody) return false;
-        
+
         // Check for any form inputs that have been modified
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         for (const input of inputs) {
@@ -600,7 +600,7 @@
           if (input.type === 'hidden' || input.type === 'submit' || input.type === 'button') {
             continue;
           }
-          
+
           // Check if the current value differs from the original value
           if (input.hasAttribute('data-original-value')) {
             const originalValue = input.getAttribute('data-original-value');
@@ -614,7 +614,7 @@
             return true;
           }
         }
-        
+
         return false;
       },
       trackFormChanges() {
@@ -623,7 +623,7 @@
           console.log('trackFormChanges: No panel body found');
           return;
         }
-        
+
         // Store original values for all form inputs
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
@@ -637,7 +637,7 @@
         // Reset tracking by updating all original values to current values
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (!panelBody) return;
-        
+
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         inputs.forEach(input => {
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
@@ -653,14 +653,14 @@
           if (callback) callback();
           return;
         }
-        
+
         const form = panelBody.querySelector('form');
         if (!form) {
           console.warn('Form not found in panel');
           if (callback) callback();
           return;
         }
-        
+
         // Trigger HTMX form submission if available
         if (typeof htmx !== 'undefined') {
           // Set up a one-time listener for after the request completes
@@ -668,7 +668,7 @@
             if (event.detail.successful) {
               // Clear unsaved changes tracking
               this.clearUnsavedChanges();
-              
+
               // Capture job ID from trigger event (available immediately)
               if (event.detail.xhr) {
                 const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
@@ -684,7 +684,7 @@
                   }
                 }
               }
-              
+
               // Fallback: try to get from DOM (for older responses)
               if (!this.currentJobId) {
                 const jobIdInput = form.querySelector('input[name="job_id"]');
@@ -693,7 +693,7 @@
                   console.log('Captured job ID from DOM fallback:', this.currentJobId);
                 }
               }
-              
+
               // Execute callback AFTER capturing job ID
               if (callback) callback();
             } else {
@@ -703,9 +703,9 @@
             // Remove the event listener
             form.removeEventListener('htmx:afterRequest', afterRequestHandler);
           };
-          
+
           form.addEventListener('htmx:afterRequest', afterRequestHandler);
-          
+
           // Trigger HTMX request
           htmx.trigger(form, 'submit');
         } else {
@@ -714,7 +714,7 @@
           if (callback) callback();
         }
       },
-      startDrag(e){
+      startDrag(e) {
         if (this.docked) return;
         const p = e.touches?.[0] ?? e;
         this.dragging = true;
@@ -722,18 +722,18 @@
         this.sy = p.clientY - this.y;
         window.addEventListener('mousemove', this._move);
         window.addEventListener('mouseup', this._stop);
-        window.addEventListener('touchmove', this._move, {passive:false});
+        window.addEventListener('touchmove', this._move, { passive: false });
         window.addEventListener('touchend', this._stop);
       },
       _move: null,
       _stop: null,
-      init(){
+      init() {
         const self = this;
         panelInstance = this; // Store reference for global API
         const st = load() || {};
         Object.assign(this, st);
-        this._move = function(ev){
-          if(!self.dragging) return;
+        this._move = function (ev) {
+          if (!self.dragging) return;
           const p = ev.touches?.[0] ?? ev;
           const maxX = window.innerWidth - 200; // keep header on-screen
           const maxY = window.innerHeight - 48;
@@ -741,7 +741,7 @@
           self.y = clamp(p.clientY - self.sy, 8, maxY);
           ev.preventDefault();
         };
-        this._stop = function(){
+        this._stop = function () {
           self.dragging = false;
           window.removeEventListener('mousemove', self._move);
           window.removeEventListener('mouseup', self._stop);
@@ -755,14 +755,116 @@
     };
   };
 
-  function save(vm){
-    const st = { x:vm.x, y:vm.y, w:vm.w, h:vm.h, docked:vm.docked, title:vm.title, isOpen:vm.isOpen };
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); } catch(e){}
+  // ==========================================================================
+  // DATE VALIDATION GUARDRAILS
+  // Warn users about far-future dates or very long job spans
+  // ==========================================================================
+  const DATE_GUARDRAILS = {
+    MAX_DAYS_IN_FUTURE: 365,  // Warn if start/end is more than this many days in the future
+    MAX_JOB_SPAN_DAYS: 60,    // Warn if job spans more than this many days
+    MIN_VALID_YEAR: 2000,     // Reject years before this
+    MAX_VALID_YEAR: 2100,     // Reject years after this
+  };
+
+  /**
+   * Validate job date inputs before form submission
+   * Returns true if validation passes (or user confirms), false to cancel submission
+   */
+  function validateJobDates(form) {
+    const startInput = form.querySelector('input[name="start_dt"]');
+    const endInput = form.querySelector('input[name="end_dt"]');
+
+    if (!startInput || !endInput) return true; // No date inputs found, allow submission
+
+    const startValue = startInput.value;
+    const endValue = endInput.value;
+
+    if (!startValue || !endValue) return true; // Empty dates handled by server validation
+
+    // Parse dates (handle both date and datetime-local inputs)
+    let startDate, endDate;
+    try {
+      startDate = new Date(startValue);
+      endDate = new Date(endValue);
+    } catch (e) {
+      return true; // Let server handle parse errors
+    }
+
+    // Check for invalid dates
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return true; // Let server handle invalid dates
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const warnings = [];
+
+    // Check for absurd year values
+    const startYear = startDate.getFullYear();
+    const endYear = endDate.getFullYear();
+
+    if (startYear < DATE_GUARDRAILS.MIN_VALID_YEAR || startYear > DATE_GUARDRAILS.MAX_VALID_YEAR) {
+      alert(`Invalid start year: ${startYear}. Please enter a year between ${DATE_GUARDRAILS.MIN_VALID_YEAR} and ${DATE_GUARDRAILS.MAX_VALID_YEAR}.`);
+      startInput.focus();
+      return false;
+    }
+
+    if (endYear < DATE_GUARDRAILS.MIN_VALID_YEAR || endYear > DATE_GUARDRAILS.MAX_VALID_YEAR) {
+      alert(`Invalid end year: ${endYear}. Please enter a year between ${DATE_GUARDRAILS.MIN_VALID_YEAR} and ${DATE_GUARDRAILS.MAX_VALID_YEAR}.`);
+      endInput.focus();
+      return false;
+    }
+
+    // Check for far-future scheduling
+    const daysUntilStart = Math.floor((startDate - today) / (1000 * 60 * 60 * 24));
+    if (daysUntilStart > DATE_GUARDRAILS.MAX_DAYS_IN_FUTURE) {
+      warnings.push(`The start date is ${daysUntilStart} days in the future (more than ${DATE_GUARDRAILS.MAX_DAYS_IN_FUTURE} days).`);
+    }
+
+    // Check for very long job span
+    const spanDays = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+    if (spanDays > DATE_GUARDRAILS.MAX_JOB_SPAN_DAYS) {
+      warnings.push(`This job spans ${spanDays} days (more than ${DATE_GUARDRAILS.MAX_JOB_SPAN_DAYS} days).`);
+    }
+
+    // If there are warnings, ask for confirmation
+    if (warnings.length > 0) {
+      const message = warnings.join('\n') + '\n\nAre you sure you want to save this job?';
+      if (!confirm(message)) {
+        return false;
+      }
+    }
+
+    return true;
   }
-  function load(){
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch(e){ return null; }
+
+  // Hook into HTMX form submissions to validate dates
+  document.addEventListener('htmx:beforeRequest', function (event) {
+    const form = event.target.closest('form');
+    if (!form) return;
+
+    // Only validate job forms (check for job-related URL)
+    const action = form.getAttribute('hx-post') || form.getAttribute('action') || '';
+    if (!action.includes('job_create') && !action.includes('job') && !form.querySelector('input[name="start_dt"]')) {
+      return;
+    }
+
+    // Validate dates
+    if (!validateJobDates(form)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+
+  function save(vm) {
+    const st = { x: vm.x, y: vm.y, w: vm.w, h: vm.h, docked: vm.docked, title: vm.title, isOpen: vm.isOpen };
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); } catch (e) { }
   }
-  
+  function load() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { return null; }
+  }
+
   // Initialize panel when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initPanel);
@@ -770,7 +872,7 @@
     // DOM already loaded
     initPanel();
   }
-  
+
   function initPanel() {
     // Wait a bit for Alpine to potentially load
     setTimeout(() => {

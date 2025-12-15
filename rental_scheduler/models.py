@@ -416,7 +416,23 @@ class Job(models.Model):
     
     def clean(self):
         """Validate the job data"""
+        from rental_scheduler.constants import MIN_VALID_YEAR, MAX_VALID_YEAR, MAX_JOB_SPAN_DAYS
         super().clean()
+        
+        # Validate year ranges to prevent data corruption (e.g., year 0026)
+        if self.start_dt:
+            start_year = self.start_dt.year
+            if start_year < MIN_VALID_YEAR or start_year > MAX_VALID_YEAR:
+                raise ValidationError({
+                    'start_dt': f'Start year must be between {MIN_VALID_YEAR} and {MAX_VALID_YEAR}. Got: {start_year}'
+                })
+        
+        if self.end_dt:
+            end_year = self.end_dt.year
+            if end_year < MIN_VALID_YEAR or end_year > MAX_VALID_YEAR:
+                raise ValidationError({
+                    'end_dt': f'End year must be between {MIN_VALID_YEAR} and {MAX_VALID_YEAR}. Got: {end_year}'
+                })
         
         # Validate dates
         if self.start_dt and self.end_dt:
@@ -432,6 +448,13 @@ class Job(models.Model):
                     raise ValidationError({
                         'end_dt': 'End date/time must be after start date/time'
                     })
+            
+            # Validate job span to prevent runaway multi-day expansion
+            span_days = (self.end_dt - self.start_dt).days
+            if span_days > MAX_JOB_SPAN_DAYS:
+                raise ValidationError({
+                    'end_dt': f'Job cannot span more than {MAX_JOB_SPAN_DAYS} days. Current span: {span_days} days.'
+                })
         
         # Validate repeat settings
         if self.repeat_type == 'monthly' and self.repeat_n_months:
@@ -705,15 +728,15 @@ class WorkOrderLine(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(qty__gte=0),
+                condition=models.Q(qty__gte=0),
                 name='work_order_line_qty_non_negative'
             ),
             models.CheckConstraint(
-                check=models.Q(rate__gte=0),
+                condition=models.Q(rate__gte=0),
                 name='work_order_line_rate_non_negative'
             ),
             models.CheckConstraint(
-                check=models.Q(total__gte=0),
+                condition=models.Q(total__gte=0),
                 name='work_order_line_total_non_negative'
             ),
         ]
@@ -1050,15 +1073,15 @@ class InvoiceLine(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(qty__gt=0),
+                condition=models.Q(qty__gt=0),
                 name='invoice_line_positive_qty'
             ),
             models.CheckConstraint(
-                check=models.Q(price__gte=0),
+                condition=models.Q(price__gte=0),
                 name='invoice_line_non_negative_price'
             ),
             models.CheckConstraint(
-                check=models.Q(total__gte=0),
+                condition=models.Q(total__gte=0),
                 name='invoice_line_non_negative_total'
             ),
         ]
