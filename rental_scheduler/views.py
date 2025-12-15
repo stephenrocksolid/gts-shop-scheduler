@@ -38,6 +38,7 @@ from rental_scheduler.utils.events import (
     get_call_reminder_sunday,
     normalize_event_datetimes,
 )
+from rental_scheduler.utils.phone import format_phone
 
 from .forms import CalendarImportForm, JobForm, WorkOrderForm, WorkOrderLineForm
 from .models import Calendar, Invoice, Job, WorkOrder
@@ -565,19 +566,8 @@ def get_job_calendar_data(request):
         events = []
         
         for job in jobs:
-            # Format phone number to match dialog format: (123) 456-5875
-            phone_formatted = ""
-            if job.get_phone():
-                # Strip all non-digit characters first
-                phone_digits = ''.join(filter(str.isdigit, job.get_phone()))
-                if phone_digits:
-                    if len(phone_digits) == 10:
-                        phone_formatted = f"({phone_digits[:3]}) {phone_digits[3:6]}-{phone_digits[6:]}"
-                    else:
-                        phone_formatted = phone_digits
-                else:
-                    # If no digits found, use the original value
-                    phone_formatted = job.get_phone()
+            # Format phone number using shared formatter
+            phone_formatted = format_phone(job.get_phone()) if job.get_phone() else ""
             
             # Build the event title in format: Business Name (Contact Name) - Phone Number
             business_name = job.business_name or ""
