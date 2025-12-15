@@ -2,6 +2,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from .models import Job, WorkOrder, WorkOrderLine, Calendar, CallReminder
+from .utils.phone import format_phone
 
 
 class JobForm(forms.ModelForm):
@@ -48,7 +49,9 @@ class JobForm(forms.ModelForm):
             'phone': forms.TextInput(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
                 'type': 'tel',
-                'placeholder': '(555) 123-4567'
+                'placeholder': '555-123-4567',
+                'inputmode': 'numeric',
+                'maxlength': '14',
             }),
             'address_line1': forms.TextInput(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
@@ -122,26 +125,14 @@ class JobForm(forms.ModelForm):
                 self.fields[field_name].label = f"{self.fields[field_name].label} *"
     
     def clean_phone(self):
-        """Clean and format phone number"""
+        """Clean and format phone number using shared formatter."""
         phone = self.cleaned_data.get('phone', '')
-        if phone:
-            # Remove all non-digit characters
-            phone_digits = ''.join(filter(str.isdigit, phone))
-            if len(phone_digits) == 10:
-                # Format as (XXX) XXX-XXXX
-                return f"({phone_digits[:3]}) {phone_digits[3:6]}-{phone_digits[6:]}"
-            elif len(phone_digits) == 11 and phone_digits[0] == '1':
-                # Format as 1 (XXX) XXX-XXXX
-                return f"1 ({phone_digits[1:4]}) {phone_digits[4:7]}-{phone_digits[7:]}"
-        return phone
-    
-    # Date validation constants
-    MIN_VALID_YEAR = 2000
-    MAX_VALID_YEAR = 2100
-    MAX_JOB_SPAN_DAYS = 365  # Maximum allowed job span (can be overridden)
+        return format_phone(phone)
     
     def clean(self):
         """Validate the form data"""
+        from rental_scheduler.constants import MIN_VALID_YEAR, MAX_VALID_YEAR, MAX_JOB_SPAN_DAYS
+        
         cleaned_data = super().clean()
         start_dt = cleaned_data.get('start_dt')
         end_dt = cleaned_data.get('end_dt')
@@ -158,16 +149,16 @@ class JobForm(forms.ModelForm):
         # Validate year ranges to prevent data corruption
         if start_dt:
             start_year = start_dt.year
-            if start_year < self.MIN_VALID_YEAR or start_year > self.MAX_VALID_YEAR:
+            if start_year < MIN_VALID_YEAR or start_year > MAX_VALID_YEAR:
                 raise ValidationError({
-                    'start_dt': f'Year must be between {self.MIN_VALID_YEAR} and {self.MAX_VALID_YEAR}'
+                    'start_dt': f'Year must be between {MIN_VALID_YEAR} and {MAX_VALID_YEAR}'
                 })
         
         if end_dt:
             end_year = end_dt.year
-            if end_year < self.MIN_VALID_YEAR or end_year > self.MAX_VALID_YEAR:
+            if end_year < MIN_VALID_YEAR or end_year > MAX_VALID_YEAR:
                 raise ValidationError({
-                    'end_dt': f'Year must be between {self.MIN_VALID_YEAR} and {self.MAX_VALID_YEAR}'
+                    'end_dt': f'Year must be between {MIN_VALID_YEAR} and {MAX_VALID_YEAR}'
                 })
         
         # Validate that end date is after (or equal for all-day events) start date
@@ -187,9 +178,9 @@ class JobForm(forms.ModelForm):
             
             # Validate job span to prevent runaway multi-day expansion
             span_days = (end_dt - start_dt).days
-            if span_days > self.MAX_JOB_SPAN_DAYS:
+            if span_days > MAX_JOB_SPAN_DAYS:
                 raise ValidationError({
-                    'end_dt': f'Job cannot span more than {self.MAX_JOB_SPAN_DAYS} days. Current span: {span_days} days.'
+                    'end_dt': f'Job cannot span more than {MAX_JOB_SPAN_DAYS} days. Current span: {span_days} days.'
                 })
         
         return cleaned_data

@@ -13,12 +13,7 @@ from datetime import datetime, date
 
 from rental_scheduler.models import Job, Calendar
 from rental_scheduler.utils.events import normalize_event_datetimes
-
-
-# Date validation constants (match Job model)
-MIN_VALID_YEAR = 2000
-MAX_VALID_YEAR = 2100
-MAX_JOB_SPAN_DAYS = 365
+from rental_scheduler.constants import MIN_VALID_YEAR, MAX_VALID_YEAR, MAX_JOB_SPAN_DAYS
 
 
 def validate_job_dates(start_dt, end_dt):

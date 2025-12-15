@@ -25,3 +25,11 @@ waitress==3.0.2
 weasyprint==66.0
 webencodings==0.5.1
 zopfli==0.2.3.post1
+
+# Testing dependencies
+pytest>=8.0.0
+pytest-django>=4.8.0
+pytest-cov>=4.1.0
+model-bakery>=1.18.0
+playwright>=1.40.0
+pytest-playwright>=0.4.4

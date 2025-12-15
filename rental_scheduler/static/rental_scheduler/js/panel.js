@@ -757,20 +757,31 @@
 
   // ==========================================================================
   // DATE VALIDATION GUARDRAILS
-  // Warn users about far-future dates or very long job spans
+  // Values come from server (constants.py) via window.calendarConfig.guardrails
+  // Fallbacks provided in case calendarConfig is not yet loaded
   // ==========================================================================
-  const DATE_GUARDRAILS = {
-    MAX_DAYS_IN_FUTURE: 365,  // Warn if start/end is more than this many days in the future
-    MAX_JOB_SPAN_DAYS: 60,    // Warn if job spans more than this many days
-    MIN_VALID_YEAR: 2000,     // Reject years before this
-    MAX_VALID_YEAR: 2100,     // Reject years after this
-  };
+  function getGuardrails() {
+    const serverGuardrails = window.calendarConfig?.guardrails || {};
+    return {
+      // UX warning thresholds (from server)
+      MAX_DAYS_IN_FUTURE: serverGuardrails.warnDaysInFuture || 365,
+      MAX_JOB_SPAN_DAYS: serverGuardrails.warnJobSpanDays || 60,
+      // Hard validation limits (from server)
+      MIN_VALID_YEAR: serverGuardrails.minValidYear || 2000,
+      MAX_VALID_YEAR: serverGuardrails.maxValidYear || 2100,
+    };
+  }
+  // Convenience alias for immediate use (re-evaluated each call for late-loading config)
+  const DATE_GUARDRAILS = getGuardrails();
 
   /**
    * Validate job date inputs before form submission
    * Returns true if validation passes (or user confirms), false to cancel submission
    */
   function validateJobDates(form) {
+    // Get fresh guardrails each call (in case config was loaded late)
+    const guardrails = getGuardrails();
+
     const startInput = form.querySelector('input[name="start_dt"]');
     const endInput = form.querySelector('input[name="end_dt"]');
 
@@ -804,28 +815,28 @@
     const startYear = startDate.getFullYear();
     const endYear = endDate.getFullYear();
 
-    if (startYear < DATE_GUARDRAILS.MIN_VALID_YEAR || startYear > DATE_GUARDRAILS.MAX_VALID_YEAR) {
-      alert(`Invalid start year: ${startYear}. Please enter a year between ${DATE_GUARDRAILS.MIN_VALID_YEAR} and ${DATE_GUARDRAILS.MAX_VALID_YEAR}.`);
+    if (startYear < guardrails.MIN_VALID_YEAR || startYear > guardrails.MAX_VALID_YEAR) {
+      alert(`Invalid start year: ${startYear}. Please enter a year between ${guardrails.MIN_VALID_YEAR} and ${guardrails.MAX_VALID_YEAR}.`);
       startInput.focus();
       return false;
     }
 
-    if (endYear < DATE_GUARDRAILS.MIN_VALID_YEAR || endYear > DATE_GUARDRAILS.MAX_VALID_YEAR) {
-      alert(`Invalid end year: ${endYear}. Please enter a year between ${DATE_GUARDRAILS.MIN_VALID_YEAR} and ${DATE_GUARDRAILS.MAX_VALID_YEAR}.`);
+    if (endYear < guardrails.MIN_VALID_YEAR || endYear > guardrails.MAX_VALID_YEAR) {
+      alert(`Invalid end year: ${endYear}. Please enter a year between ${guardrails.MIN_VALID_YEAR} and ${guardrails.MAX_VALID_YEAR}.`);
       endInput.focus();
       return false;
     }
 
     // Check for far-future scheduling
     const daysUntilStart = Math.floor((startDate - today) / (1000 * 60 * 60 * 24));
-    if (daysUntilStart > DATE_GUARDRAILS.MAX_DAYS_IN_FUTURE) {
-      warnings.push(`The start date is ${daysUntilStart} days in the future (more than ${DATE_GUARDRAILS.MAX_DAYS_IN_FUTURE} days).`);
+    if (daysUntilStart > guardrails.MAX_DAYS_IN_FUTURE) {
+      warnings.push(`The start date is ${daysUntilStart} days in the future (more than ${guardrails.MAX_DAYS_IN_FUTURE} days).`);
     }
 
     // Check for very long job span
     const spanDays = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
-    if (spanDays > DATE_GUARDRAILS.MAX_JOB_SPAN_DAYS) {
-      warnings.push(`This job spans ${spanDays} days (more than ${DATE_GUARDRAILS.MAX_JOB_SPAN_DAYS} days).`);
+    if (spanDays > guardrails.MAX_JOB_SPAN_DAYS) {
+      warnings.push(`This job spans ${spanDays} days (more than ${guardrails.MAX_JOB_SPAN_DAYS} days).`);
     }
 
     // If there are warnings, ask for confirmation
