@@ -1,117 +1,183 @@
-# GTS Rental Scheduler
+# GTS Shop Scheduler
 
-A Django-based rental scheduling system with a modern UI powered by TailwindCSS and HTMX.
+A Django app for scheduling and managing shop/rental jobs. The UI uses TailwindCSS, and the calendar experience is driven by JavaScript in `rental_scheduler/static/`.
+
+## Tech stack
+
+- **Backend**: Django (`gts_django/`, app: `rental_scheduler/`)
+- **Database**: SQLite by default (dev) + optional PostgreSQL
+- **Frontend**: TailwindCSS (build/watch via npm)
 
 ## Prerequisites
 
-- Python 3.x
-- Node.js and npm
-- PostgreSQL
+- **Python**: 3.x
+- **Node.js**: recent LTS recommended (needed for Tailwind builds)
+- **Database**:
+  - Default: **SQLite** (no extra setup)
+  - Optional: PostgreSQL (if you choose to wire it up)
 
 ## Setup
 
-### 1. Clone the Repository
+### 1) Clone
 
 ```bash
 git clone https://github.com/joshuarocksolid/gts-rental-scheduler.git
-cd gts-rental-scheduler
+cd gts-shop-scheduler
 ```
 
-### 2. Python Environment Setup
-
-Create and activate a virtual environment:
+### 2) Python venv + dependencies
 
 ```bash
-# Windows
+# Windows (PowerShell)
 python -m venv env
-env\Scripts\activate
+.\env\Scripts\Activate.ps1
 
-# Unix/MacOS
-python -m venv env
-source env/bin/activate
-```
-
-Install Python dependencies:
-```bash
 pip install -r requirements.txt
 ```
 
-### 3. JavaScript Dependencies
+### 3) Frontend deps + CSS build
 
-Install Node.js dependencies:
 ```bash
 npm install
-```
 
-Build the CSS:
-```bash
-# For one-time build
+# one-time build
 npm run build
 
-# For development with watch mode
+# watch during development
 npm run watch
 ```
 
-### 4. Environment Variables
+### 4) Environment variables
 
-Create a `.env` file in the root directory with the following variables:
-```env
-DEBUG=True
-SECRET_KEY=your_secret_key
-DATABASE_URL=postgres://user:password@localhost:5432/database_name
+Copy the example env file and adjust as needed:
+
+```bash
+# Windows (PowerShell)
+Copy-Item .\env_example.txt .\.env
 ```
 
-### 5. Database Setup
+Key env vars (see `env_example.txt`):
+- **`SECRET_KEY`**: set for local dev
+- **`TIME_ZONE`**: defaults to `America/New_York` if not set
+- **`OPENAI_API_KEY`**: optional (used for AI parsing features)
+
+### 5) Database setup (SQLite default)
 
 ```bash
 python manage.py migrate
 python manage.py createsuperuser
 ```
 
-## Running the Application
+## Running the app
 
-1. Start the Django development server:
+### Development (recommended)
+
 ```bash
 python manage.py runserver
 ```
 
-2. In a separate terminal, run the TailwindCSS watcher for development:
+Then open `http://127.0.0.1:8000/`.
+
+Keep Tailwind running in another terminal during UI work:
+
 ```bash
 npm run watch
 ```
 
-3. Access the application at `http://localhost:8000`
+### Waitress (simple production-style run)
 
-## Key Features
+This repo includes `serve.py` which runs the WSGI app with Waitress on port 8000:
 
-- Rental scheduling and management
-- Modern UI with TailwindCSS
-- Interactive features using HTMX
-- PostgreSQL database backend
-- Excel file handling with pandas
-- PDF generation with WeasyPrint
+```bash
+python serve.py
+```
 
-## Project Structure
+## Project structure (high level)
 
-- `rental_scheduler/` - Main Django app
-- `static/` - Static files (CSS, JS)
-- `templates/` - HTML templates
-- `requirements.txt` - Python dependencies
-- `package.json` - Node.js dependencies
+- `gts_django/`: Django project (settings/urls/wsgi)
+- `rental_scheduler/`: main Django app (models/views/forms/templates/static)
+- `rental_scheduler/tests/`: pytest-based Django/unit/integration tests
+- `tests/e2e/`: Playwright E2E smoke tests (browser tests)
+- `src/css/`: Tailwind input CSS
+- `rental_scheduler/static/rental_scheduler/css/`: built CSS output
 
-## Development
+## Testing
 
-- CSS styling is managed through TailwindCSS
-- Run `npm run watch` during development to automatically compile CSS changes
-- Python dependencies should be added to `requirements.txt`
-- JavaScript dependencies should be managed through `package.json`
+This repo uses **pytest** (with `pytest-django`). By default, pytest will discover tests under:
+- `rental_scheduler/tests/`
+- `tests/` (includes `tests/e2e/`)
+
+### Run unit/integration tests (pytest)
+
+Run everything:
+
+```bash
+pytest
+```
+
+Run a single file:
+
+```bash
+pytest rental_scheduler/tests/test_job_phone_formatting.py -v
+```
+
+Run by keyword:
+
+```bash
+pytest -k phone -v
+```
+
+### Coverage
+
+```bash
+pytest --cov=rental_scheduler --cov-report=term-missing
+```
+
+### Run E2E (Playwright)
+
+E2E tests live under `tests/e2e/` and are designed to run against an **already-running** Django server.
+
+One-time browser install:
+
+```bash
+python -m playwright install
+```
+
+Terminal 1 (start the server):
+
+```bash
+python manage.py runserver
+```
+
+Terminal 2 (run E2E tests):
+
+```bash
+# PowerShell
+$env:DJANGO_ALLOW_ASYNC_UNSAFE="true"
+pytest tests/e2e -v
+```
+
+Optional: point E2E tests at a different server URL:
+
+```bash
+# PowerShell
+$env:BASE_URL="http://127.0.0.1:8000"
+pytest tests/e2e -v
+```
+
+Note: the E2E fixtures document the same approach in `tests/e2e/conftest.py`.
+
+## Development notes
+
+- **CSS**: Tailwind output is generated via `npm run build` / `npm run watch` (see `package.json`).
+- **DB**: Defaults to SQLite (`db.sqlite3`). PostgreSQL is not enabled by default; if you enable it, update Django DB settings accordingly.
 
 ## Contributing
 
-1. Create a new branch for your feature
-2. Make your changes
-3. Submit a pull request
+1. Create a feature branch
+2. Make changes + add tests where appropriate
+3. Open a pull request
 
 ## License
 
-ISC License 
+ISC License
