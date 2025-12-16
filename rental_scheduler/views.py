@@ -186,6 +186,10 @@ class JobListView(ListView):
         elif date_filter == 'future':
             now = timezone.now()
             queryset = queryset.filter(start_dt__gte=now)
+        elif date_filter == 'two_years':
+            now = timezone.now()
+            two_years_from_now = now + timedelta(days=730)  # 2 years = 730 days
+            queryset = queryset.filter(start_dt__gte=now, start_dt__lte=two_years_from_now)
         
         # Unified search across multiple fields with word-based matching
         search = self.request.GET.get('search', '').strip()
@@ -195,6 +199,9 @@ class JobListView(ListView):
             
             # For each word, create a Q object that searches across all fields
             for word in search_words:
+                # Check if word contains digits (phone number search)
+                word_digits = ''.join(filter(str.isdigit, word))
+
                 word_query = models.Q(business_name__icontains=word) | \
                              models.Q(contact_name__icontains=word) | \
                              models.Q(phone__icontains=word) | \
@@ -207,13 +214,44 @@ class JobListView(ListView):
                              models.Q(trailer_details__icontains=word) | \
                              models.Q(notes__icontains=word) | \
                              models.Q(repair_notes__icontains=word)
+
+                # If word contains digits, also search phone field with digits only.
+                # This allows searching for "6208887050" to match "(620) 888-7050".
+                if word_digits and len(word_digits) >= 3:
+                    from django.db.models.functions import Replace
+
+                    queryset_with_stripped = queryset.annotate(
+                        phone_digits=Replace(
+                            Replace(
+                                Replace(
+                                    Replace(
+                                        Replace('phone', models.Value('('), models.Value('')),
+                                        models.Value(')'), models.Value('')
+                                    ),
+                                    models.Value(' '), models.Value('')
+                                ),
+                                models.Value('-'), models.Value('')
+                            ),
+                            models.Value('+'), models.Value('')
+                        )
+                    )
+                    word_query = word_query | models.Q(phone_digits__icontains=word_digits)
+                    queryset = queryset_with_stripped
                 
                 # Chain with AND logic - all words must match
                 queryset = queryset.filter(word_query)
         
         # Sorting
-        sort_by = self.request.GET.get('sort', '-start_dt')
-        sort_direction = self.request.GET.get('direction', 'desc')
+        # For two_years filter, default to ascending (soonest first) unless specified otherwise
+        if date_filter == 'two_years' and 'sort' not in self.request.GET:
+            default_sort = 'start_dt'
+            default_direction = 'asc'
+        else:
+            default_sort = '-start_dt'
+            default_direction = 'desc'
+
+        sort_by = self.request.GET.get('sort', default_sort)
+        sort_direction = self.request.GET.get('direction', default_direction)
         
         # Validate sort field
         allowed_sort_fields = {
@@ -226,14 +264,17 @@ class JobListView(ListView):
             'repeat_type': 'repeat_type',
         }
         
-        if sort_by in allowed_sort_fields:
-            sort_field = allowed_sort_fields[sort_by]
-            if sort_direction == 'desc':
+        if sort_by.lstrip('-') in allowed_sort_fields:
+            sort_field = allowed_sort_fields[sort_by.lstrip('-')]
+            if sort_direction == 'desc' or sort_by.startswith('-'):
                 sort_field = f'-{sort_field}'
             queryset = queryset.order_by(sort_field)
         else:
-            # Default sorting
-            queryset = queryset.order_by('-start_dt')
+            # Default sorting based on filter
+            if date_filter == 'two_years':
+                queryset = queryset.order_by('start_dt')
+            else:
+                queryset = queryset.order_by('-start_dt')
         
         return queryset
     
