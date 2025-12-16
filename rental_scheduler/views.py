@@ -1808,6 +1808,7 @@ def job_detail_api(request, pk):
         # Return job data
         return JsonResponse({
             'id': job.id,
+            'calendar_name': job.calendar.name if job.calendar_id else '',
             'business_name': job.business_name,
             'contact_name': job.contact_name,
             'phone': job.phone,
