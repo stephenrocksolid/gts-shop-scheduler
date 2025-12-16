@@ -1,4 +1,21 @@
-<tr class="hover:bg-gray-50 job-row" id="job-row-{{ job.id }}" data-job-id="{{ job.id }}">
+<tr class="hover:bg-gray-50 job-row" 
+    id="job-row-{{ job.id }}" 
+    data-job-id="{{ job.id }}"
+    data-job-title="{{ job.display_name }}"
+    data-calendar-name="{{ job.calendar.name }}"
+    data-start-date="{{ job.start_dt|date:'c' }}"
+    data-end-date="{{ job.end_dt|date:'c' }}"
+    data-all-day="{{ job.all_day|yesno:'true,false' }}"
+    data-business-name="{% if job.business %}{{ job.business.name }}{% endif %}"
+    data-contact-name="{% if job.contact %}{{ job.contact.first_name }} {{ job.contact.last_name }}{% endif %}"
+    data-phone="{{ job.get_phone }}"
+    data-trailer-details="{% if job.trailer %}{{ job.trailer.description }}{% endif %}"
+    data-trailer-color="{% if job.trailer %}{{ job.trailer.color }}{% endif %}"
+    data-trailer-serial="{% if job.trailer %}{{ job.trailer.serial_number }}{% endif %}"
+    data-repair-notes="{{ job.repair_notes|default:'' }}"
+    data-notes="{{ job.notes|default:'' }}"
+    data-status="{{ job.status }}"
+    data-is-recurring="{% if job.repeat_type != 'none' %}true{% else %}false{% endif %}">
     <td class="px-6 py-4 whitespace-nowrap">
         <div class="text-sm font-medium text-gray-900">{{ job.display_name }}</div>
         {% if job.get_phone %}

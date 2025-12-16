@@ -38,6 +38,11 @@
             const savedSearchPanelState = localStorage.getItem('gts-calendar-search-open');
             this.searchPanelOpen = savedSearchPanelState === 'true';
             
+            // Today sidebar state - default to open if not stored
+            const savedTodaySidebarState = localStorage.getItem('gts-calendar-today-sidebar-open');
+            this.todaySidebarOpen = savedTodaySidebarState === null ? true : savedTodaySidebarState === 'true';
+            this.applyTodaySidebarState(false);
+            
             // Initialize search panel state on page load
             if (this.searchPanelOpen) {
                 setTimeout(() => {
@@ -119,7 +124,7 @@
                 headerToolbar: {
                     left: 'prev title next',
                     center: '',
-                    right: 'searchButton jobsButton settingsButton'
+                    right: 'searchButton jobsButton settingsButton todaySidebarButton'
                 },
                 buttonText: {
                     today: 'Today'
@@ -133,7 +138,7 @@
                         buttonText: 'Month',
                         fixedWeekCount: false,
                         showNonCurrentDates: true,
-                        titleFormat: { month: 'short', day: 'numeric' },
+                        titleFormat: { month: 'short', day: 'numeric', year: 'numeric' },
                         titleRangeSeparator: ' – ',
                         displayEventEnd: true  // Show end time/date for multi-day events
                     }
@@ -156,6 +161,13 @@
                         text: 'Settings',
                         click: function() {
                             window.location.href = '/calendars/';
+                        }
+                    },
+                    todaySidebarButton: {
+                        text: '📅',
+                        hint: 'Toggle Today column',
+                        click: () => {
+                            this.toggleTodaySidebar();
                         }
                     },
                     calendarFilterButton: {
@@ -220,6 +232,9 @@
             
             // Style the custom buttons after render
             this.styleCustomButtons();
+            setTimeout(() => {
+                this.applyTodaySidebarState();
+            }, 0);
             
             // Ensure calendar content is visible
             setTimeout(() => {
@@ -2271,6 +2286,44 @@
         }
 
         /**
+         * Show tooltip for job row (from search results)
+         */
+        showJobRowTooltip(rowElement) {
+            // Extract data from row's data attributes
+            const data = rowElement.dataset;
+            
+            // Parse dates
+            const startDate = data.startDate ? new Date(data.startDate) : null;
+            const endDate = data.endDate ? new Date(data.endDate) : null;
+            const isAllDay = data.allDay === 'true';
+            
+            // Create a fake event object that matches the structure expected by showEventTooltip
+            const fakeEvent = {
+                title: data.jobTitle || '(No Title)',
+                start: startDate,
+                end: endDate,
+                allDay: isAllDay,
+                extendedProps: {
+                    calendar_name: data.calendarName,
+                    business_name: data.businessName,
+                    contact_name: data.contactName,
+                    phone: data.phone,
+                    trailer_details: data.trailerDetails,
+                    trailer_color: data.trailerColor,
+                    trailer_serial: data.trailerSerial,
+                    repair_notes: data.repairNotes,
+                    notes: data.notes,
+                    status: data.status,
+                    is_recurring_parent: data.isRecurring === 'true',
+                    is_multi_day: false  // Job rows show the full date range, not split days
+                }
+            };
+            
+            // Use the existing showEventTooltip method
+            this.showEventTooltip(fakeEvent, rowElement);
+        }
+
+        /**
          * Handle event mouse enter for tooltip
          */
         handleEventMouseEnter(info) {
@@ -3378,6 +3431,44 @@
                     this.forceEqualWeekHeights();
                 }
             }, 350);
+        }
+
+        /**
+         * Toggle Today sidebar visibility
+         */
+        toggleTodaySidebar() {
+            this.todaySidebarOpen = !this.todaySidebarOpen;
+            this.applyTodaySidebarState();
+            localStorage.setItem('gts-calendar-today-sidebar-open', this.todaySidebarOpen);
+
+            setTimeout(() => {
+                if (this.calendar) {
+                    this.calendar.updateSize();
+                    this.forceEqualWeekHeights();
+                }
+            }, 200);
+        }
+
+        /**
+         * Apply Today sidebar state to DOM and button
+         * @param {boolean} updateButton - whether to update the toggle button state
+         */
+        applyTodaySidebarState(updateButton = true) {
+            const todaySidebar = document.getElementById('todaySidebar');
+            if (todaySidebar) {
+                todaySidebar.classList.toggle('hidden', !this.todaySidebarOpen);
+            }
+
+            if (!updateButton) {
+                return;
+            }
+
+            const todayToggleButton = document.querySelector('.fc-todaySidebarButton-button');
+            if (todayToggleButton) {
+                todayToggleButton.setAttribute('aria-pressed', this.todaySidebarOpen ? 'true' : 'false');
+                todayToggleButton.classList.toggle('active', this.todaySidebarOpen);
+                todayToggleButton.title = this.todaySidebarOpen ? 'Hide Today column' : 'Show Today column';
+            }
         }
 
         /**

@@ -85,9 +85,59 @@ class RecurrenceGenerator:
         for i in range(1, count + 1):  # Start from 1 (parent is 0)
             # Calculate next occurrence
             if recurrence_type == 'monthly':
-                next_start = current_start + relativedelta(months=interval)
+                # Preserve the same weekday occurrence (e.g., 3rd Friday)
+                # Get the weekday and which occurrence it is
+                original_weekday = current_start.weekday()  # 0=Monday, 6=Sunday
+                original_date = current_start.date()
+                
+                # Calculate which occurrence of this weekday in the month
+                first_of_month = original_date.replace(day=1)
+                days_into_month = (original_date - first_of_month).days
+                occurrence = (days_into_month // 7) + 1
+                
+                # Calculate target month
+                target_month_date = current_start + relativedelta(months=interval)
+                target_year = target_month_date.year
+                target_month = target_month_date.month
+                
+                # Get timezone
+                tz = timezone.get_current_timezone() if timezone.is_aware(current_start) else None
+                
+                # Find the Nth occurrence of the same weekday in the target month
+                next_start = get_nth_weekday_of_month(
+                    target_year, 
+                    target_month, 
+                    original_weekday, 
+                    occurrence,
+                    current_start.time(),
+                    tz
+                )
+                
+                # If we couldn't find it (shouldn't happen with our fallback logic), use simple addition
+                if next_start is None:
+                    next_start = current_start + relativedelta(months=interval)
+                    
             elif recurrence_type == 'yearly':
-                next_start = current_start + relativedelta(years=interval)
+                # Preserve the same ISO week and weekday
+                # Get ISO calendar values (year, week, weekday)
+                iso_year, iso_week, iso_weekday = current_start.isocalendar()
+                
+                # Calculate target year
+                target_year = current_start.year + interval
+                
+                # Get timezone
+                tz = timezone.get_current_timezone() if timezone.is_aware(current_start) else None
+                
+                # Find the same weekday in the same ISO week of the target year
+                # Note: iso_weekday is 1-7 (Mon-Sun), but we need 0-6 for get_date_from_iso_week
+                next_start = get_date_from_iso_week(
+                    target_year,
+                    iso_week,
+                    iso_weekday - 1,  # Convert from 1-7 to 0-6
+                    current_start.time(),
+                    tz
+                )
+                
             elif recurrence_type == 'weekly':
                 next_start = current_start + timedelta(weeks=interval)
             elif recurrence_type == 'daily':
@@ -153,6 +203,11 @@ class RecurrenceGenerator:
             repeat_type='none',
             repeat_n_months=None,
             
+            # Copy call reminder settings
+            has_call_reminder=self.parent_job.has_call_reminder,
+            call_reminder_weeks_prior=self.parent_job.call_reminder_weeks_prior,
+            call_reminder_completed=False,  # Each instance starts with reminder not completed
+            
             # Copy job details
             notes=self.parent_job.notes,
             repair_notes=self.parent_job.repair_notes,
@@ -195,6 +250,28 @@ def create_recurring_instances(parent_job, count=None, until_date=None):
         for instance in instances:
             instance.save()
             created_instances.append(instance)
+            
+            # Create CallReminder if needed
+            if instance.has_call_reminder and instance.call_reminder_weeks_prior:
+                from rental_scheduler.models import CallReminder
+                from rental_scheduler.utils.events import get_call_reminder_sunday
+                
+                try:
+                    reminder_date = get_call_reminder_sunday(
+                        instance.start_dt, 
+                        instance.call_reminder_weeks_prior
+                    ).date()
+                    
+                    CallReminder.objects.create(
+                        job=instance,
+                        calendar=instance.calendar,
+                        reminder_date=reminder_date,
+                        notes='',
+                        completed=False
+                    )
+                    logger.debug(f"Created call reminder for recurring instance {instance.id} on {reminder_date}")
+                except Exception as e:
+                    logger.error(f"Error creating call reminder for instance {instance.id}: {str(e)}")
             
     logger.info(f"Created {len(created_instances)} recurring instances for job {parent_job.id}")
     return created_instances
@@ -314,6 +391,90 @@ def cancel_future_recurrences(parent_job, from_date):
         
     logger.info(f"Canceled {count} future instances for job {parent_job.id} from {from_date}")
     return count, True
+
+
+def get_nth_weekday_of_month(year, month, weekday, occurrence, time_obj, tz):
+    """
+    Find the Nth occurrence of a weekday in a given month.
+    
+    Args:
+        year: Target year
+        month: Target month (1-12)
+        weekday: Target weekday (0=Monday, 6=Sunday)
+        occurrence: Which occurrence (1=first, 2=second, etc.)
+        time_obj: Time to apply to the date (datetime.time object)
+        tz: Timezone to apply
+        
+    Returns:
+        datetime object with timezone, or None if occurrence doesn't exist
+    """
+    # Find the first day of the target month
+    first_day = datetime(year, month, 1)
+    
+    # Find the first occurrence of the target weekday
+    days_until_weekday = (weekday - first_day.weekday()) % 7
+    first_occurrence = first_day + timedelta(days=days_until_weekday)
+    
+    # Calculate the Nth occurrence
+    target_date = first_occurrence + timedelta(weeks=(occurrence - 1))
+    
+    # Check if the target date is still in the same month
+    if target_date.month != month:
+        # This occurrence doesn't exist in this month, use the last occurrence
+        target_date = target_date - timedelta(weeks=1)
+        
+        # Verify it's still in the correct month
+        if target_date.month != month:
+            return None
+    
+    # Combine date with time and apply timezone
+    result = datetime.combine(target_date.date(), time_obj)
+    if tz:
+        # Use replace() to set the timezone for zoneinfo compatibility
+        result = result.replace(tzinfo=tz)
+    
+    return result
+
+
+def get_date_from_iso_week(year, week, weekday, time_obj, tz):
+    """
+    Get a datetime from ISO year, week number, and weekday.
+    
+    Args:
+        year: Target ISO year
+        week: ISO week number (1-53)
+        weekday: ISO weekday (0=Monday, 6=Sunday)
+        time_obj: Time to apply to the date (datetime.time object)
+        tz: Timezone to apply
+        
+    Returns:
+        datetime object with timezone
+    """
+    # Use datetime.fromisocalendar() which properly handles ISO week dates
+    # ISO weekday: 1=Monday, 7=Sunday
+    iso_weekday = weekday + 1  # Convert from 0-6 to 1-7
+    if iso_weekday > 7:
+        iso_weekday = 7
+    
+    try:
+        # Create date from ISO year, week, and weekday
+        target_date = datetime.fromisocalendar(year, week, iso_weekday)
+    except ValueError:
+        # Week might not exist in this year (e.g., week 53 doesn't always exist)
+        # Fall back to the last week of the year
+        try:
+            target_date = datetime.fromisocalendar(year, 52, iso_weekday)
+        except ValueError:
+            # If even week 52 fails, use week 51
+            target_date = datetime.fromisocalendar(year, 51, iso_weekday)
+    
+    # Combine with time and apply timezone
+    result = datetime.combine(target_date.date(), time_obj)
+    if tz:
+        # Use replace() to set the timezone for zoneinfo compatibility
+        result = result.replace(tzinfo=tz)
+    
+    return result
 
 
 

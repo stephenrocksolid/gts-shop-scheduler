@@ -166,6 +166,10 @@ class JobListView(ListView):
         elif date_filter == 'future':
             now = timezone.now()
             queryset = queryset.filter(start_dt__gte=now)
+        elif date_filter == 'two_years':
+            now = timezone.now()
+            two_years_from_now = now + timezone.timedelta(days=730)  # 2 years = 730 days
+            queryset = queryset.filter(start_dt__gte=now, start_dt__lte=two_years_from_now)
         
         # Unified search across multiple fields with word-based matching
         search = self.request.GET.get('search', '').strip()
@@ -175,6 +179,10 @@ class JobListView(ListView):
             
             # For each word, create a Q object that searches across all fields
             for word in search_words:
+                # Check if word is numeric (phone number search)
+                word_digits = ''.join(filter(str.isdigit, word))
+                
+                # Build the base query
                 word_query = models.Q(business_name__icontains=word) | \
                              models.Q(contact_name__icontains=word) | \
                              models.Q(phone__icontains=word) | \
@@ -188,12 +196,46 @@ class JobListView(ListView):
                              models.Q(notes__icontains=word) | \
                              models.Q(repair_notes__icontains=word)
                 
+                # If word contains digits, also search phone field with digits only
+                # This allows searching for "6208887050" to match "(620) 888-7050"
+                if word_digits and len(word_digits) >= 3:
+                    # Use database functions to strip formatting from phone field
+                    from django.db.models.functions import Replace
+                    # Create a temporary annotated field with stripped phone
+                    queryset_with_stripped = queryset.annotate(
+                        phone_digits=Replace(
+                            Replace(
+                                Replace(
+                                    Replace(
+                                        Replace('phone', models.Value('('), models.Value('')),
+                                        models.Value(')'), models.Value('')
+                                    ),
+                                    models.Value(' '), models.Value('')
+                                ),
+                                models.Value('-'), models.Value('')
+                            ),
+                            models.Value('+'), models.Value('')
+                        )
+                    )
+                    # Add phone digit matching to the query
+                    word_query = word_query | models.Q(phone_digits__icontains=word_digits)
+                    # Update queryset to use the annotated version
+                    queryset = queryset_with_stripped
+                
                 # Chain with AND logic - all words must match
                 queryset = queryset.filter(word_query)
         
         # Sorting
-        sort_by = self.request.GET.get('sort', '-start_dt')
-        sort_direction = self.request.GET.get('direction', 'desc')
+        # For two_years filter, default to ascending (soonest first) unless specified otherwise
+        if date_filter == 'two_years' and 'sort' not in self.request.GET:
+            default_sort = 'start_dt'
+            default_direction = 'asc'
+        else:
+            default_sort = '-start_dt'
+            default_direction = 'desc'
+        
+        sort_by = self.request.GET.get('sort', default_sort)
+        sort_direction = self.request.GET.get('direction', default_direction)
         
         # Validate sort field
         allowed_sort_fields = {
@@ -206,14 +248,17 @@ class JobListView(ListView):
             'repeat_type': 'repeat_type',
         }
         
-        if sort_by in allowed_sort_fields:
-            sort_field = allowed_sort_fields[sort_by]
-            if sort_direction == 'desc':
+        if sort_by.lstrip('-') in allowed_sort_fields:
+            sort_field = allowed_sort_fields[sort_by.lstrip('-')]
+            if sort_direction == 'desc' or sort_by.startswith('-'):
                 sort_field = f'-{sort_field}'
             queryset = queryset.order_by(sort_field)
         else:
-            # Default sorting
-            queryset = queryset.order_by('-start_dt')
+            # Default sorting based on filter
+            if date_filter == 'two_years':
+                queryset = queryset.order_by('start_dt')
+            else:
+                queryset = queryset.order_by('-start_dt')
         
         return queryset
     
@@ -1485,16 +1530,42 @@ def job_create_submit(request):
                 return redirect('rental_scheduler:job_list')
             
             recurrence_type = request.POST.get('recurrence_type', 'monthly')
-            recurrence_interval = int(request.POST.get('recurrence_interval', 1))
-            recurrence_count = request.POST.get('recurrence_count')
-            recurrence_until = request.POST.get('recurrence_until')
-            
-            # Convert count to int if provided and validate
-            count = int(recurrence_count) if recurrence_count else None
-            if count and count > 500:
-                messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+            recurrence_interval_raw = request.POST.get('recurrence_interval', '1')
+            try:
+                recurrence_interval = int(recurrence_interval_raw)
+            except (TypeError, ValueError):
+                messages.error(request, 'Recurrence interval must be a whole number.')
                 return redirect('rental_scheduler:job_list')
-            until_date = recurrence_until if recurrence_until else None
+            
+            if recurrence_interval < 1:
+                messages.error(request, 'Recurrence interval must be at least 1.')
+                return redirect('rental_scheduler:job_list')
+            
+            recurrence_count_raw = request.POST.get('recurrence_count')
+            count = None
+            if recurrence_count_raw:
+                try:
+                    count = int(recurrence_count_raw)
+                except (TypeError, ValueError):
+                    messages.error(request, 'Recurrence count must be a whole number.')
+                    return redirect('rental_scheduler:job_list')
+                
+                if count < 1:
+                    messages.error(request, 'Recurrence count must be at least 1.')
+                    return redirect('rental_scheduler:job_list')
+                
+                if count > 500:
+                    messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+                    return redirect('rental_scheduler:job_list')
+            
+            recurrence_until_raw = request.POST.get('recurrence_until')
+            until_date = None
+            if recurrence_until_raw:
+                try:
+                    until_date = datetime.strptime(recurrence_until_raw, DATE_ONLY_FMT).date()
+                except ValueError:
+                    messages.error(request, 'Recurrence end date must be a valid date (YYYY-MM-DD).')
+                    return redirect('rental_scheduler:job_list')
             
             # Create recurrence rule
             job.create_recurrence_rule(

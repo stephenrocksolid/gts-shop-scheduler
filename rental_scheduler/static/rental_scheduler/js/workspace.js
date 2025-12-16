@@ -319,6 +319,7 @@
         createTab(job) {
             const tab = document.createElement('div');
             tab.className = 'workspace-tab';
+            tab.dataset.jobId = job.jobId; // Store job ID for tooltip
             
             // Add active/minimized state classes
             if (job.jobId === this.activeJobId && !job.isMinimized) {
@@ -352,6 +353,35 @@
             };
             tab.appendChild(closeBtn);
             
+            // Tooltip hover state
+            let tooltipTimeout = null;
+            
+            // Add hover handlers for tooltip
+            tab.addEventListener('mouseenter', (e) => {
+                // Don't show tooltip when hovering over close button
+                if (e.target === closeBtn || e.target.parentElement === closeBtn) {
+                    return;
+                }
+                
+                // Set a 500ms delay before showing the tooltip
+                tooltipTimeout = setTimeout(() => {
+                    this.showWorkspaceTabTooltip(job.jobId, tab);
+                }, 500);
+            });
+            
+            tab.addEventListener('mouseleave', () => {
+                // Clear the timeout if user stops hovering before delay completes
+                if (tooltipTimeout) {
+                    clearTimeout(tooltipTimeout);
+                    tooltipTimeout = null;
+                }
+                
+                // Hide the tooltip
+                if (window.jobCalendar) {
+                    window.jobCalendar.hideEventTooltip();
+                }
+            });
+            
             // Click to switch/restore
             tab.onclick = () => {
                 if (this.activeJobId === job.jobId && !job.isMinimized) {
@@ -376,6 +406,54 @@
             btn.title = 'Close all open jobs';
             btn.onclick = () => this.closeAll();
             return btn;
+        }
+        
+        /**
+         * Show tooltip for workspace tab by fetching job details
+         */
+        async showWorkspaceTabTooltip(jobId, tabElement) {
+            try {
+                // Fetch job details from API
+                const response = await fetch(`/api/jobs/${jobId}/detail/`);
+                if (!response.ok) {
+                    console.error('Failed to fetch job details');
+                    return;
+                }
+                
+                const jobData = await response.json();
+                
+                // Get the job's calendar info from the workspace
+                const job = this.openJobs.get(jobId);
+                
+                // Create a fake event object that matches the structure expected by showEventTooltip
+                const fakeEvent = {
+                    title: jobData.display_name || 'No Title',
+                    start: jobData.start_dt ? new Date(jobData.start_dt) : null,
+                    end: jobData.end_dt ? new Date(jobData.end_dt) : null,
+                    allDay: jobData.all_day || false,
+                    extendedProps: {
+                        calendar_name: '', // We don't have calendar name in workspace, but it's okay
+                        business_name: jobData.business_name || '',
+                        contact_name: jobData.contact_name || '',
+                        phone: jobData.phone || '',
+                        trailer_details: jobData.trailer_details || '',
+                        trailer_color: jobData.trailer_color || '',
+                        trailer_serial: jobData.trailer_serial || '',
+                        repair_notes: jobData.repair_notes || '',
+                        notes: jobData.notes || '',
+                        status: jobData.status || '',
+                        is_recurring_parent: false,
+                        is_multi_day: false
+                    }
+                };
+                
+                // Use the existing showEventTooltip method from JobCalendar
+                if (window.jobCalendar) {
+                    window.jobCalendar.showEventTooltip(fakeEvent, tabElement);
+                }
+            } catch (error) {
+                console.error('Error showing workspace tab tooltip:', error);
+            }
         }
         
         /**
