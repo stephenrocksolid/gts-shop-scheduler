@@ -2,244 +2,779 @@
 <form hx-post="{% url 'rental_scheduler:job_create_submit' %}"
       hx-swap="none"
       hx-on::after-request="if(event.detail.successful) { if(window.JobPanel) { if(window.JobPanel.clearUnsavedChanges) { window.JobPanel.clearUnsavedChanges(); } if(!window.JobPanel.isSwitchingJobs) { const currentJobId = window.JobPanel.currentJobId; if(currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(currentJobId)) { window.JobWorkspace.closeJob(currentJobId); } else { window.JobPanel.close(true); } } } if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
-      style="display: flex; flex-direction: column; gap: 8px;">
-  {% csrf_token %}
+      style="display: flex;
+             flex-direction: column;
+             gap: 8px">
+{% csrf_token %}
   {% if form.instance.pk %}
     <input type="hidden" name="job_id" value="{{ form.instance.pk }}">
   {% endif %}
-  
+
   {% if form.non_field_errors %}
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 4px; color: #dc2626; font-size: 12px;">
-      {{ form.non_field_errors }}
+    <div style="background: #fef2f2;
+                border: 1px solid #fecaca;
+                border-radius: 8px;
+                padding: 4px;
+                color: #dc2626;
+                font-size: 12px">
+    {{ form.non_field_errors }}
     </div>
   {% endif %}
-  
+
   <!-- Calendar Selection - Cloned to header but kept here for form submission -->
   <div id="calendar-field-container" style="display: none;">
     {{ form.calendar }}
   </div>
-  
+
   <!-- Customer Information Section -->
-  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+  <div style="background: #f8fafc;
+              border-radius: 12px;
+              border: 1px solid #e2e8f0;
+              overflow: hidden">
     <div style="padding: 8px;">
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label for="{{ form.business_name.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Business Name *</label>
-          <div style="flex: 1;">{{ form.business_name }}</div>
-          {% if form.business_name.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.business_name.errors.0 }}</p>{% endif %}
+          <label for="{{ form.business_name.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        min-width: 90px">
+Business Name *
+          </label>
+          <div style="flex: 1;">
+{{ form.business_name }}
+          </div>
+          {% if form.business_name.errors %}
+            <p style="color: #dc2626; font-size: 10px; margin: 0;">
+{{ form.business_name.errors.0 }}
+            </p>
+          {% endif %}
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label for="{{ form.contact_name.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Contact Name</label>
-          <div style="flex: 1;">{{ form.contact_name }}</div>
-          {% if form.contact_name.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.contact_name.errors.0 }}</p>{% endif %}
+          <label for="{{ form.contact_name.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        min-width: 90px">
+Contact Name
+          </label>
+          <div style="flex: 1;">
+{{ form.contact_name }}
+          </div>
+          {% if form.contact_name.errors %}
+            <p style="color: #dc2626; font-size: 10px; margin: 0;">
+{{ form.contact_name.errors.0 }}
+            </p>
+          {% endif %}
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label for="{{ form.phone.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Phone</label>
-          <div style="flex: 1;">{{ form.phone }}</div>
-          {% if form.phone.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.phone.errors.0 }}</p>{% endif %}
+          <label for="{{ form.phone.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        min-width: 90px">
+Phone
+          </label>
+          <div style="flex: 1;">
+{{ form.phone }}
+          </div>
+          {% if form.phone.errors %}
+            <p style="color: #dc2626; font-size: 10px; margin: 0;">
+{{ form.phone.errors.0 }}
+            </p>
+          {% endif %}
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label for="{{ form.date_call_received.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Date Call Received</label>
-          <input type="date" id="{{ form.date_call_received.id_for_label }}" name="{{ form.date_call_received.html_name }}" value="{{ form.date_call_received.value|date:'Y-m-d'|default:'' }}" style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px;">
-          {% if form.date_call_received.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.date_call_received.errors.0 }}</p>{% endif %}
+          <label for="{{ form.date_call_received.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        min-width: 90px">
+Date Call Received
+          </label>
+          <input type="date"
+                 id="{{ form.date_call_received.id_for_label }}"
+                 name="{{ form.date_call_received.html_name }}"
+                 value="{{ form.date_call_received.value|date:'Y-m-d'|default:'' }}"
+                 style="flex: 1;
+                        padding: 4px 8px;
+                        border: 1px solid #d1d5db;
+                        border-radius: 8px;
+                        font-size: 12px">
+          {% if form.date_call_received.errors %}
+            <p style="color: #dc2626; font-size: 10px; margin: 0;">
+{{ form.date_call_received.errors.0 }}
+            </p>
+          {% endif %}
         </div>
       </div>
     </div>
   </div>
 
   <!-- Schedule Information Section -->
-  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+  <div style="background: #f8fafc;
+              border-radius: 12px;
+              border: 1px solid #e2e8f0;">
     <div style="padding: 8px;">
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label style="font-weight: 600; color: #374151; display: flex; align-items: center; font-size: 12px; white-space: nowrap; margin: 0; min-width: 90px;">
-            <input type="checkbox" name="all_day" id="{{ form.all_day.id_for_label }}" 
-                   style="width: 14px; height: 14px; margin-right: 6px;"
-                   {% if not form.instance.pk or form.instance.all_day %}checked{% endif %}>
+          <label style="font-weight: 600;
+                        color: #374151;
+                        display: flex;
+                        align-items: center;
+                        font-size: 12px;
+                        white-space: nowrap;
+                        margin: 0;
+                        min-width: 90px">
+            <input type="checkbox"
+                   name="all_day"
+                   id="{{ form.all_day.id_for_label }}"
+                   style="width: 14px;
+                          height: 14px;
+                          margin-right: 6px"
+                   {% if not form.instance.pk or form.instance.all_day %}
+                     checked
+                   {% endif %}>
             All Day
           </label>
-          <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label for="{{ form.start_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap;">
-                Start *
-              </label>
-              <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
-                     name="start_dt" 
-                     id="{{ form.start_dt.id_for_label }}"
-                     value="{% if form.data.start_dt %}{{ form.data.start_dt }}{% elif form.instance.pk and form.instance.start_dt %}{{ form.instance.start_dt|date:'Y-m-d' }}{% else %}{{ form.initial.start_dt }}{% endif %}"
-                     required
-                     style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px;">
-              {% if form.start_dt.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.start_dt.errors.0 }}</p>{% endif %}
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label for="{{ form.end_dt.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap;">
-                End *
-              </label>
-              <input type="{% if not form.instance.pk or form.instance.all_day %}date{% else %}datetime-local{% endif %}" 
-                     name="end_dt" 
-                     id="{{ form.end_dt.id_for_label }}"
-                     value="{% if form.data.end_dt %}{{ form.data.end_dt }}{% elif form.instance.pk and form.instance.end_dt %}{{ form.instance.end_dt|date:'Y-m-d' }}{% else %}{{ form.initial.end_dt }}{% endif %}"
-                     required
-                     style="flex: 1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 12px;">
-              {% if form.end_dt.errors %}<p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.end_dt.errors.0 }}</p>{% endif %}
+          <div id="schedule-picker-container" style="flex: 1;">
+            <!-- Start/End fields with per-input flatpickr -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="{{ form.start_dt.id_for_label }}"
+                       style="font-weight: 600;
+                              color: #374151;
+                              margin: 0;
+                              font-size: 12px;
+                              white-space: nowrap">
+                  Start *
+                </label>
+                <input type="text"
+                       name="start_dt"
+                       id="{{ form.start_dt.id_for_label }}"
+                       value="{% if form.data.start_dt %}{{ form.data.start_dt }}{% elif form.instance.pk and form.instance.start_dt %}{% if form.instance.all_day %}{{ form.instance.start_dt|date:'Y-m-d' }}{% else %}{{ form.instance.start_dt|date:'Y-m-d\TH:i' }}{% endif %}{% else %}{{ form.initial.start_dt }}{% endif %}"
+                       required
+                       placeholder="Select date"
+                       style="flex: 1;
+                              padding: 4px 8px;
+                              border: 1px solid #d1d5db;
+                              border-radius: 8px;
+                              font-size: 12px;
+                              cursor: pointer;
+                              background: #fff;
+                              text-align: left;">
+                {% if form.start_dt.errors %}
+                  <p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.start_dt.errors.0 }}</p>
+                {% endif %}
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="{{ form.end_dt.id_for_label }}"
+                       style="font-weight: 600;
+                              color: #374151;
+                              margin: 0;
+                              font-size: 12px;
+                              white-space: nowrap">
+                  End *
+                </label>
+                <input type="text"
+                       name="end_dt"
+                       id="{{ form.end_dt.id_for_label }}"
+                       value="{% if form.data.end_dt %}{{ form.data.end_dt }}{% elif form.instance.pk and form.instance.end_dt %}{% if form.instance.all_day %}{{ form.instance.end_dt|date:'Y-m-d' }}{% else %}{{ form.instance.end_dt|date:'Y-m-d\TH:i' }}{% endif %}{% else %}{{ form.initial.end_dt }}{% endif %}"
+                       required
+                       placeholder="Select date"
+                       style="flex: 1;
+                              padding: 4px 8px;
+                              border: 1px solid #d1d5db;
+                              border-radius: 8px;
+                              font-size: 12px;
+                              cursor: pointer;
+                              background: #fff;
+                              text-align: left;">
+                {% if form.end_dt.errors %}
+                  <p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.end_dt.errors.0 }}</p>
+                {% endif %}
+              </div>
             </div>
           </div>
         </div>
         <!-- Call Reminder and Recurring Event in 2 columns -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
           <!-- Call Reminder Section -->
-          <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 6px;">
-            <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; color: #374151; margin-bottom: 6px; cursor: pointer; font-size: 12px;">
-              <input type="checkbox" id="call-reminder-enabled" name="has_call_reminder" style="width: 14px; height: 14px; accent-color: #f59e0b;" {% if form.instance.has_call_reminder %}checked{% endif %}>
-              <svg style="width: 14px; height: 14px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
+          <div style="background: #fef3c7;
+                      border: 1px solid #fcd34d;
+                      border-radius: 6px;
+                      padding: 6px">
+            <label style="display: flex;
+                          align-items: center;
+                          gap: 6px;
+                          font-weight: 600;
+                          color: #374151;
+                          margin-bottom: 6px;
+                          cursor: pointer;
+                          font-size: 12px">
+              <input type="checkbox"
+                     id="call-reminder-enabled"
+                     name="has_call_reminder"
+                     style="width: 14px;
+                            height: 14px;
+                            accent-color: #f59e0b"
+                     {% if form.instance.has_call_reminder %}
+                       checked
+                     {% endif %}>
+              <svg style="width: 14px;
+                          height: 14px;
+                          color: #f59e0b"
+                   fill="currentColor"
+                   viewBox="0 0 20 20">
+<path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z">
+</path>
               </svg>
               Set a call reminder for this job
             </label>
-            
-            <div id="call-reminder-options" class="{% if form.instance.has_call_reminder %}call-reminder-visible{% else %}call-reminder-hidden{% endif %}" style="display: flex; flex-direction: column; gap: 4px;">
+
+            <div id="call-reminder-options"
+                 class="{% if form.instance.has_call_reminder %}
+                          call-reminder-visible
+                        {% else %}
+                          call-reminder-hidden
+                        {% endif %}"
+                 style="display: flex;
+                        flex-direction: column;
+                        gap: 4px">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <label for="call-reminder-weeks" style="font-weight: 600; color: #374151; font-size: 12px; min-width: 80px;">Reminder:</label>
-                <select id="call-reminder-weeks" name="call_reminder_weeks_prior" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff; flex: 1;">
-                  <option value="2" {% if form.instance.call_reminder_weeks_prior == 2 or not form.instance.call_reminder_weeks_prior %}selected{% endif %}>1 week prior</option>
-                  <option value="3" {% if form.instance.call_reminder_weeks_prior == 3 %}selected{% endif %}>2 weeks prior</option>
+                <label for="call-reminder-weeks"
+                       style="font-weight: 600;
+                              color: #374151;
+                              font-size: 12px;
+                              min-width: 80px">
+Reminder:
+                </label>
+                <select id="call-reminder-weeks"
+                        name="call_reminder_weeks_prior"
+                        style="padding: 4px 8px;
+                               border: 1px solid #d1d5db;
+                               border-radius: 6px;
+                               font-size: 12px;
+                               background-color: #ffffff;
+                               flex: 1">
+                  <option value="2"
+                          {% if form.instance.call_reminder_weeks_prior == 2 or not form.instance.call_reminder_weeks_prior %}
+                            selected
+                          {% endif %}>
+1 week prior
+                  </option>
+                  <option value="3"
+                          {% if form.instance.call_reminder_weeks_prior == 3 %}
+                            selected
+                          {% endif %}>
+2 weeks prior
+                  </option>
                 </select>
               </div>
-              
+
               <div>
-                <label for="call-reminder-notes" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Call Reminder Notes</label>
-                <textarea id="call-reminder-notes" name="call_reminder_notes" rows="2" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; resize: vertical; font-family: inherit;" placeholder="Notes for this call reminder...">{{ call_reminder_notes }}</textarea>
+                <label for="call-reminder-notes"
+                       style="font-weight: 600;
+                              color: #374151;
+                              margin-bottom: 0;
+                              display: block;
+                              font-size: 12px">
+Call Reminder Notes
+                </label>
+                <textarea id="call-reminder-notes"
+                          name="call_reminder_notes"
+                          rows="2"
+                          style="width: 100%;
+                                 padding: 4px 8px;
+                                 border: 1px solid #d1d5db;
+                                 border-radius: 6px;
+                                 font-size: 12px;
+                                 resize: vertical;
+                                 font-family: inherit"
+                          placeholder="Notes for this call reminder...">{{ call_reminder_notes }}</textarea>
               </div>
-              
+
               {% if form.instance.pk and form.instance.has_call_reminder %}
-              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px; background-color: #f9fafb; border-radius: 4px; border: 1px solid #e5e7eb;">
-                <input type="checkbox" id="call-reminder-completed" name="call_reminder_completed" style="width: 14px; height: 14px; accent-color: #10b981;" {% if form.instance.call_reminder_completed %}checked{% endif %}>
-                <span style="font-size: 12px; color: #374151;">
-                  <svg style="width: 12px; height: 12px; display: inline-block; vertical-align: middle; margin-right: 3px; color: #10b981;" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                  </svg>
+                <label style="display: flex;
+                              align-items: center;
+                              gap: 6px;
+                              cursor: pointer;
+                              padding: 4px;
+                              background-color: #f9fafb;
+                              border-radius: 4px;
+                              border: 1px solid #e5e7eb">
+                  <input type="checkbox"
+                         id="call-reminder-completed"
+                         name="call_reminder_completed"
+                         style="width: 14px;
+                                height: 14px;
+                                accent-color: #10b981"
+                         {% if form.instance.call_reminder_completed %}
+                           checked
+                         {% endif %}>
+                  <span style="font-size: 12px; color: #374151;">
+                    <svg style="width: 12px;
+                                height: 12px;
+                                display: inline-block;
+                                vertical-align: middle;
+                                margin-right: 3px;
+                                color: #10b981"
+                         fill="currentColor"
+                         viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd">
+</path>
+                    </svg>
                   Call reminder completed
-                </span>
-              </label>
+                  </span>
+                </label>
               {% endif %}
             </div>
           </div>
-          
+
           <!-- Recurring Event Section -->
-          <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 6px;">
-            <label style="display: flex; align-items: center; gap: 6px; font-weight: 600; color: #374151; margin-bottom: 6px; cursor: pointer; font-size: 12px;">
-              <input type="checkbox" id="recurrence-enabled" name="recurrence_enabled" style="width: 14px; height: 14px; accent-color: #3b82f6;" {% if form.instance.pk %}{% if form.instance.recurrence_parent or form.instance.recurrence_rule %}checked{% endif %} {% if form.instance.recurrence_parent %}disabled{% endif %}{% endif %}>
-              <svg style="width: 14px; height: 14px; color: #f59e0b;" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+          <div style="background: #fef3c7;
+                      border: 1px solid #fcd34d;
+                      border-radius: 6px;
+                      padding: 6px">
+            <label style="display: flex;
+                          align-items: center;
+                          gap: 6px;
+                          font-weight: 600;
+                          color: #374151;
+                          margin-bottom: 6px;
+                          cursor: pointer;
+                          font-size: 12px">
+              <input type="checkbox"
+                     id="recurrence-enabled"
+                     name="recurrence_enabled"
+                     style="width: 14px;
+                            height: 14px;
+                            accent-color: #3b82f6"
+                     {% if form.instance.pk %}
+                       {% if form.instance.recurrence_parent or form.instance.recurrence_rule %}
+                         checked
+                       {% endif %}
+                     {% if form.instance.recurrence_parent %}
+                       disabled
+                     {% endif %}
+                     {% endif %}>
+              <svg style="width: 14px;
+                          height: 14px;
+                          color: #f59e0b"
+                   fill="currentColor"
+                   viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd">
+</path>
               </svg>
               Make this a recurring event
             </label>
-            
+
             {% if form.instance.pk and form.instance.recurrence_parent %}
-            <!-- For recurring instances, show info message -->
-            <div style="background: #e0f2fe; border: 1px solid #7dd3fc; border-radius: 4px; padding: 6px; margin-top: 4px;">
-              <p style="margin: 0; color: #0369a1; font-size: 12px;">
-                This is part of a recurring series. 
-                <a href="#" onclick="event.preventDefault(); JobPanel.load('{% url 'rental_scheduler:job_create_partial' %}?edit={{ form.instance.recurrence_parent.id }}');" style="text-decoration: underline; font-weight: 600;">Edit the entire series</a>
-              </p>
-            </div>
+              <!-- For recurring instances, show info message -->
+              <div style="background: #e0f2fe;
+                          border: 1px solid #7dd3fc;
+                          border-radius: 4px;
+                          padding: 6px;
+                          margin-top: 4px">
+                <p style="margin: 0; color: #0369a1; font-size: 12px;">
+                This is part of a recurring series.
+                  <a href="#"
+                     data-edit-series-url="{% url 'rental_scheduler:job_create_partial' %}?edit={{ form.instance.recurrence_parent.id }}"
+                     onclick="event.preventDefault(); JobPanel.load(this.dataset.editSeriesUrl);"
+                     style="text-decoration: underline;
+                            font-weight: 600">Edit the entire series</a>
+                </p>
+              </div>
             {% else %}
-            <div id="recurrence-options" class="{% if form.instance.pk and form.instance.recurrence_rule %}recurrence-visible{% else %}recurrence-hidden{% endif %}" style="grid-template-columns: 1fr 1fr; gap: 4px;">
-              <div>
-                <label for="recurrence-type" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Repeats</label>
-                <select id="recurrence-type" name="recurrence_type" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
-                  <option value="monthly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'monthly' %}selected{% endif %}>Monthly</option>
-                  <option value="yearly" {% if not form.instance.recurrence_rule or form.instance.recurrence_rule.type == 'yearly' %}selected{% endif %}>Yearly</option>
-                  <option value="weekly" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'weekly' %}selected{% endif %}>Weekly</option>
-                  <option value="daily" {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'daily' %}selected{% endif %}>Daily</option>
-                </select>
+              <div id="recurrence-options"
+                   class="{% if form.instance.pk and form.instance.recurrence_rule %}
+                            recurrence-visible
+                          {% else %}
+                            recurrence-hidden
+                          {% endif %}"
+                   style="grid-template-columns: 1fr 1fr;
+                          gap: 4px">
+                <div>
+                  <label for="recurrence-type"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Repeats
+                  </label>
+                  <select id="recurrence-type"
+                          name="recurrence_type"
+                          style="width: 100%;
+                                 padding: 4px 8px;
+                                 border: 1px solid #d1d5db;
+                                 border-radius: 6px;
+                                 font-size: 12px;
+                                 background-color: #ffffff">
+                    <option value="monthly"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'monthly' %}
+                              selected
+                            {% endif %}>
+Monthly
+                    </option>
+                    <option value="yearly"
+                            {% if not form.instance.recurrence_rule or form.instance.recurrence_rule.type == 'yearly' %}
+                              selected
+                            {% endif %}>
+Yearly
+                    </option>
+                    <option value="weekly"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'weekly' %}
+                              selected
+                            {% endif %}>
+Weekly
+                    </option>
+                    <option value="daily"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'daily' %}
+                              selected
+                            {% endif %}>
+Daily
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="recurrence-interval"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Every
+                  </label>
+                  <input type="number"
+                         id="recurrence-interval"
+                         name="recurrence_interval"
+                         min="1"
+                         max="12"
+                         value="{% if form.instance.recurrence_rule %}
+                                  {{ form.instance.recurrence_rule.interval|default:'1' }}
+                                {% else %}
+                                  1
+                                {% endif %}"
+                         style="width: 100%;
+                                padding: 4px 8px;
+                                border: 1px solid #d1d5db;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                background-color: #ffffff">
+                </div>
+
+                <div>
+                  <label for="recurrence-count"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Number of occurrences
+                  </label>
+                  <input type="number"
+                         id="recurrence-count"
+                         name="recurrence_count"
+                         min="1"
+                         max="500"
+                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}
+                                  {{ form.instance.recurrence_rule.count }}
+                                {% else %}
+                                  50
+                                {% endif %}"
+                         placeholder="50"
+                         style="width: 100%;
+                                padding: 4px 8px;
+                                border: 1px solid #d1d5db;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                background-color: #ffffff">
+                </div>
+
+                <div>
+                  <label for="recurrence-until"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Or end by date
+                  </label>
+                  <input type="date"
+                         id="recurrence-until"
+                         name="recurrence_until"
+                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}
+                                  {{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}
+                                {% endif %}"
+                         style="width: 100%;
+                                padding: 4px 8px;
+                                border: 1px solid #d1d5db;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                background-color: #ffffff">
+                </div>
               </div>
-              
-              <div>
-                <label for="recurrence-interval" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Every</label>
-                <input type="number" id="recurrence-interval" name="recurrence_interval" min="1" max="12" value="{% if form.instance.recurrence_rule %}{{ form.instance.recurrence_rule.interval|default:'1' }}{% else %}1{% endif %}" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
-              </div>
-              
-              <div>
-                <label for="recurrence-count" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Number of occurrences</label>
-                <input type="number" id="recurrence-count" name="recurrence_count" min="1" max="500" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}{{ form.instance.recurrence_rule.count }}{% else %}50{% endif %}" placeholder="50" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
-              </div>
-              
-              <div>
-                <label for="recurrence-until" style="font-weight: 600; color: #374151; margin-bottom: 0; display: block; font-size: 12px;">Or end by date</label>
-                <input type="date" id="recurrence-until" name="recurrence_until" value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}{% endif %}" style="width: 100%; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background-color: #ffffff;">
-              </div>
-            </div>
             {% endif %}
           </div>
         </div>
         <div style="display: flex; align-items: flex-start; gap: 8px;">
-          <label for="{{ form.notes.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap; padding-top: 4px;">General Notes</label>
-          <div style="flex: 1;">{{ form.notes }}</div>
+          <label for="{{ form.notes.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        white-space: nowrap;
+                        padding-top: 4px">
+General Notes
+          </label>
+          <div style="flex: 1;">
+{{ form.notes }}
+          </div>
         </div>
       </div>
     </div>
   </div>
 
   <!-- Trailer Information Section -->
-  <div style="background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden;">
+  <div style="background: #f8fafc;
+              border-radius: 12px;
+              border: 1px solid #e2e8f0;
+              overflow: hidden">
     <div style="padding: 8px;">
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <div style="display: flex; align-items: flex-start; gap: 8px;">
-          <label for="{{ form.trailer_details.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap; padding-top: 4px; min-width: 90px;">Trailer Description</label>
-          <div style="flex: 1;">{{ form.trailer_details }}</div>
+          <label for="{{ form.trailer_details.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        white-space: nowrap;
+                        padding-top: 4px;
+                        min-width: 90px">
+Trailer Description
+          </label>
+          <div style="flex: 1;">
+{{ form.trailer_details }}
+          </div>
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label for="{{ form.trailer_color.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Color</label>
-          <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <div>{{ form.trailer_color }}</div>
+          <label for="{{ form.trailer_color.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        min-width: 90px">
+Color
+          </label>
+          <div style="flex: 1;
+                      display: grid;
+                      grid-template-columns: 1fr 1fr;
+                      gap: 8px">
+            <div>
+{{ form.trailer_color }}
+            </div>
             <div style="display: flex; align-items: center; gap: 8px;">
-              <label for="{{ form.trailer_serial.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap;">Serial Number</label>
-              <div style="flex: 1;">{{ form.trailer_serial }}</div>
+              <label for="{{ form.trailer_serial.id_for_label }}"
+                     style="font-weight: 600;
+                            color: #374151;
+                            margin: 0;
+                            font-size: 12px;
+                            white-space: nowrap">
+Serial Number
+              </label>
+              <div style="flex: 1;">
+{{ form.trailer_serial }}
+              </div>
             </div>
           </div>
         </div>
         <div style="display: flex; align-items: flex-start; gap: 8px;">
-          <label for="{{ form.repair_notes.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap; padding-top: 4px; min-width: 90px;">Repair Notes</label>
-          <div style="flex: 1;">{{ form.repair_notes }}</div>
+          <label for="{{ form.repair_notes.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        white-space: nowrap;
+                        padding-top: 4px;
+                        min-width: 90px">
+Repair Notes
+          </label>
+          <div style="flex: 1;">
+{{ form.repair_notes }}
+          </div>
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <label for="{{ form.quote.id_for_label }}" style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; min-width: 90px;">Quote Amount</label>
-          <div style="flex: 1;">{{ form.quote }}</div>
+          <label for="{{ form.quote.id_for_label }}"
+                 style="font-weight: 600;
+                        color: #374151;
+                        margin: 0;
+                        font-size: 12px;
+                        min-width: 90px">
+Quote Amount
+          </label>
+          <div style="flex: 1;">
+{{ form.quote }}
+          </div>
         </div>
       </div>
     </div>
   </div>
 
   <!-- Action Buttons -->
-  <div style="display: flex; gap: 4px; justify-content: center; padding-top: 4px; flex-wrap: wrap;">
-    <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
+  <div style="display: flex;
+              gap: 4px;
+              justify-content: center;
+              padding-top: 4px;
+              flex-wrap: wrap">
+    <button type="button"
+            class="print-btn
+                   {% if not form.instance.pk %}
+                     btn-disabled
+                   {% endif %}"
+            data-job-id="{{ form.instance.pk|default:'0' }}"
+            data-print-type="wo"
+            style="padding: 4px 12px;
+                   border: 1px solid #d1d5db;
+                   border-radius: 6px;
+                   background: #ffffff;
+                   color: #374151;
+                   font-weight: 500;
+                   font-size: 12px;
+                   cursor: pointer;
+                   transition: all 0.2s"
+            {% if not form.instance.pk %}
+              disabled
+            {% endif %}>
       Print WO
     </button>
-    <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="wo-customer" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
+    <button type="button"
+            class="print-btn
+                   {% if not form.instance.pk %}
+                     btn-disabled
+                   {% endif %}"
+            data-job-id="{{ form.instance.pk|default:'0' }}"
+            data-print-type="wo-customer"
+            style="padding: 4px 12px;
+                   border: 1px solid #d1d5db;
+                   border-radius: 6px;
+                   background: #ffffff;
+                   color: #374151;
+                   font-weight: 500;
+                   font-size: 12px;
+                   cursor: pointer;
+                   transition: all 0.2s"
+            {% if not form.instance.pk %}
+              disabled
+            {% endif %}>
       Print Customer WO
     </button>
-    <button type="button" class="print-btn {% if not form.instance.pk %}btn-disabled{% endif %}" data-job-id="{{ form.instance.pk|default:'0' }}" data-print-type="invoice" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" {% if not form.instance.pk %}disabled{% endif %}>
+    <button type="button"
+            class="print-btn
+                   {% if not form.instance.pk %}
+                     btn-disabled
+                   {% endif %}"
+            data-job-id="{{ form.instance.pk|default:'0' }}"
+            data-print-type="invoice"
+            style="padding: 4px 12px;
+                   border: 1px solid #d1d5db;
+                   border-radius: 6px;
+                   background: #ffffff;
+                   color: #374151;
+                   font-weight: 500;
+                   font-size: 12px;
+                   cursor: pointer;
+                   transition: all 0.2s"
+            {% if not form.instance.pk %}
+              disabled
+            {% endif %}>
       Print Invoice
     </button>
-    <button type="button" onclick="JobPanel.close()" style="padding: 4px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #ffffff; color: #374151; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='#ffffff'">
+    <button type="button"
+            onclick="JobPanel.close()"
+            style="padding: 4px 12px;
+                   border: 1px solid #d1d5db;
+                   border-radius: 6px;
+                   background: #ffffff;
+                   color: #374151;
+                   font-weight: 500;
+                   font-size: 12px;
+                   cursor: pointer;
+                   transition: all 0.2s"
+            onmouseover="this.style.backgroundColor='#f9fafb'"
+            onmouseout="this.style.backgroundColor='#ffffff'">
       Cancel
     </button>
     {% if form.instance.pk and form.instance.status == 'completed' %}
-      <button type="button" class="uncomplete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 4px 12px; border: none; border-radius: 6px; background: #f59e0b; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#d97706'" onmouseout="this.style.backgroundColor='#f59e0b'">
-        Mark as Uncompleted
+      <button type="button"
+              class="uncomplete-btn"
+              data-job-id="{{ form.instance.pk }}"
+              style="padding: 4px 12px;
+                     border: none;
+                     border-radius: 6px;
+                     background: #f59e0b;
+                     color: #ffffff;
+                     font-weight: 500;
+                     font-size: 12px;
+                     cursor: pointer;
+                     transition: all 0.2s"
+              onmouseover="this.style.backgroundColor='#d97706'"
+              onmouseout="this.style.backgroundColor='#f59e0b'">
+      Mark as Uncompleted
       </button>
     {% elif form.instance.pk and form.instance.status == 'uncompleted' %}
-      <button type="button" class="complete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 4px 12px; border: none; border-radius: 6px; background: #16a34a; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#15803d'" onmouseout="this.style.backgroundColor='#16a34a'">
-        Mark as Complete
+      <button type="button"
+              class="complete-btn"
+              data-job-id="{{ form.instance.pk }}"
+              style="padding: 4px 12px;
+                     border: none;
+                     border-radius: 6px;
+                     background: #16a34a;
+                     color: #ffffff;
+                     font-weight: 500;
+                     font-size: 12px;
+                     cursor: pointer;
+                     transition: all 0.2s"
+              onmouseover="this.style.backgroundColor='#15803d'"
+              onmouseout="this.style.backgroundColor='#16a34a'">
+      Mark as Complete
       </button>
     {% endif %}
     {% if form.instance.pk %}
-      <button type="button" class="delete-btn" data-job-id="{{ form.instance.pk }}" style="padding: 4px 12px; border: none; border-radius: 6px; background: #dc2626; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#b91c1c'" onmouseout="this.style.backgroundColor='#dc2626'">
-        Delete
+      <button type="button"
+              class="delete-btn"
+              data-job-id="{{ form.instance.pk }}"
+              style="padding: 4px 12px;
+                     border: none;
+                     border-radius: 6px;
+                     background: #dc2626;
+                     color: #ffffff;
+                     font-weight: 500;
+                     font-size: 12px;
+                     cursor: pointer;
+                     transition: all 0.2s"
+              onmouseover="this.style.backgroundColor='#b91c1c'"
+              onmouseout="this.style.backgroundColor='#dc2626'">
+      Delete
       </button>
     {% endif %}
-    <button type="submit" style="padding: 4px 12px; border: none; border-radius: 6px; background: #3b82f6; color: #ffffff; font-weight: 500; font-size: 12px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='#3b82f6'">
+    <button type="submit"
+            style="padding: 4px 12px;
+                   border: none;
+                   border-radius: 6px;
+                   background: #3b82f6;
+                   color: #ffffff;
+                   font-weight: 500;
+                   font-size: 12px;
+                   cursor: pointer;
+                   transition: all 0.2s"
+            onmouseover="this.style.backgroundColor='#2563eb'"
+            onmouseout="this.style.backgroundColor='#3b82f6'">
       Save Job
     </button>
   </div>
@@ -259,19 +794,23 @@
     padding: 4px 8px !important;
     border-radius: 6px !important;
   }
-  
+
   .recurrence-visible {
     display: grid !important;
   }
+
   .recurrence-hidden {
     display: none !important;
   }
+
   .call-reminder-visible {
     display: flex !important;
   }
+
   .call-reminder-hidden {
     display: none !important;
   }
+
   .btn-disabled {
     opacity: 0.5;
     cursor: not-allowed !important;
@@ -280,34 +819,35 @@
 
 <script src="{% static 'rental_scheduler/js/all_day_toggle.js' %}"></script>
 <script src="{% static 'rental_scheduler/js/phone_mask.js' %}"></script>
+<script src="{% static 'rental_scheduler/js/schedule_picker.js' %}"></script>
 <script>
-  (function() {
+  (function () {
     // Clone calendar selector to panel header (keep original in form for submission)
     const calendarField = document.querySelector('#calendar-field-container select');
     const panelCalendarSelector = document.getElementById('panel-calendar-selector');
     const panelCalendarContainer = document.getElementById('panel-calendar-container');
-    
+
     if (calendarField && panelCalendarSelector && panelCalendarContainer) {
       // Clone the select element for the header (visual display)
       const clonedSelect = calendarField.cloneNode(true);
       clonedSelect.id = 'calendar-header-select';
       clonedSelect.removeAttribute('name'); // Remove name to avoid duplicate submission
-      
+
       // Clear any existing content in the selector container first
       panelCalendarSelector.innerHTML = '';
       // Add the cloned select to the header
       panelCalendarSelector.appendChild(clonedSelect);
-      
+
       // Add event listener to sync changes from header dropdown to original field
-      clonedSelect.addEventListener('change', function() {
+      clonedSelect.addEventListener('change', function () {
         // Update the original hidden field so it gets submitted with the form
         calendarField.value = this.value;
       });
-      
+
       // Show the container
       panelCalendarContainer.style.display = 'flex';
     }
-    
+
     // Function to initialize all toggles
     function initializeFormToggles() {
       // Try Tempus Dominus first
@@ -327,9 +867,9 @@
         const endDtInput = document.querySelector('input[name="end_dt"]');
         const startLabel = startDtInput?.previousElementSibling;
         const endLabel = endDtInput?.previousElementSibling;
-        
+
         if (!allDayCheckbox || !startDtInput || !endDtInput) return;
-        
+
         function toggleDateTimeInputs() {
           if (allDayCheckbox.checked) {
             // All Day = true → Use date-only inputs
@@ -337,10 +877,10 @@
             if (startDtInput.type !== 'date') {
               const startVal = startDtInput.value.split('T')[0] || '';
               const endVal = endDtInput.value.split('T')[0] || '';
-              
+
               startDtInput.type = 'date';
               endDtInput.type = 'date';
-              
+
               startDtInput.value = startVal;
               endDtInput.value = endVal;
             }
@@ -350,10 +890,10 @@
             if (startDtInput.type !== 'datetime-local') {
               const startVal = startDtInput.value;
               const endVal = endDtInput.value;
-              
+
               startDtInput.type = 'datetime-local';
               endDtInput.type = 'datetime-local';
-              
+
               // Add default times if we only have dates
               if (startVal && startVal.length === 10) {
                 startDtInput.value = startVal + 'T09:00';
@@ -364,7 +904,7 @@
             }
           }
         }
-        
+
         // Prevent duplicate listeners
         if (!allDayCheckbox._hasAllDayListener) {
           allDayCheckbox._hasAllDayListener = true;
@@ -374,12 +914,12 @@
         // Only call it on checkbox change events
       }
     }
-    
+
     // Set up call reminder toggle
     function setupCallReminderToggle() {
       const callReminderEnabled = document.getElementById('call-reminder-enabled');
       const callReminderOptions = document.getElementById('call-reminder-options');
-      
+
       if (callReminderEnabled && callReminderOptions) {
         function toggleCallReminderOptions() {
           if (callReminderEnabled.checked) {
@@ -390,24 +930,24 @@
             callReminderOptions.classList.add('call-reminder-hidden');
           }
         }
-        
+
         // Set initial state
         toggleCallReminderOptions();
-        
+
         // Prevent duplicate listeners
         if (callReminderEnabled._hasCallReminderListener) return;
         callReminderEnabled._hasCallReminderListener = true;
-        
+
         // Add change listener
         callReminderEnabled.addEventListener('change', toggleCallReminderOptions);
       }
     }
-    
+
     // Set up recurring event toggle
     function setupRecurrenceToggle() {
       const recurrenceEnabled = document.getElementById('recurrence-enabled');
       const recurrenceOptions = document.getElementById('recurrence-options');
-      
+
       if (recurrenceEnabled && recurrenceOptions) {
         function toggleRecurrenceOptions() {
           if (recurrenceEnabled.checked) {
@@ -418,38 +958,38 @@
             recurrenceOptions.classList.add('recurrence-hidden');
           }
         }
-        
+
         // Set initial state
         toggleRecurrenceOptions();
-        
+
         // Prevent duplicate listeners
         if (recurrenceEnabled._hasToggleListener) return;
         recurrenceEnabled._hasToggleListener = true;
-        
+
         // Add change listener
         recurrenceEnabled.addEventListener('change', toggleRecurrenceOptions);
       }
     }
-    
+
     // Function to initialize all form event handlers
     function initializeAllFormHandlers() {
       initializeFormToggles();
       setupCallReminderToggle();
       setupRecurrenceToggle();
     }
-    
+
     // Initial setup with delay
     setTimeout(initializeAllFormHandlers, 150);
-    
+
     // Re-initialize after HTMX content swaps (only attach these once)
     if (!window._formHandlersInitialized) {
       window._formHandlersInitialized = true;
-      
-      document.body.addEventListener('htmx:afterSwap', function() {
+
+      document.body.addEventListener('htmx:afterSwap', function () {
         setTimeout(initializeAllFormHandlers, 150);
       });
-      
-      document.body.addEventListener('htmx:load', function() {
+
+      document.body.addEventListener('htmx:load', function () {
         setTimeout(initializeAllFormHandlers, 150);
       });
     }
@@ -457,124 +997,124 @@
 
   // Get CSRF token from cookie (shared helper)
   function getCookie(name) {
-      const value = `; ${document.cookie}`;
-      const parts = value.split(`; ${name}=`);
-      if (parts.length === 2) return parts.pop().split(';').shift();
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
   }
 
   // Job status update function for panel
   function updateJobStatus(jobId, status) {
-      // Check if there's a form with unsaved changes
-      const form = document.querySelector('#job-panel form');
-      const hasUnsavedChanges = window.JobPanel && window.JobPanel.hasUnsavedChanges 
-          ? (typeof window.JobPanel.hasUnsavedChanges === 'function' 
-              ? window.JobPanel.hasUnsavedChanges() 
-              : false)
-          : false;
-      
-      // If there are unsaved changes and we have a form, save first
-      if (hasUnsavedChanges && form) {
-          console.log('Saving form before updating job status...');
-          
-          // Create a one-time listener for the save success
-          const handleAfterRequest = function(event) {
-              if (event.detail.successful) {
-                  console.log('Form saved, now updating job status...');
-                  document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
-                  
-                  // Clear unsaved changes tracking
-                  if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
-                      window.JobPanel.clearUnsavedChanges();
-                  }
-                  
-                  // Now update the status
-                  performStatusUpdate(jobId, status);
-              }
-          };
-          
-          document.body.addEventListener('htmx:afterRequest', handleAfterRequest);
-          
-          // Trigger form submission
-          htmx.trigger(form, 'submit');
-      } else {
-          // No unsaved changes, proceed directly
+    // Check if there's a form with unsaved changes
+    const form = document.querySelector('#job-panel form');
+    const hasUnsavedChanges = window.JobPanel && window.JobPanel.hasUnsavedChanges
+      ? (typeof window.JobPanel.hasUnsavedChanges === 'function'
+        ? window.JobPanel.hasUnsavedChanges()
+        : false)
+      : false;
+
+    // If there are unsaved changes and we have a form, save first
+    if (hasUnsavedChanges && form) {
+      console.log('Saving form before updating job status...');
+
+      // Create a one-time listener for the save success
+      const handleAfterRequest = function (event) {
+        if (event.detail.successful) {
+          console.log('Form saved, now updating job status...');
+          document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
+
+          // Clear unsaved changes tracking
+          if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
+            window.JobPanel.clearUnsavedChanges();
+          }
+
+          // Now update the status
           performStatusUpdate(jobId, status);
-      }
+        }
+      };
+
+      document.body.addEventListener('htmx:afterRequest', handleAfterRequest);
+
+      // Trigger form submission
+      htmx.trigger(form, 'submit');
+    } else {
+      // No unsaved changes, proceed directly
+      performStatusUpdate(jobId, status);
+    }
   }
-  
+
   // Helper function to perform the actual status update
   function performStatusUpdate(jobId, status) {
-      fetch(`/api/jobs/${jobId}/update-status/`, {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-              'X-CSRFToken': getCookie('csrftoken'),
-          },
-          body: JSON.stringify({
-              status: status
-          })
+    fetch(`/api/jobs/${jobId}/update-status/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify({
+        status: status
       })
+    })
       .then(response => response.json())
       .then(data => {
-          if (data.success) {
-              // Close panel without unsaved check (since we just saved)
-              if (window.JobPanel) {
-                  window.JobPanel.close(true); // true = skip unsaved check
-              }
-              // Refresh the calendar if it exists
-              if (typeof window.refreshCalendar === 'function') {
-                  window.refreshCalendar();
-              } else if (window.calendar && window.calendar.refetchEvents) {
-                  window.calendar.refetchEvents();
-              } else if (window.jobCalendar && window.jobCalendar.calendar) {
-                  window.jobCalendar.calendar.refetchEvents();
-              }
-          } else {
-              console.error('Failed to update job status:', data.error);
+        if (data.success) {
+          // Close panel without unsaved check (since we just saved)
+          if (window.JobPanel) {
+            window.JobPanel.close(true); // true = skip unsaved check
           }
+          // Refresh the calendar if it exists
+          if (typeof window.refreshCalendar === 'function') {
+            window.refreshCalendar();
+          } else if (window.calendar && window.calendar.refetchEvents) {
+            window.calendar.refetchEvents();
+          } else if (window.jobCalendar && window.jobCalendar.calendar) {
+            window.jobCalendar.calendar.refetchEvents();
+          }
+        } else {
+          console.error('Failed to update job status:', data.error);
+        }
       })
       .catch(error => {
-          console.error('Error updating job status:', error);
+        console.error('Error updating job status:', error);
       });
   }
 
   // Job delete function for panel
   function deleteJob(jobId) {
-      if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
-          fetch(`/api/jobs/${jobId}/delete/`, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'X-CSRFToken': getCookie('csrftoken'),
-              }
-          })
-          .then(response => response.json())
-          .then(data => {
-              if (data.success) {
-                  // Close panel and refresh calendar
-                  if (window.JobPanel) {
-                      window.JobPanel.close();
-                  }
-                  // Refresh the calendar if it exists
-                  if (typeof window.refreshCalendar === 'function') {
-                      window.refreshCalendar();
-                  } else if (window.calendar && window.calendar.refetchEvents) {
-                      window.calendar.refetchEvents();
-                  } else if (window.jobCalendar && window.jobCalendar.calendar) {
-                      window.jobCalendar.calendar.refetchEvents();
-                  }
-              } else {
-                  console.error('Failed to delete job:', data.error);
-              }
-          })
-          .catch(error => {
-              console.error('Error deleting job:', error);
-          });
-      }
+    if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
+      fetch(`/api/jobs/${jobId}/delete/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken'),
+        }
+      })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            // Close panel and refresh calendar
+            if (window.JobPanel) {
+              window.JobPanel.close();
+            }
+            // Refresh the calendar if it exists
+            if (typeof window.refreshCalendar === 'function') {
+              window.refreshCalendar();
+            } else if (window.calendar && window.calendar.refetchEvents) {
+              window.calendar.refetchEvents();
+            } else if (window.jobCalendar && window.jobCalendar.calendar) {
+              window.jobCalendar.calendar.refetchEvents();
+            }
+          } else {
+            console.error('Failed to delete job:', data.error);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting job:', error);
+        });
+    }
   }
 
   // Print button handlers using event delegation and hidden iframe
-  (function() {
+  (function () {
     // Only set up once globally
     if (window._printHandlerInitialized) {
       console.log('Print handler already initialized, skipping');
@@ -585,40 +1125,40 @@
     // Function to handle printing via iframe
     function printViaIframe(url) {
       console.log('Print via iframe:', url);
-      
+
       // Close the Job Panel before printing
       if (window.JobPanel) {
         window.JobPanel.close();
       }
-      
+
       // Remove any existing iframe
       let oldFrame = document.getElementById('printFrame');
       if (oldFrame) {
         oldFrame.remove();
       }
-      
+
       // Create a fresh iframe for each print job
       const printFrame = document.createElement('iframe');
       printFrame.id = 'printFrame';
       printFrame.style.cssText = 'position:absolute;width:0;height:0;border:none;';
       document.body.appendChild(printFrame);
-      
+
       // Add cache-busting parameter
       const fullUrl = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
-      
+
       console.log('Loading URL:', fullUrl);
-      
+
       // Use a different approach - set up onload then load the URL
       let loadAttempted = false;
-      printFrame.onload = function() {
+      printFrame.onload = function () {
         // Prevent multiple calls
         if (loadAttempted) return;
         loadAttempted = true;
-        
+
         console.log('Iframe loaded, attempting to print...');
-        
+
         // Wait a bit for the content to fully render
-        setTimeout(function() {
+        setTimeout(function () {
           try {
             const iframeWindow = printFrame.contentWindow || printFrame.contentDocument.defaultView;
             if (iframeWindow) {
@@ -635,17 +1175,17 @@
           }
         }, 500);
       };
-      
+
       // Small delay before loading to ensure iframe is ready
-      setTimeout(function() {
+      setTimeout(function () {
         printFrame.src = fullUrl;
       }, 50);
     }
-    
+
     // Function to save job form and then print
     function saveJobThenPrint(form, jobId, printType) {
       console.log('Saving job form before printing...');
-      
+
       // Show loading state on the print button
       const printBtn = document.querySelector(`[data-print-type="${printType}"]`);
       const originalText = printBtn ? printBtn.textContent : '';
@@ -653,45 +1193,45 @@
         printBtn.textContent = 'Saving...';
         printBtn.disabled = true;
       }
-      
+
       // Get the form action URL
       const hxPost = form.getAttribute('hx-post');
-      
+
       if (hxPost) {
         // Define the success handler
-        const handleSuccess = function(event) {
+        const handleSuccess = function (event) {
           console.log('Job saved successfully, now printing...');
           // Get the job ID from the response or use the existing one
           let actualJobId = jobId;
-          
+
           // Try to get job ID from the form after save
           const jobIdInput = form.querySelector('input[name="job_id"]');
           if (jobIdInput && jobIdInput.value) {
             actualJobId = jobIdInput.value;
           }
-          
+
           // Clear unsaved changes tracking since we just saved
           if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
             window.JobPanel.clearUnsavedChanges();
           }
-          
+
           // Remove the event listener to avoid memory leaks
           document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
-          
+
           const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
           printViaIframe(url);
         };
-        
-        const handleFailure = function(event) {
+
+        const handleFailure = function (event) {
           console.error('Failed to save job:', event.detail);
-          
+
           // Try to extract error message from response
           let errorMsg = 'Failed to save job. Please check all required fields and try again.';
           if (event.detail.xhr && event.detail.xhr.responseText) {
             // Log the full error for debugging
             console.error('Server response:', event.detail.xhr.responseText);
           }
-          
+
           alert(errorMsg);
           if (printBtn) {
             printBtn.textContent = originalText;
@@ -700,26 +1240,26 @@
           // Remove the event listener
           document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
         };
-        
+
         // Combined handler to route to success or failure
-        const handleAfterRequest = function(event) {
+        const handleAfterRequest = function (event) {
           if (event.detail.successful) {
             handleSuccess(event);
           } else {
             handleFailure(event);
           }
         };
-        
+
         // Add event listener
         document.body.addEventListener('htmx:afterRequest', handleAfterRequest);
-        
+
         // Trigger the form submission using HTMX's trigger
         htmx.trigger(form, 'submit');
-        
+
       } else {
         // Fallback: try to submit using fetch
         const formData = new FormData(form);
-        
+
         fetch(form.action || window.location.href, {
           method: 'POST',
           body: formData,
@@ -727,40 +1267,40 @@
             'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
           }
         })
-        .then(response => {
-          if (response.ok) {
-            console.log('Job saved successfully, now printing...');
-            // Try to get the job ID from the response
-            let actualJobId = jobId;
-            if (response.headers.get('content-type')?.includes('application/json')) {
-              return response.json().then(data => {
-                if (data.id) {
-                  actualJobId = data.id;
-                }
+          .then(response => {
+            if (response.ok) {
+              console.log('Job saved successfully, now printing...');
+              // Try to get the job ID from the response
+              let actualJobId = jobId;
+              if (response.headers.get('content-type')?.includes('application/json')) {
+                return response.json().then(data => {
+                  if (data.id) {
+                    actualJobId = data.id;
+                  }
+                  const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
+                  printViaIframe(url);
+                });
+              } else {
                 const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
                 printViaIframe(url);
-              });
+              }
             } else {
-              const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
-              printViaIframe(url);
+              throw new Error('Save failed - status ' + response.status);
             }
-          } else {
-            throw new Error('Save failed - status ' + response.status);
-          }
-        })
-        .catch(error => {
-          console.error('Failed to save job:', error);
-          alert('Failed to save job. Please check all required fields and try again.');
-          if (printBtn) {
-            printBtn.textContent = originalText;
-            printBtn.disabled = false;
-          }
-        });
+          })
+          .catch(error => {
+            console.error('Failed to save job:', error);
+            alert('Failed to save job. Please check all required fields and try again.');
+            if (printBtn) {
+              printBtn.textContent = originalText;
+              printBtn.disabled = false;
+            }
+          });
       }
     }
-    
+
     // Use event delegation - attach to document body so it works for all future buttons
-    document.body.addEventListener('click', function(e) {
+    document.body.addEventListener('click', function (e) {
       // Check if clicked element is a print button
       const btn = e.target.closest('.print-btn');
       if (btn && !btn.disabled) {
@@ -768,7 +1308,7 @@
         e.stopPropagation();
         const jobId = btn.getAttribute('data-job-id');
         const printType = btn.getAttribute('data-print-type');
-        
+
         // Check if we're in a job form and need to save first
         const form = btn.closest('form');
         if (form && form.querySelector('input[name="business_name"]')) {
@@ -786,78 +1326,78 @@
         }
       }
     });
-    
+
     // Hover effects using event delegation
-    document.body.addEventListener('mouseover', function(e) {
+    document.body.addEventListener('mouseover', function (e) {
       const btn = e.target.closest('.print-btn');
       if (btn && !btn.disabled) {
         btn.style.backgroundColor = '#f9fafb';
       }
     });
-    
-    document.body.addEventListener('mouseout', function(e) {
+
+    document.body.addEventListener('mouseout', function (e) {
       const btn = e.target.closest('.print-btn');
       if (btn && !btn.disabled) {
         btn.style.backgroundColor = '#ffffff';
       }
     });
   })();
-  
+
   // Complete button handler (with duplicate prevention)
-  (function() {
+  (function () {
     const completeBtn = document.querySelector('.complete-btn');
     if (completeBtn && !completeBtn._hasCompleteListener) {
       completeBtn._hasCompleteListener = true;
-      completeBtn.addEventListener('click', function() {
+      completeBtn.addEventListener('click', function () {
         const jobId = this.getAttribute('data-job-id');
         updateJobStatus(jobId, 'completed');
       });
     }
   })();
-  
+
   // Uncomplete button handler (with duplicate prevention)
-  (function() {
+  (function () {
     const uncompleteBtn = document.querySelector('.uncomplete-btn');
     if (uncompleteBtn && !uncompleteBtn._hasUncompleteListener) {
       uncompleteBtn._hasUncompleteListener = true;
-      uncompleteBtn.addEventListener('click', function() {
+      uncompleteBtn.addEventListener('click', function () {
         const jobId = this.getAttribute('data-job-id');
         updateJobStatus(jobId, 'uncompleted');
       });
     }
   })();
-  
+
   // Delete button handler (with duplicate prevention)
-  (function() {
+  (function () {
     const deleteBtn = document.querySelector('.delete-btn');
     if (deleteBtn && !deleteBtn._hasDeleteListener) {
       deleteBtn._hasDeleteListener = true;
-      deleteBtn.addEventListener('click', function() {
+      deleteBtn.addEventListener('click', function () {
         const jobId = this.getAttribute('data-job-id');
         deleteJob(jobId);
       });
     }
   })();
 
-  
+
   // Track form changes for unsaved changes warning
-  (function() {
+  (function () {
     // Initialize form change tracking when the form loads
     function initializeFormChangeTracking() {
       if (window.JobPanel && window.JobPanel.trackFormChanges) {
         window.JobPanel.trackFormChanges();
       }
     }
-    
+
     // Initialize immediately and after HTMX content swaps
     initializeFormChangeTracking();
-    
+
     // Re-initialize after HTMX content swaps
-    document.body.addEventListener('htmx:afterSwap', function() {
+    document.body.addEventListener('htmx:afterSwap', function () {
       setTimeout(initializeFormChangeTracking, 100);
     });
-    
-    document.body.addEventListener('htmx:load', function() {
+
+    document.body.addEventListener('htmx:load', function () {
       setTimeout(initializeFormChangeTracking, 100);
     });
   })();

@@ -1,0 +1,176 @@
+"""
+Tests for partial view endpoints that render templates.
+
+These tests ensure that template compilation succeeds and basic rendering works.
+This catches template syntax errors (like missing spaces around ==) at test time.
+"""
+import pytest
+from django.urls import reverse
+from django.test import Client
+from django.utils import timezone
+from datetime import timedelta
+
+
+@pytest.fixture(autouse=True)
+def use_simple_staticfiles_storage(settings):
+    """Use simple staticfiles storage to avoid needing collectstatic."""
+    settings.STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+
+@pytest.mark.django_db
+class TestJobCreatePartial:
+    """Test the job_create_partial view renders without errors."""
+    
+    def test_new_job_form_renders_with_date(self, api_client, calendar):
+        """GET /jobs/new/partial/?date=... should return 200 and contain form fields."""
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url, {'date': '2026-01-12'})
+        
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+        
+        # Verify key form fields are present
+        assert 'name="start_dt"' in content
+        assert 'name="end_dt"' in content
+        assert 'name="business_name"' in content
+        assert 'name="calendar"' in content
+    
+    def test_new_job_form_renders_without_date(self, api_client, calendar):
+        """GET /jobs/new/partial/ without date param should still return 200."""
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url)
+        
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+        
+        # Verify form fields are present
+        assert 'name="start_dt"' in content
+        assert 'name="business_name"' in content
+    
+    def test_edit_job_form_renders(self, api_client, job):
+        """GET /jobs/new/partial/?edit=<id> should return 200 and show job data."""
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url, {'edit': job.id})
+        
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+        
+        # Verify job data is in the form
+        assert job.business_name in content
+        assert 'name="start_dt"' in content
+    
+    def test_edit_job_with_call_reminder(self, api_client, calendar):
+        """GET /jobs/new/partial/?edit=<id> for job with call reminder should render."""
+        from rental_scheduler.models import Job
+        
+        now = timezone.now()
+        job = Job.objects.create(
+            calendar=calendar,
+            business_name="Call Reminder Test",
+            start_dt=now + timedelta(days=30),
+            end_dt=now + timedelta(days=30, hours=2),
+            all_day=False,
+            status='uncompleted',
+            has_call_reminder=True,
+            call_reminder_weeks_prior=2,
+        )
+        
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url, {'edit': job.id})
+        
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+        
+        # Verify call reminder section renders
+        assert 'call-reminder-enabled' in content
+        assert 'call_reminder_weeks_prior' in content
+    
+    def test_edit_job_with_recurrence_rule(self, api_client, calendar):
+        """GET /jobs/new/partial/?edit=<id> for recurring job should render."""
+        from rental_scheduler.models import Job
+        
+        now = timezone.now()
+        job = Job.objects.create(
+            calendar=calendar,
+            business_name="Recurring Test",
+            start_dt=now,
+            end_dt=now + timedelta(hours=2),
+            all_day=False,
+            status='uncompleted',
+        )
+        # Create a recurrence rule
+        job.create_recurrence_rule(
+            recurrence_type='monthly',
+            interval=1,
+            count=5,
+        )
+        
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url, {'edit': job.id})
+        
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+        
+        # Verify recurrence section renders
+        assert 'recurrence-type' in content
+
+
+@pytest.mark.django_db
+class TestCallReminderCreatePartial:
+    """Test the call_reminder_create_partial view renders without errors."""
+    
+    def test_call_reminder_form_renders_with_date(self, api_client, calendar):
+        """GET /call-reminders/new/partial/?date=... should return 200."""
+        url = reverse('rental_scheduler:call_reminder_create_partial')
+        response = api_client.get(url, {'date': '2026-01-12'})
+        
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+        
+        # Verify form fields are present
+        assert 'name="reminder_date"' in content
+        assert 'name="calendar"' in content
+        assert 'name="notes"' in content
+    
+    def test_call_reminder_form_renders_with_calendar(self, api_client, calendar):
+        """GET /call-reminders/new/partial/?calendar=... should pre-select calendar."""
+        url = reverse('rental_scheduler:call_reminder_create_partial')
+        response = api_client.get(url, {'date': '2026-01-12', 'calendar': calendar.id})
+        
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+        
+        # Form should render successfully
+        assert 'name="reminder_date"' in content
+
+
+@pytest.mark.django_db
+class TestJobDetailPartial:
+    """Test the job_detail_partial view.
+    
+    NOTE: The template _job_detail_partial.html does not exist yet.
+    These tests document the expected behavior once the template is created.
+    """
+    
+    @pytest.mark.skip(reason="Template _job_detail_partial.html does not exist yet")
+    def test_job_detail_renders(self, api_client, job):
+        """GET /jobs/<pk>/partial/ should return 200."""
+        url = reverse('rental_scheduler:job_detail_partial', args=[job.id])
+        response = api_client.get(url)
+        
+        assert response.status_code == 200
+    
+    def test_job_detail_returns_404_for_missing_job(self, api_client):
+        """GET /jobs/<pk>/partial/ with invalid pk should return 404."""
+        url = reverse('rental_scheduler:job_detail_partial', args=[99999])
+        response = api_client.get(url)
+        
+        assert response.status_code == 404
+

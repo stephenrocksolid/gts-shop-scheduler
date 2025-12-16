@@ -1,0 +1,21 @@
+{
+    // Use djLint for Django templates - understands {% %} syntax
+    "[html]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "monosans.djlint"
+    },
+    "[django-html]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "monosans.djlint"
+    },
+    // Associate Django template files with django-html for better syntax highlighting
+    "files.associations": {
+        "**/templates/**/*.html": "django-html",
+        "**/templates/*.html": "django-html"
+    },
+    // Python formatting settings
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "ms-python.python"
+    }
+}

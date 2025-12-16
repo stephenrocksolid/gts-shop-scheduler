@@ -697,4 +697,41 @@ body.workspace-active {
     padding-bottom: 28px; /* Reserve space for workspace bar when visible */
 }
 
+/* ===== SCHEDULE PICKER (per-input flatpickr) ===== */
+/* Force left alignment for Start/End inputs in job panel */
+#job-panel input[name="start_dt"],
+#job-panel input[name="end_dt"],
+#schedule-picker-container input[name="start_dt"],
+#schedule-picker-container input[name="end_dt"] {
+    text-align: left !important;
+}
+
+/* Ensure flatpickr popup appears above panel content */
+#job-panel .flatpickr-calendar {
+    z-index: 99999 !important;
+}
+
+/* Compact styling for job form flatpickr calendars */
+#schedule-picker-container + .flatpickr-calendar,
+#job-panel .flatpickr-calendar {
+    font-size: 12px;
+}
+
+#schedule-picker-container + .flatpickr-calendar .flatpickr-day,
+#job-panel .flatpickr-calendar .flatpickr-day {
+    height: 32px;
+    line-height: 32px;
+}
+
+#schedule-picker-container + .flatpickr-calendar .flatpickr-months .flatpickr-month,
+#job-panel .flatpickr-calendar .flatpickr-months .flatpickr-month {
+    height: 32px;
+}
+
+#schedule-picker-container + .flatpickr-calendar .flatpickr-current-month,
+#job-panel .flatpickr-calendar .flatpickr-current-month {
+    font-size: 100%;
+    padding-top: 6px;
+}
+
 

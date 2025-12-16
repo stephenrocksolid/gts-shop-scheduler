@@ -1,0 +1,28 @@
+[tool.djlint]
+# Django template profile
+profile = "django"
+
+# Indent size
+indent = 2
+
+# Max line length (0 = no limit)
+max_line_length = 120
+
+# Preserve leading/trailing whitespace in text
+preserve_leading_space = true
+preserve_blank_lines = true
+
+# Don't close void elements with />
+close_void_tags = false
+
+# Format attributes
+format_attribute_template_tags = true
+
+# Ignore these rules (customize as needed)
+# See: https://djlint.com/docs/linter/
+ignore = "H006,H021,H030,H031"
+# H006: img tag should have alt attribute
+# H021: Inline styles should be avoided
+# H030: Consider adding meta description
+# H031: Consider adding meta keywords
+
