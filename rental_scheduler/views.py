@@ -1506,16 +1506,42 @@ def job_create_submit(request):
                 return redirect('rental_scheduler:job_list')
             
             recurrence_type = request.POST.get('recurrence_type', 'monthly')
-            recurrence_interval = int(request.POST.get('recurrence_interval', 1))
-            recurrence_count = request.POST.get('recurrence_count')
-            recurrence_until = request.POST.get('recurrence_until')
-            
-            # Convert count to int if provided and validate
-            count = int(recurrence_count) if recurrence_count else None
-            if count and count > 500:
-                messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+            recurrence_interval_raw = request.POST.get('recurrence_interval', '1')
+            try:
+                recurrence_interval = int(recurrence_interval_raw)
+            except (TypeError, ValueError):
+                messages.error(request, 'Recurrence interval must be a whole number.')
                 return redirect('rental_scheduler:job_list')
-            until_date = recurrence_until if recurrence_until else None
+
+            if recurrence_interval < 1:
+                messages.error(request, 'Recurrence interval must be at least 1.')
+                return redirect('rental_scheduler:job_list')
+
+            recurrence_count_raw = request.POST.get('recurrence_count')
+            count = None
+            if recurrence_count_raw:
+                try:
+                    count = int(recurrence_count_raw)
+                except (TypeError, ValueError):
+                    messages.error(request, 'Recurrence count must be a whole number.')
+                    return redirect('rental_scheduler:job_list')
+
+                if count < 1:
+                    messages.error(request, 'Recurrence count must be at least 1.')
+                    return redirect('rental_scheduler:job_list')
+
+                if count > 500:
+                    messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+                    return redirect('rental_scheduler:job_list')
+
+            recurrence_until_raw = request.POST.get('recurrence_until')
+            until_date = None
+            if recurrence_until_raw:
+                try:
+                    until_date = datetime.strptime(recurrence_until_raw, DATE_ONLY_FMT).date()
+                except ValueError:
+                    messages.error(request, 'Recurrence end date must be a valid date (YYYY-MM-DD).')
+                    return redirect('rental_scheduler:job_list')
             
             # Create recurrence rule
             job.create_recurrence_rule(
