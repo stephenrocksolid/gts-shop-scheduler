@@ -1,7 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 import os
 from django.core.files.storage import FileSystemStorage
@@ -94,6 +94,8 @@ class Job(models.Model):
     # Repeat type choices for recurring jobs
     REPEAT_CHOICES = [
         ('none', 'None'),
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
         ('monthly', 'Monthly'),
         ('yearly', 'Annually'),
     ]
@@ -492,11 +494,31 @@ class Job(models.Model):
             count: Maximum number of occurrences
             until_date: Don't create occurrences after this date
         """
+        until_value = None
+        if until_date:
+            parsed_until = until_date
+
+            if isinstance(parsed_until, str):
+                normalized = parsed_until.replace('Z', '+00:00')
+                try:
+                    parsed_until = datetime.fromisoformat(normalized)
+                except ValueError:
+                    # Fallback to date-only format
+                    parsed_until = datetime.strptime(parsed_until, '%Y-%m-%d')
+
+            if isinstance(parsed_until, datetime):
+                parsed_until = parsed_until.date()
+
+            if isinstance(parsed_until, date):
+                until_value = parsed_until.isoformat()
+            else:
+                raise ValueError("until_date must be a date, datetime, or ISO-8601 string")
+
         self.recurrence_rule = {
             'type': recurrence_type,
             'interval': interval,
             'count': count,
-            'until_date': until_date.isoformat() if until_date else None,
+            'until_date': until_value,
         }
         self.save(update_fields=['recurrence_rule'])
     
