@@ -2,98 +2,135 @@
 <!DOCTYPE html>
 <html lang="en">
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }} - Shop Scheduler</title>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{{ title }} - Shop Scheduler</title>
 
-    <!-- CSRF Token for HTMX -->
-    <meta name="csrf-token" content="{{ csrf_token }}">
+        <!-- CSRF Token for HTMX -->
+        <meta name="csrf-token" content="{{ csrf_token }}">
 
-    <!-- Favicon -->
-    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'rental_scheduler/img/favicon-32x32.png' %}">
-    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'rental_scheduler/img/favicon-16x16.png' %}">
-    <link rel="icon" type="image/x-icon" href="{% static 'rental_scheduler/img/favicon.png' %}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'rental_scheduler/img/apple-touch-icon.png' %}">
-    <link rel="manifest" href="{% static 'rental_scheduler/img/site.webmanifest' %}">
+        <!-- Favicon -->
+        <link rel="icon"
+              type="image/png"
+              sizes="32x32"
+              href="{% static 'rental_scheduler/img/favicon-32x32.png' %}">
+        <link rel="icon"
+              type="image/png"
+              sizes="16x16"
+              href="{% static 'rental_scheduler/img/favicon-16x16.png' %}">
+        <link rel="icon"
+              type="image/x-icon"
+              href="{% static 'rental_scheduler/img/favicon.png' %}">
+        <link rel="apple-touch-icon"
+              sizes="180x180"
+              href="{% static 'rental_scheduler/img/apple-touch-icon.png' %}">
+        <link rel="manifest"
+              href="{% static 'rental_scheduler/img/site.webmanifest' %}">
 
-    
-    
-    <!-- HTMX -->
-    <script src="{% static 'rental_scheduler/js/htmx.min.js' %}"></script>
-    
-    <link href="{% static 'rental_scheduler/css/styles.css' %}" rel="stylesheet">
-    <!-- Centralized Configuration -->
-    <script src="{% static 'rental_scheduler/js/config.js' %}"></script>
-    
-    <!-- FullCalendar CSS -->
-    <link href="{% static 'rental_scheduler/css/fullcalendar.min.css' %}" rel="stylesheet">
-    
-    <!-- Tailwind CSS -->
-    <!-- Flatpickr CSS -->
-    <link rel="stylesheet" href="{% static 'rental_scheduler/css/flatpickr.min.css' %}">
 
-    
-    <link href="{% static 'rental_scheduler/css/components.css' %}" rel="stylesheet">
-    
-    {% block extra_css %}{% endblock %}
-</head>
 
-<body class="min-h-screen bg-gray-50">
-    <!-- Toast Messages Container -->
-    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2">
-        {% if messages %}
-            {% for message in messages %}
-            <div class="toast toast-enter bg-white border-l-4 {% if message.tags == 'success' %}border-green-400{% elif message.tags == 'error' %}border-red-400{% elif message.tags == 'warning' %}border-yellow-400{% else %}border-blue-400{% endif %} shadow-lg rounded-lg p-4 max-w-sm transition-all duration-300">
-                <div class="flex items-start">
-                    <div class="flex-shrink-0">
-                        {% if message.tags == 'success' %}
-                            <svg class="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                            </svg>
-                        {% elif message.tags == 'error' %}
-                            <svg class="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
-                            </svg>
-                        {% elif message.tags == 'warning' %}
-                            <svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                            </svg>
-                        {% else %}
-                            <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
-                            </svg>
-                        {% endif %}
+        <!-- HTMX -->
+        <script src="{% static 'rental_scheduler/js/htmx.min.js' %}"></script>
+    
+        <link href="{% static 'rental_scheduler/css/styles.css' %}"
+              rel="stylesheet">
+        <!-- Centralized Configuration -->
+        <script src="{% static 'rental_scheduler/js/config.js' %}"></script>
+    
+        <!-- FullCalendar CSS -->
+        <link href="{% static 'rental_scheduler/css/fullcalendar.min.css' %}"
+              rel="stylesheet">
+
+        <!-- Tailwind CSS -->
+        <!-- Flatpickr CSS -->
+        <link rel="stylesheet"
+              href="{% static 'rental_scheduler/css/flatpickr.min.css' %}">
+
+
+        <link href="{% static 'rental_scheduler/css/components.css' %}"
+              rel="stylesheet">
+
+        {% block extra_css %}
+        {% endblock extra_css %}
+    </head>
+
+    <body class="min-h-screen bg-gray-50">
+        <!-- Toast Messages Container -->
+        <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2">
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="toast toast-enter bg-white border-l-4
+                                {% if message.tags == 'success' %}
+                                    border-green-400
+                                {% elif message.tags == 'error' %}
+                                    border-red-400
+                                {% elif message.tags == 'warning' %}
+                                    border-yellow-400
+                                {% else %}
+                                    border-blue-400
+                                {% endif %}
+                                shadow-lg rounded-lg p-4 max-w-sm transition-all duration-300">
+                        <div class="flex items-start">
+                            <div class="flex-shrink-0">
+                                {% if message.tags == 'success' %}
+                                    <svg class="h-5 w-5 text-green-400"
+                                         fill="currentColor"
+                                         viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                    </svg>
+                                {% elif message.tags == 'error' %}
+                                    <svg class="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                                    </svg>
+                                {% elif message.tags == 'warning' %}
+                                    <svg class="h-5 w-5 text-yellow-400"
+                                         fill="currentColor"
+                                         viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                    </svg>
+                                {% else %}
+                                    <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                                    </svg>
+                                {% endif %}
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <p class="text-sm font-medium text-gray-900">
+{{ message }}
+                                </p>
+                            </div>
+                            <div class="ml-4 flex-shrink-0 flex">
+                                <button onclick="this.closest('.toast').remove()"
+                                        class="inline-flex text-gray-400 hover:text-gray-600 focus:outline-none focus:text-gray-600">
+                                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="ml-3 flex-1">
-                        <p class="text-sm font-medium text-gray-900">{{ message }}</p>
-                    </div>
-                    <div class="ml-4 flex-shrink-0 flex">
-                        <button onclick="this.closest('.toast').remove()" class="inline-flex text-gray-400 hover:text-gray-600 focus:outline-none focus:text-gray-600">
-                            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        {% endif %}
-    </div>
+                {% endfor %}
+            {% endif %}
+        </div>
 
 
-    <!-- Main Content -->
-    <main class="{% block main_container_class %}max-w-7xl{% endblock %} mx-auto">
-        {% block content %}{% endblock %}
-    </main>
+        <!-- Main Content -->
+        <main class="{% block main_container_class %}
+                         max-w-7xl
+                     {% endblock %}
+                     mx-auto">
+            {% block content %}
+            {% endblock %}
+        </main>
 
-    <!-- FullCalendar JS -->
-    <script src="{% static 'rental_scheduler/js/fullcalendar.min.js' %}"></script>
+        <!-- FullCalendar JS -->
+        <script src="{% static 'rental_scheduler/js/fullcalendar.min.js' %}"></script>
 
-    <!-- Flatpickr JS -->
-    <script src="{% static 'rental_scheduler/js/flatpickr.min.js' %}"></script>
+        <!-- Flatpickr JS -->
+        <script src="{% static 'rental_scheduler/js/flatpickr.min.js' %}"></script>
 
-    <script>
+        <script>
         // Global toast utility (vanilla JS)
         window.showToast = function(message, type = 'info', duration = 5000) {
             const toast = document.createElement('div');
@@ -109,7 +146,7 @@
                     <div class="ml-4 flex-shrink-0 flex">
                         <button onclick="this.closest('.toast').remove()" class="inline-flex text-gray-400 hover:text-gray-600 focus:outline-none focus:text-gray-600">
                             <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
                             </svg>
                         </button>
                     </div>
@@ -130,10 +167,10 @@
         
         function getToastIcon(type) {
             const icons = {
-                success: '<svg class="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>',
-                error: '<svg class="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg>',
-                warning: '<svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>',
-                info: '<svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>'
+                success: '<svg class="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>',
+                error: '<svg class="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>',
+                warning: '<svg class="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>',
+                info: '<svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" /></svg>'
             };
             return icons[type] || icons.info;
         }
@@ -178,18 +215,19 @@
                 window.showToast('Network error. Please check your connection.', 'error');
             });
         });
-    </script>
+        </script>
 
-    <!-- Job Panel -->
-    {% include "rental_scheduler/includes/panel.html" %}
-    <script src="{% static 'rental_scheduler/js/panel.js' %}"></script>
+        <!-- Job Panel -->
+{% include "rental_scheduler/includes/panel.html" %}
+        <script src="{% static 'rental_scheduler/js/panel.js' %}"></script>
 
-    <!-- Job Workspace Bar -->
-    {% include "rental_scheduler/includes/workspace_bar.html" %}
-    <script src="{% static 'rental_scheduler/js/workspace.js' %}"></script>
+        <!-- Job Workspace Bar -->
+{% include "rental_scheduler/includes/workspace_bar.html" %}
+        <script src="{% static 'rental_scheduler/js/workspace.js' %}"></script>
 
-    <!-- Custom JS -->
-    {% block extra_js %}{% endblock %}
-</body>
+        <!-- Custom JS -->
+        {% block extra_js %}
+        {% endblock %}
+    </body>
 
 </html>

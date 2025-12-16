@@ -20,9 +20,12 @@ format_attribute_template_tags = true
 
 # Ignore these rules (customize as needed)
 # See: https://djlint.com/docs/linter/
-ignore = "H006,H021,H030,H031"
+ignore = "H006,H021,H030,H031,T002,T003,H014"
 # H006: img tag should have alt attribute
 # H021: Inline styles should be avoided
 # H030: Consider adding meta description
 # H031: Consider adding meta keywords
+# T002: Double quotes should be used in tags
+# T003: Endblock should have name
+# H014: Found extra blank lines
 

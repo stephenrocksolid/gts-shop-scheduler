@@ -274,29 +274,25 @@
         font-size: 0.75rem !important;
     }
 
-    /* Search & Today sidebar toggle button styling - white with grey border when inactive, blue when active */
-    .fc-searchButton-button,
-    .fc-todaySidebarButton-button {
+    /* Search button styling - white with grey border when collapsed, blue when expanded */
+    .fc-searchButton-button {
         background-color: white !important;
         border-color: #d1d5db !important;
         color: #374151 !important;
     }
 
-    .fc-searchButton-button:hover,
-    .fc-todaySidebarButton-button:hover {
+    .fc-searchButton-button:hover {
         background-color: #f9fafb !important;
         border-color: #9ca3af !important;
     }
 
-    .fc-searchButton-button.active,
-    .fc-todaySidebarButton-button.active {
+    .fc-searchButton-button.active {
         background-color: #2563eb !important;
         border-color: #2563eb !important;
         color: white !important;
     }
 
-    .fc-searchButton-button.active:hover,
-    .fc-todaySidebarButton-button.active:hover {
+    .fc-searchButton-button.active:hover {
         background-color: #1d4ed8 !important;
         border-color: #1d4ed8 !important;
         color: white !important;
@@ -741,10 +737,6 @@
         flex-grow: 0;
     }
 
-    .today-sidebar.hidden {
-        display: none !important;
-    }
-
     .resize-handle {
         position: absolute;
         left: -4px;
@@ -1063,11 +1055,11 @@
         position: relative !important;
     }
     </style>
-{% endblock extra_css %}
+{% endblock %}
 
 {% block main_container_class %}
 full-bleed
-{% endblock main_container_class %}
+{% endblock %}
 
 {% block content %}
     <!-- Search Panel -->
@@ -1150,13 +1142,6 @@ Events
                                        class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
                                 <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events in Current View</span>
                             </label>
-                            <label class="flex items-center cursor-pointer">
-                                <input type="radio"
-                                       name="date_filter"
-                                       value="two_years"
-                                       class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                                <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events within 2 years</span>
-                            </label>
                         </div>
                         <!-- Hidden inputs to store current view dates -->
                         <input type="hidden" name="start_date" id="search-view-start-date">
@@ -1200,16 +1185,6 @@ Events
 </path>
                             </svg>
                         Clear
-                        </button>
-                        <button type="button"
-                                id="calendar-close-search-btn"
-                                class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200 whitespace-nowrap"
-                                title="Close the search area">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7">
-</path>
-                            </svg>
-                        Close Search
                         </button>
                     </div>
                 </div>
@@ -1719,16 +1694,6 @@ Today
             });
         }
 
-        // Handle close search area button click
-        const closeSearchBtn = document.getElementById('calendar-close-search-btn');
-        if (closeSearchBtn) {
-            closeSearchBtn.addEventListener('click', function () {
-                if (window.jobCalendar && window.jobCalendar.searchPanelOpen) {
-                    window.jobCalendar.toggleSearchPanel();
-                }
-            });
-        }
-
         // Handle search form submission
         if (searchForm) {
             searchForm.addEventListener('submit', function (e) {
@@ -1808,36 +1773,14 @@ Today
                                     }
                                 });
 
-                                // Tooltip hover state
-                                let tooltipTimeout = null;
-
                                 // Add visual feedback on hover (but don't override highlight)
                                 row.addEventListener('mouseenter', function () {
                                     if (!this.classList.contains('bg-blue-100')) {
                                         this.style.backgroundColor = '#f9fafb';
                                     }
-
-                                    // Set a 500ms delay before showing the tooltip (same as calendar events)
-                                    const rowElement = this;
-                                    tooltipTimeout = setTimeout(() => {
-                                        if (window.jobCalendar) {
-                                            window.jobCalendar.showJobRowTooltip(rowElement);
-                                        }
-                                    }, 500);
                                 });
 
                                 row.addEventListener('mouseleave', function () {
-                                    // Clear the timeout if user stops hovering before delay completes
-                                    if (tooltipTimeout) {
-                                        clearTimeout(tooltipTimeout);
-                                        tooltipTimeout = null;
-                                    }
-
-                                    // Hide the tooltip
-                                    if (window.jobCalendar) {
-                                        window.jobCalendar.hideEventTooltip();
-                                    }
-
                                     if (!this.classList.contains('bg-blue-100')) {
                                         this.style.backgroundColor = '';
                                     }
@@ -1862,8 +1805,7 @@ Today
         }
     });
     </script>
-{% endblock content %}
-
+{% endblock %}
 {% block extra_js %}
     <script src="{% static 'rental_scheduler/js/job_calendar.js' %}?v={{ timestamp|default:'1' }}"></script>
-{% endblock extra_js %}
+{% endblock %}
