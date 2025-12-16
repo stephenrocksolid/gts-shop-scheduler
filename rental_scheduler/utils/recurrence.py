@@ -3,13 +3,47 @@ Recurring event utilities for the rental scheduler.
 Provides functionality similar to Google Calendar's recurring events.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
 from django.utils import timezone
 from django.db import transaction
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_to_date(value):
+    """
+    Convert a variety of inputs into a date object.
+
+    Accepts:
+    - date
+    - datetime (aware or naive)
+    - ISO-8601 string (date-only or datetime)
+    """
+    if value is None:
+        return None
+
+    # datetime is a subclass of date; check it first.
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            value = timezone.localtime(value)
+        return value.date()
+
+    if isinstance(value, date):
+        return value
+
+    if isinstance(value, str):
+        normalized = value.replace('Z', '+00:00')
+        try:
+            return datetime.fromisoformat(normalized).date()
+        except ValueError:
+            try:
+                return datetime.strptime(value[:10], '%Y-%m-%d').date()
+            except ValueError:
+                return None
+
+    return None
 
 
 class RecurrenceGenerator:
@@ -48,36 +82,20 @@ class RecurrenceGenerator:
         # Determine interval and count
         interval = self.rule.get('interval', 1)
         count = max_count or self.rule.get('count', 50)  # Default 50 occurrences
-        until_date = self.rule.get('until_date')
-        
-        # Parse until_date if it's a string
-        if until_date and isinstance(until_date, str):
-            until_date = datetime.fromisoformat(until_date.replace('Z', '+00:00'))
-            if timezone.is_naive(until_date):
-                until_date = timezone.make_aware(until_date)
-        
-        # Use the more restrictive of until_date and end_date
-        if end_date:
-            if timezone.is_naive(end_date):
-                end_date = timezone.make_aware(end_date)
-            if until_date:
-                until_date = min(until_date, end_date)
-            else:
-                until_date = end_date
-                
-        # Check end_recurrence_date from parent
-        if self.parent_job.end_recurrence_date:
-            end_recur_dt = timezone.make_aware(
-                datetime.combine(self.parent_job.end_recurrence_date, datetime.min.time())
-            )
-            if until_date:
-                until_date = min(until_date, end_recur_dt)
-            else:
-                until_date = end_recur_dt
+        until_date = _coerce_to_date(self.rule.get('until_date'))
+        end_date_value = _coerce_to_date(end_date) if end_date else None
+
+        candidates = [d for d in [until_date, end_date_value, self.parent_job.end_recurrence_date] if d]
+        until_date = min(candidates) if candidates else None
         
         instances = []
         current_start = self.parent_job.start_dt
         current_end = self.parent_job.end_dt
+
+        # Do recurrence computations in local time so date/week/weekday rules behave as users expect.
+        if timezone.is_aware(current_start):
+            current_start = timezone.localtime(current_start)
+            current_end = timezone.localtime(current_end)
         
         # Calculate duration for each instance
         duration = current_end - current_start
@@ -85,9 +103,44 @@ class RecurrenceGenerator:
         for i in range(1, count + 1):  # Start from 1 (parent is 0)
             # Calculate next occurrence
             if recurrence_type == 'monthly':
-                next_start = current_start + relativedelta(months=interval)
+                # Preserve the same weekday occurrence (e.g., 3rd Friday)
+                original_weekday = current_start.weekday()  # 0=Monday, 6=Sunday
+                original_date = current_start.date()
+
+                first_of_month = original_date.replace(day=1)
+                days_into_month = (original_date - first_of_month).days
+                occurrence = (days_into_month // 7) + 1
+
+                target_month_date = current_start + relativedelta(months=interval)
+                tz = current_start.tzinfo if timezone.is_aware(current_start) else None
+
+                next_start = get_nth_weekday_of_month(
+                    target_month_date.year,
+                    target_month_date.month,
+                    original_weekday,
+                    occurrence,
+                    current_start.time(),
+                    tz,
+                )
+
+                if next_start is None:
+                    next_start = current_start + relativedelta(months=interval)
             elif recurrence_type == 'yearly':
-                next_start = current_start + relativedelta(years=interval)
+                # Preserve the same ISO week and weekday
+                iso_year, iso_week, iso_weekday = current_start.isocalendar()  # weekday: 1-7
+                target_iso_year = iso_year + interval
+                tz = current_start.tzinfo if timezone.is_aware(current_start) else None
+
+                next_start = get_date_from_iso_week(
+                    target_iso_year,
+                    iso_week,
+                    iso_weekday - 1,  # Convert 1-7 to 0-6
+                    current_start.time(),
+                    tz,
+                )
+
+                if next_start is None:
+                    next_start = current_start + relativedelta(years=interval)
             elif recurrence_type == 'weekly':
                 next_start = current_start + timedelta(weeks=interval)
             elif recurrence_type == 'daily':
@@ -96,8 +149,8 @@ class RecurrenceGenerator:
                 logger.warning(f"Unknown recurrence type: {recurrence_type}")
                 break
                 
-            # Check if we've exceeded until_date
-            if until_date and next_start > until_date:
+            # Check if we've exceeded until_date (inclusive date-based end)
+            if until_date and next_start.date() > until_date:
                 break
                 
             next_end = next_start + duration
@@ -152,6 +205,11 @@ class RecurrenceGenerator:
             # Don't copy repeat fields (instances don't repeat themselves)
             repeat_type='none',
             repeat_n_months=None,
+
+            # Copy call reminder settings
+            has_call_reminder=self.parent_job.has_call_reminder,
+            call_reminder_weeks_prior=self.parent_job.call_reminder_weeks_prior,
+            call_reminder_completed=False,  # Each instance starts with reminder not completed
             
             # Copy job details
             notes=self.parent_job.notes,
@@ -195,6 +253,24 @@ def create_recurring_instances(parent_job, count=None, until_date=None):
         for instance in instances:
             instance.save()
             created_instances.append(instance)
+
+            # Create CallReminder if needed
+            if instance.has_call_reminder and instance.call_reminder_weeks_prior:
+                from rental_scheduler.models import CallReminder
+                from rental_scheduler.utils.events import get_call_reminder_sunday
+
+                reminder_date = get_call_reminder_sunday(
+                    instance.start_dt,
+                    instance.call_reminder_weeks_prior,
+                ).date()
+
+                CallReminder.objects.create(
+                    job=instance,
+                    calendar=instance.calendar,
+                    reminder_date=reminder_date,
+                    notes='',
+                    completed=instance.call_reminder_completed,
+                )
             
     logger.info(f"Created {len(created_instances)} recurring instances for job {parent_job.id}")
     return created_instances
@@ -315,6 +391,84 @@ def cancel_future_recurrences(parent_job, from_date):
     logger.info(f"Canceled {count} future instances for job {parent_job.id} from {from_date}")
     return count, True
 
+
+def get_nth_weekday_of_month(year, month, weekday, occurrence, time_obj, tz):
+    """
+    Find the Nth occurrence of a weekday in a given month.
+
+    Args:
+        year: Target year
+        month: Target month (1-12)
+        weekday: Target weekday (0=Monday, 6=Sunday)
+        occurrence: Which occurrence (1=first, 2=second, etc.)
+        time_obj: Time to apply to the date (datetime.time object)
+        tz: Timezone to apply (tzinfo) or None
+
+    Returns:
+        datetime (timezone-aware if tz provided), or None if not resolvable
+    """
+    first_day = datetime(year, month, 1)
+
+    # First occurrence of weekday in the month
+    days_until_weekday = (weekday - first_day.weekday()) % 7
+    first_occurrence = first_day + timedelta(days=days_until_weekday)
+
+    # Nth occurrence
+    target_date = first_occurrence + timedelta(weeks=(occurrence - 1))
+
+    # If the Nth occurrence doesn't exist (e.g., 5th Monday), use the last occurrence.
+    if target_date.month != month:
+        target_date = target_date - timedelta(weeks=1)
+        if target_date.month != month:
+            return None
+
+    naive = datetime.combine(target_date.date(), time_obj)
+    if not tz:
+        return naive
+
+    try:
+        return timezone.make_aware(naive, tz)
+    except Exception:
+        # Fall back to setting tzinfo directly if make_aware can't resolve.
+        return naive.replace(tzinfo=tz)
+
+
+def get_date_from_iso_week(year, week, weekday, time_obj, tz):
+    """
+    Get a datetime from ISO year, week number, and weekday.
+
+    Args:
+        year: Target ISO year
+        week: ISO week number (1-53)
+        weekday: ISO weekday (0=Monday, 6=Sunday)
+        time_obj: Time to apply to the date
+        tz: Timezone to apply (tzinfo) or None
+    """
+    iso_weekday = weekday + 1  # Convert 0-6 to 1-7
+    if iso_weekday > 7:
+        iso_weekday = 7
+
+    try:
+        target_date = date.fromisocalendar(year, week, iso_weekday)
+    except ValueError:
+        # Week might not exist in this year (e.g., week 53 doesn't always exist)
+        for fallback_week in (52, 51):
+            try:
+                target_date = date.fromisocalendar(year, fallback_week, iso_weekday)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+
+    naive = datetime.combine(target_date, time_obj)
+    if not tz:
+        return naive
+
+    try:
+        return timezone.make_aware(naive, tz)
+    except Exception:
+        return naive.replace(tzinfo=tz)
 
 
 
