@@ -4,22 +4,22 @@
  * VERSION: 1.0 - Initial implementation
  */
 
-(function() {
+(function () {
     'use strict';
-    
+
     const STORAGE_KEY = 'gts-job-workspace';
     const MAX_TABS = 10; // Limit number of open jobs
-    
+
     class JobWorkspace {
         constructor() {
             this.openJobs = new Map(); // jobId -> jobData
             this.activeJobId = null;
             this.barElement = null;
             this.tabsContainer = null;
-            
+
             this.initialize();
         }
-        
+
         /**
          * Initialize the workspace
          */
@@ -31,26 +31,26 @@
                 this.init();
             }
         }
-        
+
         init() {
             this.barElement = document.getElementById('workspace-bar');
             this.tabsContainer = document.getElementById('workspace-tabs');
-            
+
             if (!this.barElement || !this.tabsContainer) {
                 console.warn('JobWorkspace: Required elements not found');
                 return;
             }
-            
+
             // Load saved workspace state
             this.loadFromStorage();
-            
+
             // Render initial state
             this.render();
-            
+
             // Set up global access
             window.JobWorkspace = this;
         }
-        
+
         /**
          * Open a job and add it to workspace
          */
@@ -61,7 +61,7 @@
                 this.switchToJob(jobId);
                 return;
             }
-            
+
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
                 if (window.showToast) {
@@ -69,7 +69,7 @@
                 }
                 return;
             }
-            
+
             // Add to workspace
             this.openJobs.set(jobId, {
                 jobId: jobId,
@@ -79,19 +79,19 @@
                 isMinimized: false,
                 timestamp: Date.now()
             });
-            
+
             this.activeJobId = jobId;
-            
+
             // Save and render
             this.saveToStorage();
             this.render();
-            
+
             // Load job edit form in panel
             if (window.JobPanel) {
                 window.JobPanel.setTitle('Edit Job');
                 window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
                 window.JobPanel.setCurrentJobId(jobId);
-                
+
                 // Update minimize button after a short delay to ensure panel is ready
                 setTimeout(() => {
                     if (window.JobPanel.updateMinimizeButton) {
@@ -100,7 +100,7 @@
                 }, 100);
             }
         }
-        
+
         /**
          * Add a job to workspace in minimized state (doesn't make it active)
          */
@@ -109,7 +109,7 @@
             if (this.openJobs.has(jobId)) {
                 return; // Already exists, don't modify
             }
-            
+
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
                 if (window.showToast) {
@@ -117,7 +117,7 @@
                 }
                 return;
             }
-            
+
             // Add to workspace as minimized
             this.openJobs.set(jobId, {
                 jobId: jobId,
@@ -127,39 +127,39 @@
                 isMinimized: true,  // Keep it minimized
                 timestamp: Date.now()
             });
-            
+
             // Save and render
             this.saveToStorage();
             this.render();
         }
-        
+
         /**
          * Minimize a job (keep in workspace but hide panel)
          */
         minimizeJob(jobId) {
             const job = this.openJobs.get(jobId);
             if (!job) return;
-            
+
             job.isMinimized = true;
             this.activeJobId = null;
-            
+
             // Hide the panel
             if (window.JobPanel) {
                 window.JobPanel.close(true); // Skip unsaved check since we're minimizing
             }
-            
+
             this.saveToStorage();
             this.render();
         }
-        
+
         /**
          * Close a job completely (remove from workspace)
          */
         closeJob(jobId) {
             if (!this.openJobs.has(jobId)) return;
-            
+
             this.openJobs.delete(jobId);
-            
+
             // If this was the active job, close the panel
             if (this.activeJobId === jobId) {
                 this.activeJobId = null;
@@ -167,23 +167,23 @@
                     window.JobPanel.close(true);
                 }
             }
-            
+
             // Update minimize button visibility
             if (window.JobPanel && window.JobPanel.updateMinimizeButton) {
                 window.JobPanel.updateMinimizeButton();
             }
-            
+
             this.saveToStorage();
             this.render();
         }
-        
+
         /**
          * Switch to a job (restore from minimized state)
          */
         switchToJob(jobId) {
             const job = this.openJobs.get(jobId);
             if (!job) return;
-            
+
             // Check if there are unsaved changes
             if (window.JobPanel && window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
                 // Save the form first
@@ -193,11 +193,11 @@
                     if (currentJobId && !this.hasJob(currentJobId)) {
                         // Get job details from the form
                         const form = document.querySelector('#job-panel .panel-body form');
-                        const businessName = form?.querySelector('input[name="business_name"]')?.value || 
-                                           form?.querySelector('input[name="contact_name"]')?.value || 
-                                           'Unnamed Job';
+                        const businessName = form?.querySelector('input[name="business_name"]')?.value ||
+                            form?.querySelector('input[name="contact_name"]')?.value ||
+                            'Unnamed Job';
                         const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-                        
+
                         // Add to workspace as minimized
                         this.addJobMinimized(currentJobId, {
                             customerName: businessName,
@@ -205,7 +205,7 @@
                             calendarColor: '#3B82F6'
                         });
                     }
-                    
+
                     // Now switch to the selected job
                     this.doSwitchToJob(jobId);
                 });
@@ -214,23 +214,23 @@
                 this.doSwitchToJob(jobId);
             }
         }
-        
+
         /**
          * Actually perform the job switch (called after unsaved check)
          */
         doSwitchToJob(jobId) {
             const job = this.openJobs.get(jobId);
             if (!job) return;
-            
+
             job.isMinimized = false;
             this.activeJobId = jobId;
-            
+
             // Load job edit form in panel
             if (window.JobPanel) {
                 window.JobPanel.setTitle('Edit Job');
                 window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
                 window.JobPanel.setCurrentJobId(jobId);
-                
+
                 // Update minimize button after a short delay to ensure panel is ready
                 setTimeout(() => {
                     if (window.JobPanel.updateMinimizeButton) {
@@ -238,81 +238,81 @@
                     }
                 }, 100);
             }
-            
+
             this.saveToStorage();
             this.render();
         }
-        
+
         /**
          * Check if a job is in the workspace
          */
         hasJob(jobId) {
             return this.openJobs.has(jobId);
         }
-        
+
         /**
          * Get the currently active job ID
          */
         getActiveJobId() {
             return this.activeJobId;
         }
-        
+
         /**
          * Close all jobs
          */
         closeAll() {
             if (this.openJobs.size === 0) return;
-            
+
             if (confirm('Close all open jobs?')) {
                 this.openJobs.clear();
                 this.activeJobId = null;
-                
+
                 if (window.JobPanel) {
                     window.JobPanel.close(true);
                 }
-                
+
                 this.saveToStorage();
                 this.render();
             }
         }
-        
+
         /**
          * Render the workspace tabs
          */
         render() {
             if (!this.tabsContainer || !this.barElement) return;
-            
+
             // If no jobs, hide the bar
             if (this.openJobs.size === 0) {
                 this.barElement.classList.add('hidden');
                 document.body.classList.remove('workspace-active');
                 return;
             }
-            
+
             // Show the bar
             this.barElement.classList.remove('hidden');
             document.body.classList.add('workspace-active');
-            
+
             // Clear existing tabs
             this.tabsContainer.innerHTML = '';
-            
+
             // Sort jobs by timestamp (oldest first)
             const sortedJobs = Array.from(this.openJobs.values())
                 .sort((a, b) => a.timestamp - b.timestamp);
-            
+
             // Create tabs
             sortedJobs.forEach(job => {
                 const tab = this.createTab(job);
                 this.tabsContainer.appendChild(tab);
             });
-            
+
             // Add "Close All" button if multiple jobs
             if (this.openJobs.size > 1) {
                 const closeAllBtn = this.createCloseAllButton();
                 this.tabsContainer.appendChild(closeAllBtn);
             }
         }
-        
+
         /**
          * Create a tab element for a job
          */
@@ -320,7 +320,7 @@
             const tab = document.createElement('div');
             tab.className = 'workspace-tab';
             tab.dataset.jobId = job.jobId; // Store job ID for tooltip
-            
+
             // Add active/minimized state classes
             if (job.jobId === this.activeJobId && !job.isMinimized) {
                 tab.classList.add('active');
@@ -328,20 +328,20 @@
             if (job.isMinimized) {
                 tab.classList.add('minimized');
             }
-            
+
             // Color indicator (small circle)
             const colorIndicator = document.createElement('div');
             colorIndicator.className = 'workspace-tab-color';
             colorIndicator.style.backgroundColor = job.calendarColor;
             tab.appendChild(colorIndicator);
-            
+
             // Customer name
             const name = document.createElement('span');
             name.className = 'workspace-tab-name';
             name.textContent = job.customerName;
             name.title = job.customerName; // Tooltip for long names
             tab.appendChild(name);
-            
+
             // Close button
             const closeBtn = document.createElement('button');
             closeBtn.className = 'workspace-tab-close';
@@ -381,7 +381,7 @@
                     window.jobCalendar.hideEventTooltip();
                 }
             });
-            
+
             // Click to switch/restore
             tab.onclick = () => {
                 if (this.activeJobId === job.jobId && !job.isMinimized) {
@@ -392,10 +392,10 @@
                     this.switchToJob(job.jobId);
                 }
             };
-            
+
             return tab;
         }
-        
+
         /**
          * Show tooltip for workspace tab by fetching job details
          */
@@ -449,7 +449,7 @@
             btn.onclick = () => this.closeAll();
             return btn;
         }
-        
+
         /**
          * Show dialog for unsaved changes with options to save, minimize, or cancel
          */
@@ -468,7 +468,7 @@
                 z-index: 10000;
                 animation: fadeIn 0.2s ease;
             `;
-            
+
             const dialog = document.createElement('div');
             dialog.style.cssText = `
                 background: white;
@@ -479,7 +479,7 @@
                 box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
                 animation: slideUp 0.2s ease;
             `;
-            
+
             dialog.innerHTML = `
                 <div style="display: flex; align-items: start; margin-bottom: 16px;">
                     <svg style="width: 24px; height: 24px; color: #f59e0b; margin-right: 12px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -505,7 +505,7 @@
                     </button>
                 </div>
             `;
-            
+
             // Add animations
             const style = document.createElement('style');
             style.textContent = `
@@ -519,25 +519,25 @@
                 }
             `;
             document.head.appendChild(style);
-            
+
             overlay.appendChild(dialog);
             document.body.appendChild(overlay);
-            
+
             // Button hover effects
             const saveBtn = dialog.querySelector('#dialog-save-btn');
             const minimizeBtn = dialog.querySelector('#dialog-minimize-btn');
             const discardBtn = dialog.querySelector('#dialog-discard-btn');
             const cancelBtn = dialog.querySelector('#dialog-cancel-btn');
-            
+
             saveBtn.addEventListener('mouseenter', () => saveBtn.style.background = '#2563eb');
             saveBtn.addEventListener('mouseleave', () => saveBtn.style.background = '#3b82f6');
-            
+
             minimizeBtn.addEventListener('mouseenter', () => minimizeBtn.style.background = '#e5e7eb');
             minimizeBtn.addEventListener('mouseleave', () => minimizeBtn.style.background = '#f3f4f6');
-            
+
             discardBtn.addEventListener('mouseenter', () => discardBtn.style.background = '#fecaca');
             discardBtn.addEventListener('mouseleave', () => discardBtn.style.background = '#fee2e2');
-            
+
             cancelBtn.addEventListener('mouseenter', () => {
                 cancelBtn.style.background = '#f9fafb';
                 cancelBtn.style.borderColor = '#9ca3af';
@@ -546,13 +546,13 @@
                 cancelBtn.style.background = 'white';
                 cancelBtn.style.borderColor = '#d1d5db';
             });
-            
+
             // Close dialog function
             const closeDialog = () => {
                 overlay.remove();
                 style.remove();
             };
-            
+
             // Save and proceed
             saveBtn.addEventListener('click', () => {
                 if (window.JobPanel.saveForm) {
@@ -565,7 +565,7 @@
                     onProceed();
                 }
             });
-            
+
             // Minimize to workspace
             minimizeBtn.addEventListener('click', () => {
                 const currentJobId = window.JobPanel.currentJobId;
@@ -588,16 +588,16 @@
                     onProceed();
                 }
             });
-            
+
             // Discard changes and proceed
             discardBtn.addEventListener('click', () => {
                 closeDialog();
                 onProceed();
             });
-            
+
             // Cancel - don't switch jobs
             cancelBtn.addEventListener('click', closeDialog);
-            
+
             // ESC key to cancel
             const escHandler = (e) => {
                 if (e.key === 'Escape') {
@@ -606,7 +606,7 @@
                 }
             };
             document.addEventListener('keydown', escHandler);
-            
+
             // Click overlay to cancel
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
@@ -614,7 +614,7 @@
                 }
             });
         }
-        
+
         /**
          * Save workspace state to localStorage
          */
@@ -629,7 +629,7 @@
                 console.warn('JobWorkspace: Error saving to localStorage', error);
             }
         }
-        
+
         /**
          * Load workspace state from localStorage
          */
@@ -637,29 +637,29 @@
             try {
                 const saved = localStorage.getItem(STORAGE_KEY);
                 if (!saved) return;
-                
+
                 const state = JSON.parse(saved);
-                
+
                 // Restore jobs
                 if (state.jobs && Array.isArray(state.jobs)) {
                     this.openJobs = new Map(state.jobs);
                 }
-                
+
                 // Restore active job (but don't open panel yet - wait for user action)
                 this.activeJobId = null; // Don't auto-open on page load
-                
+
                 // Mark all as minimized on page load
                 this.openJobs.forEach(job => {
                     job.isMinimized = true;
                 });
-                
+
             } catch (error) {
                 console.warn('JobWorkspace: Error loading from localStorage', error);
                 this.openJobs.clear();
                 this.activeJobId = null;
             }
         }
-        
+
         /**
          * Clear all workspace data
          */
@@ -670,7 +670,7 @@
             this.render();
         }
     }
-    
+
     // Initialize on load
     new JobWorkspace();
 })();

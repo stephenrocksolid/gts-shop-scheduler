@@ -2,10 +2,12 @@
 {% load static %}
 
 {% block extra_css %}
-<link href="{% static 'rental_scheduler/css/calendar.css' %}" rel="stylesheet">
-<link href="{% static 'rental_scheduler/css/job_calendar.css' %}" rel="stylesheet">
+    <link href="{% static 'rental_scheduler/css/calendar.css' %}"
+          rel="stylesheet">
+    <link href="{% static 'rental_scheduler/css/job_calendar.css' %}"
+          rel="stylesheet">
 
-<style>
+    <style>
     /* Status indicator styles for calendar events */
     .status-pending {
         background-color: #fbbf24;
@@ -1060,158 +1062,241 @@
     .fc-daygrid-day-frame {
         position: relative !important;
     }
-</style>
-{% endblock %}
+    </style>
+{% endblock extra_css %}
 
-{% block main_container_class %}full-bleed{% endblock %}
+{% block main_container_class %}
+full-bleed
+{% endblock main_container_class %}
 
 {% block content %}
-<!-- Search Panel -->
-<div id="calendar-search-panel">
-    <div id="search-panel-content">
-        <form method="get" id="calendar-search-form" class="mb-4">
-            <!-- Filters and Search on Same Row -->
-            <div class="flex flex-row gap-4 items-center flex-wrap">
-                <!-- Calendar Filter -->
-                <div style="flex: 0 0 280px; min-width: 280px; display: flex; align-items: center; gap: 0.75rem;">
-                    <label class="text-sm font-medium text-gray-700" style="margin: 0; white-space: nowrap;">Calendars</label>
-                    <div class="relative" style="flex: 1; min-width: 180px;">
-                        <button type="button" id="search-calendar-dropdown-btn" class="w-full flex items-center justify-between px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <span id="search-calendar-selected-text">All Calendars</span>
-                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                            </svg>
-                        </button>
-                        <div id="search-calendar-dropdown" class="hidden absolute w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto" style="z-index: 1000;">
-                            {% for calendar in calendars %}
-                            <label class="flex items-center px-4 py-2 hover:bg-gray-50 cursor-pointer">
-                                <input type="checkbox" name="calendars" value="{{ calendar.id }}" class="search-calendar-checkbox w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                                <span class="ml-3 flex items-center">
-                                    <span class="inline-block w-3 h-3 rounded mr-2" style="background-color: {{ calendar.color }};"></span>
-                                    <span class="text-sm text-gray-700">{{ calendar.name }}</span>
-                                </span>
+    <!-- Search Panel -->
+    <div id="calendar-search-panel">
+        <div id="search-panel-content">
+            <form method="get" id="calendar-search-form" class="mb-4">
+                <!-- Filters and Search on Same Row -->
+                <div class="flex flex-row gap-4 items-center flex-wrap">
+                    <!-- Calendar Filter -->
+                    <div style="flex: 0 0 280px;
+                                min-width: 280px;
+                                display: flex;
+                                align-items: center;
+                                gap: 0.75rem">
+                        <label class="text-sm font-medium text-gray-700"
+                               style="margin: 0;
+                                      white-space: nowrap">
+Calendars
+                        </label>
+                        <div class="relative" style="flex: 1; min-width: 180px;">
+                            <button type="button"
+                                    id="search-calendar-dropdown-btn"
+                                    class="w-full flex items-center justify-between px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <span id="search-calendar-selected-text">All Calendars</span>
+                                <svg class="w-4 h-4 text-gray-400"
+                                     fill="none"
+                                     stroke="currentColor"
+                                     viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7">
+</path>
+                                </svg>
+                            </button>
+                            <div id="search-calendar-dropdown"
+                                 class="hidden absolute w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto"
+                                 style="z-index: 1000">
+                                {% for calendar in calendars %}
+                                    <label class="flex items-center px-4 py-2 hover:bg-gray-50 cursor-pointer">
+                                        <input type="checkbox"
+                                               name="calendars"
+                                               value="{{ calendar.id }}"
+                                               class="search-calendar-checkbox w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                        <span class="ml-3 flex items-center">
+                                            <span class="inline-block w-3 h-3 rounded mr-2"
+                                                  style="background-color: {{ calendar.color }}"></span>
+                                            <span class="text-sm text-gray-700">{{ calendar.name }}</span>
+                                        </span>
+                                    </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Events Date Filter -->
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <label class="text-sm font-medium text-gray-700"
+                               style="margin: 0;
+                                      white-space: nowrap">
+Events
+                        </label>
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio"
+                                       name="date_filter"
+                                       value="all"
+                                       checked
+                                       class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">All Events</span>
                             </label>
-                            {% endfor %}
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio"
+                                       name="date_filter"
+                                       value="future"
+                                       class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">All Future</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio"
+                                       name="date_filter"
+                                       value="current_view"
+                                       class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events in Current View</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio"
+                                       name="date_filter"
+                                       value="two_years"
+                                       class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events within 2 years</span>
+                            </label>
                         </div>
+                        <!-- Hidden inputs to store current view dates -->
+                        <input type="hidden" name="start_date" id="search-view-start-date">
+                        <input type="hidden" name="end_date" id="search-view-end-date">
                     </div>
-                </div>
 
-                <!-- Events Date Filter -->
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    <label class="text-sm font-medium text-gray-700" style="margin: 0; white-space: nowrap;">Events</label>
-                    <div class="flex items-center gap-3 flex-wrap">
-                        <label class="flex items-center cursor-pointer">
-                            <input type="radio" name="date_filter" value="all" checked class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                            <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">All Events</span>
-                        </label>
-                        <label class="flex items-center cursor-pointer">
-                            <input type="radio" name="date_filter" value="future" class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                            <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">All Future</span>
-                        </label>
-                        <label class="flex items-center cursor-pointer">
-                            <input type="radio" name="date_filter" value="current_view" class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                            <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events in Current View</span>
-                        </label>
-                        <label class="flex items-center cursor-pointer">
-                            <input type="radio" name="date_filter" value="two_years" class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                            <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events within 2 years</span>
-                        </label>
-                    </div>
-                    <!-- Hidden inputs to store current view dates -->
-                    <input type="hidden" name="start_date" id="search-view-start-date">
-                    <input type="hidden" name="end_date" id="search-view-end-date">
-                </div>
-
-                <!-- Search Bar -->
-                <div class="flex-1 flex items-center gap-2" style="min-width: 300px;">
-                    <div class="flex-1 relative">
-                        <div class="absolute inset-y-0 left-0 flex items-center pointer-events-none" style="padding-left: 12px;">
-                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    <!-- Search Bar -->
+                    <div class="flex-1 flex items-center gap-2" style="min-width: 300px;">
+                        <div class="flex-1 relative">
+                            <div class="absolute inset-y-0 left-0 flex items-center pointer-events-none"
+                                 style="padding-left: 12px">
+                                <svg class="w-4 h-4 text-gray-400"
+                                     fill="none"
+                                     stroke="currentColor"
+                                     viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z">
+</path>
+                                </svg>
+                            </div>
+                            <input type="text"
+                                   name="search"
+                                   id="calendar-search-input"
+                                   class="w-full pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   style="padding-left: 36px"
+                                   placeholder="Search jobs..."
+                                   autocomplete="off">
+                        </div>
+                        <button type="submit"
+                                class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md whitespace-nowrap">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z">
+</path>
                             </svg>
-                        </div>
-                        <input type="text" name="search" id="calendar-search-input" class="w-full pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" style="padding-left: 36px;" placeholder="Search jobs..." autocomplete="off">
-                    </div>
-                    <button type="submit" class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md whitespace-nowrap">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                        </svg>
                         Search
-                    </button>
-                    <button type="button" id="calendar-clear-search-btn" class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200 whitespace-nowrap">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
+                        </button>
+                        <button type="button"
+                                id="calendar-clear-search-btn"
+                                class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200 whitespace-nowrap">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+</path>
+                            </svg>
                         Clear
-                    </button>
-                    <button type="button" id="calendar-close-search-btn" class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200 whitespace-nowrap" title="Close the search area">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
-                        </svg>
+                        </button>
+                        <button type="button"
+                                id="calendar-close-search-btn"
+                                class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200 whitespace-nowrap"
+                                title="Close the search area">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7">
+</path>
+                            </svg>
                         Close Search
-                    </button>
+                        </button>
+                    </div>
                 </div>
-            </div>
-        </form>
+            </form>
 
-        <!-- Search Results -->
-        <div id="search-results-container">
-            <div id="search-results" class="text-center text-gray-500 py-8">
+            <!-- Search Results -->
+            <div id="search-results-container">
+                <div id="search-results" class="text-center text-gray-500 py-8">
                 Enter search criteria and click Search to see results.
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<div id="calendar-shell" class="container-fluid px-3">
-    <div id="calendarPage" class="cal-page">
-        <div id="calendar-wrap">
-            <div id="calendar"></div>
+    <div id="calendar-shell" class="container-fluid px-3">
+        <div id="calendarPage" class="cal-page">
+            <div id="calendar-wrap">
+                <div id="calendar">
+                </div>
 
-            <!-- Loading State -->
-            <div id="calendar-loading" class="calendar-loading hidden">
-                <div class="loading-component flex items-center justify-center p-8">
-                    <div class="flex flex-col items-center space-y-4">
-                        <div class="w-12 h-12 border-4 border-gray-200 border-t-blue-600 rounded-full animate-spin"></div>
-                        <p class="text-gray-600 text-sm font-medium">Loading calendar...</p>
+                <!-- Loading State -->
+                <div id="calendar-loading" class="calendar-loading hidden">
+                    <div class="loading-component flex items-center justify-center p-8">
+                        <div class="flex flex-col items-center space-y-4">
+                            <div class="w-12 h-12 border-4 border-gray-200 border-t-blue-600 rounded-full animate-spin">
+                            </div>
+                            <p class="text-gray-600 text-sm font-medium">
+Loading calendar...
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            <aside id="todaySidebar" class="today-sidebar">
+                <div class="resize-handle" id="sidebarResizeHandle">
+                </div>
+                <header>
+                    <button id="todayPanelTitle" class="today-panel-title-btn">
+Today
+                    </button>
+                    <div id="todayDateLabel">
+                    </div>
+                </header>
+                <div class="today-date-controls">
+                    <button id="prevDayBtn" class="today-nav-btn" title="Previous day">
+                        <svg width="16"
+                             height="16"
+                             viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor"
+                             stroke-width="2">
+<polyline points="15,18 9,12 15,6"></polyline>
+                        </svg>
+                    </button>
+                    <input type="date" id="todayDatePicker" class="today-date-picker">
+                    <button id="nextDayBtn" class="today-nav-btn" title="Next day">
+                        <svg width="16"
+                             height="16"
+                             viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor"
+                             stroke-width="2">
+<polyline points="9,18 15,12 9,6"></polyline>
+                        </svg>
+                    </button>
+                    <button id="todayBtn" class="today-nav-btn" title="Go to today">
+                        <svg width="16"
+                             height="16"
+                             viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor"
+                             stroke-width="2">
+<circle cx="12" cy="12" r="10"></circle>
+<polyline points="12,6 12,12 16,14"></polyline>
+                        </svg>
+                    </button>
+                </div>
+                <div id="todayList" class="today-list">
+                </div>
+            </aside>
         </div>
-
-        <aside id="todaySidebar" class="today-sidebar">
-            <div class="resize-handle" id="sidebarResizeHandle"></div>
-            <header>
-                <button id="todayPanelTitle" class="today-panel-title-btn">Today</button>
-                <div id="todayDateLabel"></div>
-            </header>
-            <div class="today-date-controls">
-                <button id="prevDayBtn" class="today-nav-btn" title="Previous day">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="15,18 9,12 15,6"></polyline>
-                    </svg>
-                </button>
-                <input type="date" id="todayDatePicker" class="today-date-picker">
-                <button id="nextDayBtn" class="today-nav-btn" title="Next day">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="9,18 15,12 9,6"></polyline>
-                    </svg>
-                </button>
-                <button id="todayBtn" class="today-nav-btn" title="Go to today">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <polyline points="12,6 12,12 16,14"></polyline>
-                    </svg>
-                </button>
-            </div>
-            <div id="todayList" class="today-list"></div>
-        </aside>
     </div>
-</div>
 
 
 
-<script>
+    <script>
     // Calendar configuration and data
     window.calendarConfig = {
         eventsUrl: "{% url 'rental_scheduler:job_calendar_data' %}",
@@ -1776,9 +1861,9 @@
             });
         }
     });
-</script>
-{% endblock %}
+    </script>
+{% endblock content %}
 
 {% block extra_js %}
-<script src="{% static 'rental_scheduler/js/job_calendar.js' %}?v={{ timestamp|default:'1' }}"></script>
-{% endblock %}
+    <script src="{% static 'rental_scheduler/js/job_calendar.js' %}?v={{ timestamp|default:'1' }}"></script>
+{% endblock extra_js %}
