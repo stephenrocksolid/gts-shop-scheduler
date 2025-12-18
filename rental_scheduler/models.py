@@ -316,6 +316,19 @@ class Job(models.Model):
             models.Index(fields=['is_deleted']),
             models.Index(fields=['repeat_type']),
             models.Index(fields=['recurrence_parent', 'recurrence_original_start'], name='job_recur_idx'),
+            # Partial index for calendar feed overlap filter (is_deleted=False)
+            # Covers: jobs.filter(is_deleted=False, start_dt__lt=X, end_dt__gte=Y)
+            models.Index(
+                fields=['start_dt', 'end_dt'],
+                name='job_active_overlap_idx',
+                condition=models.Q(is_deleted=False),
+            ),
+            # Partial composite index for calendar-filtered queries
+            models.Index(
+                fields=['calendar', 'start_dt'],
+                name='job_active_cal_start_idx',
+                condition=models.Q(is_deleted=False),
+            ),
         ]
     
     def __str__(self):
@@ -476,13 +489,21 @@ class Job(models.Model):
     # Recurring event methods
     @property
     def is_recurring_parent(self):
-        """Check if this job is a parent of recurring instances"""
-        return self.recurrence_rule is not None and self.recurrence_parent is None
+        """Check if this job is a parent of recurring instances.
+        
+        Uses recurrence_parent_id (the FK column) to avoid loading the related
+        object and triggering an N+1 query in calendar feed loops.
+        """
+        return self.recurrence_rule is not None and self.recurrence_parent_id is None
     
     @property
     def is_recurring_instance(self):
-        """Check if this job is an instance of a recurring event"""
-        return self.recurrence_parent is not None
+        """Check if this job is an instance of a recurring event.
+        
+        Uses recurrence_parent_id (the FK column) to avoid loading the related
+        object and triggering an N+1 query in calendar feed loops.
+        """
+        return self.recurrence_parent_id is not None
     
     def create_recurrence_rule(self, recurrence_type, interval=1, count=None, until_date=None):
         """
@@ -624,6 +645,21 @@ class CallReminder(models.Model):
         ordering = ['reminder_date', '-created_at']
         verbose_name = 'Call Reminder'
         verbose_name_plural = 'Call Reminders'
+        indexes = [
+            # Index for date range queries (standalone and job-linked reminders)
+            models.Index(fields=['reminder_date'], name='callreminder_date_idx'),
+            # Index for job-linked call reminders (used by Subquery in calendar feed)
+            models.Index(fields=['job'], name='callreminder_job_idx'),
+            # Composite index for calendar-filtered date range queries
+            models.Index(fields=['calendar', 'reminder_date'], name='callreminder_cal_date_idx'),
+            # Partial index for standalone reminders (job is NULL)
+            # This optimizes the standalone CallReminder query in calendar feed
+            models.Index(
+                fields=['calendar', 'reminder_date'],
+                name='callreminder_standalone_idx',
+                condition=models.Q(job__isnull=True),
+            ),
+        ]
     
     def __str__(self):
         if self.job:
@@ -1242,3 +1278,58 @@ def create_status_change_record(sender, instance, **kwargs):
         except Job.DoesNotExist:
             # This shouldn't happen, but handle gracefully
             pass
+
+
+# ============================================================================
+# Calendar Events Cache Invalidation
+# ============================================================================
+# When Job or CallReminder records are created/updated/deleted, we bump a
+# version counter in the cache so that the next calendar API request fetches
+# fresh data. This allows aggressive caching without stale data after mutations.
+
+from django.db.models.signals import post_save, post_delete
+
+CALENDAR_EVENTS_VERSION_KEY = 'calendar_events_version'
+
+
+def invalidate_calendar_events_cache(**kwargs):
+    """
+    Bump the calendar events cache version, invalidating all cached responses.
+    Called on any Job or CallReminder save/delete.
+    """
+    from django.core.cache import cache
+    try:
+        # Increment version counter (or set to 1 if doesn't exist)
+        # This makes all existing cache keys stale
+        current_version = cache.get(CALENDAR_EVENTS_VERSION_KEY, 0)
+        cache.set(CALENDAR_EVENTS_VERSION_KEY, current_version + 1, timeout=None)
+        logger.debug(f"Calendar events cache invalidated, new version: {current_version + 1}")
+    except Exception as e:
+        # Don't let cache errors break the save
+        logger.warning(f"Failed to invalidate calendar cache: {e}")
+
+
+# Connect signals for Job
+@receiver(post_save, sender=Job)
+def invalidate_cache_on_job_save(sender, instance, **kwargs):
+    """Invalidate calendar cache when a job is created or updated."""
+    invalidate_calendar_events_cache()
+
+
+@receiver(post_delete, sender=Job)
+def invalidate_cache_on_job_delete(sender, instance, **kwargs):
+    """Invalidate calendar cache when a job is deleted."""
+    invalidate_calendar_events_cache()
+
+
+# Connect signals for CallReminder
+@receiver(post_save, sender=CallReminder)
+def invalidate_cache_on_callreminder_save(sender, instance, **kwargs):
+    """Invalidate calendar cache when a call reminder is created or updated."""
+    invalidate_calendar_events_cache()
+
+
+@receiver(post_delete, sender=CallReminder)
+def invalidate_cache_on_callreminder_delete(sender, instance, **kwargs):
+    """Invalidate calendar cache when a call reminder is deleted."""
+    invalidate_calendar_events_cache()

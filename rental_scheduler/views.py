@@ -516,7 +516,30 @@ def lighten_color(hex_color, factor):
 
 def get_job_calendar_data(request):
     """API endpoint to get job data for calendar display"""
+    import time as perf_time
+    import hashlib
+    from django.conf import settings
+    from django.core.cache import cache
+    from django.db import connection, reset_queries
     from rental_scheduler.constants import MAX_MULTI_DAY_EXPANSION_DAYS
+    from rental_scheduler.models import CALENDAR_EVENTS_VERSION_KEY
+    
+    # Performance instrumentation (only in DEBUG mode)
+    _perf_start = perf_time.perf_counter()
+    _perf_db_start = None
+    _perf_db_end = None
+    _perf_serialize_start = None
+    _perf_reminders_start = None
+    _perf_reminders_end = None
+    _event_count = 0
+    _cache_hit = False
+    _query_count_jobs = 0
+    _query_count_reminders = 0
+    _query_count_total = 0
+    
+    # Reset query log for accurate counting (DEBUG only)
+    if settings.DEBUG:
+        reset_queries()
     
     try:
         # Get date range from request
@@ -549,9 +572,58 @@ def get_job_calendar_data(request):
         calendar_filter = request.GET.get('calendar')
         search_filter = request.GET.get('search')
         
+        # =====================================================================
+        # Cache lookup - build key from normalized params + version
+        # =====================================================================
+        cache_ttl = getattr(settings, 'CALENDAR_EVENTS_CACHE_TTL', 30)
+        cache_version = cache.get(CALENDAR_EVENTS_VERSION_KEY, 0)
+        
+        # Normalize dates for cache key (use date-only format to ignore timezone info in request)
+        cache_start = request_start_date.isoformat() if request_start_date else ''
+        cache_end = request_end_date.isoformat() if request_end_date else ''
+        
+        # Build deterministic cache key
+        cache_key_raw = f"cal_events:v{cache_version}:{cache_start}:{cache_end}:{calendar_filter or ''}:{status_filter or ''}:{search_filter or ''}"
+        cache_key = f"cal_events:{hashlib.md5(cache_key_raw.encode()).hexdigest()}"
+        
+        # Check cache (skip if fresh=1 is passed - used after mutations)
+        if not request.GET.get('fresh'):
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                _cache_hit = True
+                _perf_total = perf_time.perf_counter() - _perf_start
+                
+                # Use compact JSON (no extra whitespace)
+                response = JsonResponse(cached_data, json_dumps_params={'separators': (',', ':')})
+                
+                if settings.DEBUG:
+                    total_time_ms = _perf_total * 1000
+                    response['Server-Timing'] = f'cache;desc="Cache Hit", total;dur={total_time_ms:.1f}'
+                    response['X-Cache'] = 'HIT'
+                    logger.info(f"[PERF] job_calendar_data: CACHE HIT, total={total_time_ms:.1f}ms")
+                
+                return response
+        
         # Build queryset - optimized to select only necessary fields for calendar display
-        # Prefetch call_reminders to avoid N+1 queries
-        jobs = Job.objects.select_related('calendar').prefetch_related('call_reminders').filter(is_deleted=False).only(
+        # Use Subquery annotations instead of prefetch_related for call_reminders
+        # This reduces query count from 2+ to 1 for the jobs fetch
+        from django.db.models import OuterRef, Subquery, Exists
+        from django.db.models.functions import Substr, Length
+        from .models import CallReminder
+        
+        # Subquery to get the notes from the first linked call reminder
+        call_reminder_notes_subquery = CallReminder.objects.filter(
+            job_id=OuterRef('pk')
+        ).order_by('id').values('notes')[:1]
+        
+        jobs = Job.objects.select_related('calendar').filter(is_deleted=False).annotate(
+            # Annotate with call reminder notes (first 50 chars for preview)
+            _call_reminder_notes=Subquery(call_reminder_notes_subquery),
+            # Annotate with has_notes flag
+            _call_reminder_has_notes=Exists(
+                CallReminder.objects.filter(job_id=OuterRef('pk')).exclude(notes='').exclude(notes__isnull=True)
+            ),
+        ).only(
             'id', 'business_name', 'contact_name', 'phone', 'status',
             'start_dt', 'end_dt', 'all_day', 'trailer_color',
             'has_call_reminder', 'call_reminder_weeks_prior', 'call_reminder_completed',
@@ -606,7 +678,18 @@ def get_job_calendar_data(request):
         # Convert to calendar events
         events = []
         
-        for job in jobs:
+        # Performance: measure DB query time (queryset is lazy, force evaluation here)
+        _perf_db_start = perf_time.perf_counter()
+        jobs_list = list(jobs)  # Force DB query execution
+        _perf_db_end = perf_time.perf_counter()
+        
+        # Capture query count after jobs fetch (DEBUG only)
+        if settings.DEBUG:
+            _query_count_jobs = len(connection.queries)
+        
+        _perf_serialize_start = perf_time.perf_counter()
+        
+        for job in jobs_list:
             # Format phone number using shared formatter
             phone_formatted = format_phone(job.get_phone()) if job.get_phone() else ""
             
@@ -640,6 +723,10 @@ def get_job_calendar_data(request):
             job_start_date = job_start_local.date()
             job_end_date = job_end_local.date()
             is_multi_day = (job_end_date > job_start_date)
+            
+            # Compute recurring flags once (avoids repeated property access)
+            job_is_recurring_parent = job.is_recurring_parent
+            job_is_recurring_instance = job.is_recurring_instance
             
             if is_multi_day:
                 # Break multi-day jobs into separate events for each day
@@ -722,8 +809,8 @@ def get_job_calendar_data(request):
                             'phone': job.get_phone(),
                             'trailer_color': job.trailer_color,
                             # Recurring flags only (not full rule object)
-                            'is_recurring_parent': job.is_recurring_parent,
-                            'is_recurring_instance': job.is_recurring_instance,
+                            'is_recurring_parent': job_is_recurring_parent,
+                            'is_recurring_instance': job_is_recurring_instance,
                             # Multi-day tracking
                             'is_multi_day': True,
                             'multi_day_number': day_number,
@@ -755,8 +842,8 @@ def get_job_calendar_data(request):
                         'phone': job.get_phone(),
                         'trailer_color': job.trailer_color,
                         # Recurring flags only (not full rule object)
-                        'is_recurring_parent': job.is_recurring_parent,
-                        'is_recurring_instance': job.is_recurring_instance,
+                        'is_recurring_parent': job_is_recurring_parent,
+                        'is_recurring_instance': job_is_recurring_instance,
                         # Multi-day tracking
                         'is_multi_day': False,
                     }
@@ -779,15 +866,15 @@ def get_job_calendar_data(request):
                     # Format the reminder title
                     reminder_title = f"📞 {title}"
                     
-                    # Get the CallReminder notes from prefetched data (avoids N+1 query)
-                    reminder_notes = ''
-                    try:
-                        # Use prefetched call_reminders to avoid extra DB query
-                        call_reminders = list(job.call_reminders.all())
-                        if call_reminders:
-                            reminder_notes = call_reminders[0].notes or ''
-                    except Exception:
-                        pass
+                    # Get the CallReminder notes preview from annotated data (avoids N+1 query)
+                    # Full notes are fetched on demand via detail API
+                    notes_preview = ''
+                    has_notes = getattr(job, '_call_reminder_has_notes', False)
+                    if has_notes:
+                        full_notes = getattr(job, '_call_reminder_notes', '') or ''
+                        if full_notes:
+                            # Truncate for preview (same 50-char limit as title)
+                            notes_preview = full_notes[:50] + '...' if len(full_notes) > 50 else full_notes
                     
                     reminder_event = {
                         'id': f"reminder-{job.id}",
@@ -809,7 +896,8 @@ def get_job_calendar_data(request):
                             'weeks_prior': job.call_reminder_weeks_prior,
                             'job_date': timezone.localtime(job.start_dt).date().isoformat(),
                             'call_reminder_completed': job.call_reminder_completed,
-                            'notes': reminder_notes,
+                            'notes_preview': notes_preview,  # Trimmed for feed; full via detail API
+                            'has_notes': has_notes,
                         }
                     }
                     
@@ -819,6 +907,7 @@ def get_job_calendar_data(request):
         
         # Fetch standalone CallReminder records (not linked to jobs)
         # Only query if we have valid date bounds (reuse already-parsed dates from top of function)
+        _perf_reminders_start = perf_time.perf_counter()
         if request_start_date and request_end_date:
             try:
                 from .models import CallReminder
@@ -881,6 +970,10 @@ def get_job_calendar_data(request):
                         if reminder.completed:
                             reminder_title = f"✓ {reminder_title}"
                         
+                        # Use notes_preview in feed, full notes fetched on demand
+                        has_notes = bool(reminder.notes)
+                        standalone_notes_preview = notes_preview if reminder.notes else ''  # Reuse notes_preview from title
+                        
                         reminder_event = {
                             'id': f"call-reminder-{reminder.id}",
                             'title': reminder_title,
@@ -894,7 +987,8 @@ def get_job_calendar_data(request):
                                 'reminder_id': reminder.id,
                                 'calendar_id': reminder.calendar.id,
                                 'calendar_name': reminder.calendar.name,
-                                'notes': reminder.notes,
+                                'notes_preview': standalone_notes_preview,  # Trimmed for feed
+                                'has_notes': has_notes,
                                 'completed': reminder.completed,
                                 'reminder_date': reminder_date.isoformat(),
                             }
@@ -908,17 +1002,62 @@ def get_job_calendar_data(request):
                 logger.error(f"Error fetching standalone call reminders: {str(reminder_fetch_error)}")
                 # Continue without standalone reminders if there's an error
         
-        return JsonResponse({
+        _perf_reminders_end = perf_time.perf_counter()
+        
+        # Capture query count after reminders fetch (DEBUG only)
+        if settings.DEBUG:
+            _query_count_total = len(connection.queries)
+            _query_count_reminders = _query_count_total - _query_count_jobs
+        
+        # Build response with performance metrics
+        _event_count = len(events)
+        _perf_serialize_end = perf_time.perf_counter()
+        _perf_total = perf_time.perf_counter() - _perf_start
+        
+        response_data = {
             'status': 'success',
             'events': events
-        })
+        }
+        
+        # Store in cache for future requests
+        try:
+            cache.set(cache_key, response_data, timeout=cache_ttl)
+        except Exception as cache_err:
+            logger.warning(f"Failed to cache calendar data: {cache_err}")
+        
+        # Use compact JSON (no extra whitespace) for smaller payload
+        response = JsonResponse(response_data, json_dumps_params={'separators': (',', ':')})
+        
+        # Add Server-Timing header for DevTools visibility (DEBUG only)
+        if settings.DEBUG:
+            db_time_ms = (_perf_db_end - _perf_db_start) * 1000 if _perf_db_start and _perf_db_end else 0
+            reminders_time_ms = (_perf_reminders_end - _perf_reminders_start) * 1000 if _perf_reminders_start and _perf_reminders_end else 0
+            serialize_time_ms = (_perf_serialize_end - _perf_serialize_start) * 1000 if _perf_serialize_start else 0
+            total_time_ms = _perf_total * 1000
+            
+            response['Server-Timing'] = (
+                f'db;dur={db_time_ms:.1f};desc="Jobs DB", '
+                f'reminders;dur={reminders_time_ms:.1f};desc="Reminders DB", '
+                f'serialize;dur={serialize_time_ms:.1f};desc="Serialization", '
+                f'total;dur={total_time_ms:.1f};desc="Total"'
+            )
+            response['X-Cache'] = 'MISS'
+            
+            # Log performance metrics with query counts
+            logger.info(
+                f"[PERF] job_calendar_data: CACHE MISS, events={_event_count}, "
+                f"queries={_query_count_total} (jobs={_query_count_jobs}, reminders={_query_count_reminders}), "
+                f"db={db_time_ms:.1f}ms, reminders={reminders_time_ms:.1f}ms, serialize={serialize_time_ms:.1f}ms, total={total_time_ms:.1f}ms"
+            )
+        
+        return response
         
     except Exception as e:
         logger.error(f"Error getting calendar data: {str(e)}")
         return JsonResponse({
             'status': 'error',
             'error': str(e)
-        }, status=500)
+        }, status=500, json_dumps_params={'separators': (',', ':')})
 
 
 @require_http_methods(["POST"])

@@ -280,3 +280,296 @@ class TestCalendarAPIReadOnly:
         finally:
             settings.DEBUG = old_debug
             reset_queries()
+
+
+@pytest.mark.django_db
+class TestCalendarAPIQueryCount:
+    """Test that calendar feed maintains expected query count (no N+1)."""
+    
+    # Maximum expected queries for a cache-miss calendar feed request:
+    # 1 - Jobs query (with annotations)
+    # 2 - Standalone CallReminder query
+    # Plus a small margin for session/auth queries
+    MAX_EXPECTED_QUERIES = 5
+    
+    def test_query_count_with_multiple_jobs(self, api_client, calendar):
+        """
+        Ensure loading multiple jobs doesn't trigger N+1 queries.
+        This is a regression test for the recurring property fix.
+        """
+        from django.db import connection, reset_queries
+        from django.conf import settings
+        
+        now = timezone.now()
+        
+        # Create 10 jobs - if N+1 exists, this would cause 10+ extra queries
+        for i in range(10):
+            Job.objects.create(
+                calendar=calendar,
+                business_name=f"Test Business {i}",
+                start_dt=now + timedelta(days=i),
+                end_dt=now + timedelta(days=i, hours=2),
+                status='uncompleted',
+            )
+        
+        start = now.date() - timedelta(days=1)
+        end = now.date() + timedelta(days=15)
+        
+        # Enable query logging
+        old_debug = settings.DEBUG
+        settings.DEBUG = True
+        reset_queries()
+        
+        try:
+            url = reverse('rental_scheduler:job_calendar_data')
+            # Add fresh=1 to bypass cache
+            response = api_client.get(url, {
+                'start': start.isoformat(),
+                'end': end.isoformat(),
+                'calendar': calendar.id,
+                'fresh': '1',
+            })
+            
+            assert response.status_code == 200
+            
+            query_count = len(connection.queries)
+            assert query_count <= self.MAX_EXPECTED_QUERIES, (
+                f"Expected <= {self.MAX_EXPECTED_QUERIES} queries, got {query_count}. "
+                f"This may indicate an N+1 query regression."
+            )
+            
+        finally:
+            settings.DEBUG = old_debug
+            reset_queries()
+    
+    def test_query_count_with_recurring_jobs(self, api_client, calendar):
+        """
+        Ensure recurring parent/instance jobs don't trigger extra queries.
+        The is_recurring_parent and is_recurring_instance properties should
+        use recurrence_parent_id (not load the related object).
+        """
+        from django.db import connection, reset_queries
+        from django.conf import settings
+        
+        now = timezone.now()
+        
+        # Create a parent job with recurrence_rule
+        parent = Job.objects.create(
+            calendar=calendar,
+            business_name="Recurring Parent",
+            start_dt=now,
+            end_dt=now + timedelta(hours=2),
+            status='uncompleted',
+            recurrence_rule={'type': 'monthly', 'interval': 1},
+        )
+        
+        # Create some instance jobs that reference the parent
+        for i in range(5):
+            Job.objects.create(
+                calendar=calendar,
+                business_name=f"Recurring Instance {i}",
+                start_dt=now + timedelta(days=30 * (i + 1)),
+                end_dt=now + timedelta(days=30 * (i + 1), hours=2),
+                status='uncompleted',
+                recurrence_parent=parent,
+                recurrence_original_start=now + timedelta(days=30 * (i + 1)),
+            )
+        
+        start = now.date() - timedelta(days=1)
+        end = now.date() + timedelta(days=180)
+        
+        # Enable query logging
+        old_debug = settings.DEBUG
+        settings.DEBUG = True
+        reset_queries()
+        
+        try:
+            url = reverse('rental_scheduler:job_calendar_data')
+            response = api_client.get(url, {
+                'start': start.isoformat(),
+                'end': end.isoformat(),
+                'calendar': calendar.id,
+                'fresh': '1',
+            })
+            
+            assert response.status_code == 200
+            
+            query_count = len(connection.queries)
+            assert query_count <= self.MAX_EXPECTED_QUERIES, (
+                f"Expected <= {self.MAX_EXPECTED_QUERIES} queries with recurring jobs, "
+                f"got {query_count}. Recurring properties may be triggering N+1."
+            )
+            
+        finally:
+            settings.DEBUG = old_debug
+            reset_queries()
+
+
+@pytest.mark.django_db
+class TestCalendarAPIRecurringFlags:
+    """Test that recurring flags are correctly serialized."""
+    
+    def test_recurring_parent_flag_serialized(self, api_client, calendar):
+        """A job with recurrence_rule and no parent should have is_recurring_parent=True."""
+        now = timezone.now()
+        parent = Job.objects.create(
+            calendar=calendar,
+            business_name="Recurring Parent",
+            start_dt=now,
+            end_dt=now + timedelta(hours=2),
+            status='uncompleted',
+            recurrence_rule={'type': 'monthly', 'interval': 1},
+        )
+        
+        start = now.date() - timedelta(days=1)
+        end = now.date() + timedelta(days=1)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        job_events = [e for e in data['events'] if e.get('extendedProps', {}).get('job_id') == parent.id]
+        assert len(job_events) >= 1
+        
+        props = job_events[0]['extendedProps']
+        assert props.get('is_recurring_parent') is True
+        assert props.get('is_recurring_instance') is False
+    
+    def test_recurring_instance_flag_serialized(self, api_client, calendar):
+        """A job with recurrence_parent should have is_recurring_instance=True."""
+        now = timezone.now()
+        parent = Job.objects.create(
+            calendar=calendar,
+            business_name="Recurring Parent",
+            start_dt=now - timedelta(days=30),
+            end_dt=now - timedelta(days=30) + timedelta(hours=2),
+            status='uncompleted',
+            recurrence_rule={'type': 'monthly', 'interval': 1},
+        )
+        
+        instance = Job.objects.create(
+            calendar=calendar,
+            business_name="Recurring Instance",
+            start_dt=now,
+            end_dt=now + timedelta(hours=2),
+            status='uncompleted',
+            recurrence_parent=parent,
+            recurrence_original_start=now,
+        )
+        
+        start = now.date() - timedelta(days=1)
+        end = now.date() + timedelta(days=1)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        job_events = [e for e in data['events'] if e.get('extendedProps', {}).get('job_id') == instance.id]
+        assert len(job_events) >= 1
+        
+        props = job_events[0]['extendedProps']
+        assert props.get('is_recurring_parent') is False
+        assert props.get('is_recurring_instance') is True
+
+
+@pytest.mark.django_db
+class TestCalendarAPICallReminderAnnotations:
+    """Test that call reminder annotations work correctly."""
+    
+    def test_job_call_reminder_notes_annotated(self, api_client, calendar):
+        """Job-linked call reminders should have notes annotated correctly."""
+        from rental_scheduler.models import CallReminder
+        
+        now = timezone.now()
+        job = Job.objects.create(
+            calendar=calendar,
+            business_name="Test Business",
+            start_dt=now + timedelta(days=7),  # Job in future
+            end_dt=now + timedelta(days=7, hours=2),
+            status='uncompleted',
+            has_call_reminder=True,
+            call_reminder_weeks_prior=2,  # Reminder 1 week prior
+        )
+        
+        # Create a call reminder linked to this job
+        CallReminder.objects.create(
+            job=job,
+            calendar=calendar,
+            reminder_date=now.date(),
+            notes="Please call customer about scheduling",
+            completed=False,
+        )
+        
+        start = now.date() - timedelta(days=1)
+        end = now.date() + timedelta(days=14)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Find the call reminder event (type=call_reminder)
+        reminder_events = [
+            e for e in data['events'] 
+            if e.get('extendedProps', {}).get('type') == 'call_reminder' 
+            and e.get('extendedProps', {}).get('job_id') == job.id
+        ]
+        assert len(reminder_events) >= 1
+        
+        props = reminder_events[0]['extendedProps']
+        assert props.get('has_notes') is True
+        assert 'call customer' in props.get('notes_preview', '').lower()
+    
+    def test_standalone_call_reminder_displayed(self, api_client, calendar):
+        """Standalone call reminders should appear in the feed."""
+        from rental_scheduler.models import CallReminder
+        
+        reminder_date = timezone.now().date()
+        reminder = CallReminder.objects.create(
+            calendar=calendar,
+            reminder_date=reminder_date,
+            notes="Standalone reminder note",
+            completed=False,
+        )
+        
+        start = reminder_date - timedelta(days=1)
+        end = reminder_date + timedelta(days=1)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Find the standalone call reminder event
+        reminder_events = [
+            e for e in data['events'] 
+            if e.get('extendedProps', {}).get('type') == 'standalone_call_reminder'
+            and e.get('extendedProps', {}).get('reminder_id') == reminder.id
+        ]
+        assert len(reminder_events) == 1
+        
+        props = reminder_events[0]['extendedProps']
+        assert props.get('has_notes') is True
+        assert 'Standalone' in props.get('notes_preview', '')
