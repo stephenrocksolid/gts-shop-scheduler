@@ -580,12 +580,128 @@
       },
 
       /**
+       * Check which required fields are missing from the form.
+       * Required fields: business_name, start_dt, end_dt, calendar
+       * @param {HTMLFormElement} form - The form element
+       * @returns {string[]} - Array of missing field names (empty if all present)
+       */
+      getRequiredMissing(form) {
+        if (!form) return ['form'];
+        const missing = [];
+
+        // Business name - required and must not be whitespace-only
+        const businessName = form.querySelector('input[name="business_name"]');
+        if (!businessName || !businessName.value.trim()) {
+          missing.push('business_name');
+        }
+
+        // Start date - required
+        const startDt = form.querySelector('input[name="start_dt"]');
+        if (!startDt || !startDt.value.trim()) {
+          missing.push('start_dt');
+        }
+
+        // End date - required
+        const endDt = form.querySelector('input[name="end_dt"]');
+        if (!endDt || !endDt.value.trim()) {
+          missing.push('end_dt');
+        }
+
+        // Calendar - required (select element)
+        const calendar = form.querySelector('select[name="calendar"]');
+        if (!calendar || !calendar.value) {
+          missing.push('calendar');
+        }
+
+        return missing;
+      },
+
+      /**
+       * Check if any required fields are missing.
+       * @param {HTMLFormElement} form - The form element
+       * @returns {boolean} - True if any required fields are missing
+       */
+      hasRequiredMissing(form) {
+        return this.getRequiredMissing(form).length > 0;
+      },
+
+      /**
+       * Minimize to workspace as draft/unsaved. Used by both minimize button and outside-click.
+       * Reuses existing draft if present, otherwise creates one. Always closes the panel.
+       * @param {Object} options
+       * @param {string|null} options.jobId - Real job ID (if exists)
+       * @param {Object} options.meta - Job metadata {customerName, trailerColor, calendarColor}
+       * @param {string|null} options.currentHtml - Panel HTML content for restoration
+       */
+      minimizeAsDraft(options) {
+        const { jobId, meta, currentHtml } = options;
+
+        if (jobId && window.JobWorkspace) {
+          // EXISTING JOB: minimize and mark as unsaved
+          if (!window.JobWorkspace.hasJob(jobId)) {
+            window.JobWorkspace.openJob(jobId, meta);
+            this.setCurrentJobId(jobId);
+          }
+
+          // Mark as unsaved with current HTML BEFORE minimizing (so it's stored)
+          if (window.JobWorkspace.markUnsaved) {
+            window.JobWorkspace.markUnsaved(jobId, currentHtml);
+          }
+
+          // Minimize - this closes the panel
+          window.JobWorkspace.minimizeJob(jobId);
+
+        } else {
+          // NEW JOB: reuse existing draft or create one
+          let draftId = window.JobPanel.currentDraftId;
+
+          if (draftId && window.JobWorkspace && window.JobWorkspace.hasJob(draftId)) {
+            // Reuse existing draft - update meta and HTML
+            if (window.JobWorkspace.updateJobMeta) {
+              window.JobWorkspace.updateJobMeta(draftId, meta);
+            }
+            if (window.JobWorkspace.markUnsaved) {
+              window.JobWorkspace.markUnsaved(draftId, currentHtml);
+            }
+          } else if (window.JobWorkspace && window.JobWorkspace.createDraft) {
+            // Create new draft
+            draftId = window.JobWorkspace.createDraft({
+              customerName: meta.customerName || 'New Job',
+              trailerColor: meta.trailerColor,
+              calendarColor: meta.calendarColor,
+              html: currentHtml
+            });
+            window.JobPanel.currentDraftId = draftId;
+          } else {
+            console.error('Cannot minimize: JobWorkspace not available');
+            return;
+          }
+
+          // Minimize the draft - this closes the panel
+          if (draftId && window.JobWorkspace) {
+            window.JobWorkspace.minimizeJob(draftId);
+          }
+        }
+      },
+
+      /**
        * Save the form without causing page navigation.
        * Uses HTMX if the form has hx-post, otherwise uses fetch().
        * Handles draft promotion automatically on successful save.
-       * @param {Function} callback - Called with result object: { successful, jobId, responseHtml, status }
+       * @param {Object|Function} optionsOrCallback - Options object or callback function (for backwards compatibility)
+       *   - mode: 'manual' | 'autosave' (default: 'autosave')
+       *     - 'manual': Run HTML5 validation, block if invalid, show validation messages
+       *     - 'autosave': Skip validation display, return unsuccessful if required fields missing
+       * @param {Function} callback - Called with result object: { successful, jobId, responseHtml, status, reason }
        */
-      saveForm(callback) {
+      saveForm(optionsOrCallback, callback) {
+        // Handle backwards compatibility: saveForm(callback) vs saveForm(options, callback)
+        let options = { mode: 'autosave' };
+        if (typeof optionsOrCallback === 'function') {
+          callback = optionsOrCallback;
+        } else if (optionsOrCallback && typeof optionsOrCallback === 'object') {
+          options = { ...options, ...optionsOrCallback };
+        }
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (!panelBody) {
           console.warn('Panel body not found');
@@ -601,6 +717,32 @@
         }
 
         const self = this;
+        const mode = options.mode || 'autosave';
+
+        // Check for missing required fields
+        const missingFields = this.getRequiredMissing(form);
+        const hasMissing = missingFields.length > 0;
+
+        if (mode === 'manual') {
+          // Manual save mode: run HTML5 validation and show messages
+          if (hasMissing) {
+            // Trigger HTML5 validation display
+            if (!form.reportValidity()) {
+              if (window.showToast) {
+                window.showToast('Please fill in all required fields before saving.', 'warning');
+              }
+              if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
+              return;
+            }
+          }
+        } else {
+          // Autosave mode: don't show validation popups, just return unsuccessful
+          if (hasMissing) {
+            console.log('saveForm autosave skipped: missing required fields', missingFields);
+            if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
+            return;
+          }
+        }
 
         /**
          * Handle draft promotion after successful save
@@ -757,12 +899,32 @@
       },
 
       setupButtons() {
-        // Close button
+        // Close button - closes and removes job from workspace
+        // If required fields are missing, just close without saving (discard incomplete job)
+        // If required fields are present and there are changes, save first then close
         const closeBtn = panelEl.querySelector('.panel-header .btn-close');
         if (closeBtn) {
           closeBtn.addEventListener('click', () => {
             const self = this;
-            // If there are unsaved changes, save first
+            const form = document.querySelector('#job-panel .panel-body form');
+            const missingFields = this.getRequiredMissing(form);
+            const hasMissingRequired = missingFields.length > 0;
+
+            // If required fields are missing, just close without attempting save
+            if (hasMissingRequired) {
+              // Close the panel and remove from workspace
+              if (self.currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(self.currentJobId)) {
+                window.JobWorkspace.closeJob(self.currentJobId);
+              } else if (window.JobPanel.currentDraftId && window.JobWorkspace) {
+                // Also clean up any draft
+                window.JobWorkspace.closeJob(window.JobPanel.currentDraftId);
+                window.JobPanel.currentDraftId = null;
+              }
+              self.close(true);
+              return;
+            }
+
+            // Required fields present - If there are unsaved changes, save first
             if (this.hasUnsavedChanges()) {
               this.saveForm((result) => {
                 // After saving (success or fail), close/remove from workspace
@@ -784,10 +946,12 @@
         }
 
         // Workspace minimize button - HYBRID BEHAVIOR:
-        // - If job has ID: minimize immediately, save in background if dirty
-        // - If new job (no ID): save first to get ID, then minimize
+        // - If required fields missing: minimize as draft immediately (no DB save)
+        // - If job has ID and required fields present: minimize immediately, save in background if dirty
+        // - If new job and required fields present: save first to get ID, then minimize
         const workspaceMinimizeBtn = document.getElementById('panel-workspace-minimize-btn');
-        if (workspaceMinimizeBtn) {
+        if (workspaceMinimizeBtn && !workspaceMinimizeBtn.dataset.bound) {
+          workspaceMinimizeBtn.dataset.bound = '1';  // Guard against double-binding
           workspaceMinimizeBtn.addEventListener('click', () => {
             const self = this;
             const form = document.querySelector('#job-panel .panel-body form');
@@ -808,6 +972,25 @@
             // Capture current panel HTML for potential unsaved state restoration
             const currentHtml = panelBody ? panelBody.innerHTML : null;
 
+            // Check for missing required fields FIRST
+            const missingFields = this.getRequiredMissing(form);
+            const hasMissingRequired = missingFields.length > 0;
+
+            if (hasMissingRequired) {
+              // MISSING REQUIRED FIELDS: Minimize as draft immediately, NO DB save attempt
+              console.log('Minimize with missing required fields:', missingFields);
+
+              // Use shared helper - reuses existing draft if present, always closes panel
+              self.minimizeAsDraft({
+                jobId: jobId,
+                meta: getJobMeta(),
+                currentHtml: currentHtml
+              });
+
+              return; // Exit early - no network save attempted
+            }
+
+            // REQUIRED FIELDS PRESENT: Proceed with normal save flow
             if (jobId && window.JobWorkspace) {
               // EXISTING JOB: Minimize immediately, save in background if dirty
 
@@ -898,11 +1081,28 @@
 
         // Delete button is handled by the global API via setDeleteCallback
 
-        // ESC key
+        // ESC key - same behavior as close button
+        // If required fields are missing, just close without saving
         document.addEventListener('keydown', (e) => {
           const self = this;
           if (e.key === 'Escape' && this.isOpen) {
-            // If there are unsaved changes, save first
+            const form = document.querySelector('#job-panel .panel-body form');
+            const missingFields = this.getRequiredMissing(form);
+            const hasMissingRequired = missingFields.length > 0;
+
+            // If required fields are missing, just close without attempting save
+            if (hasMissingRequired) {
+              if (self.currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(self.currentJobId)) {
+                window.JobWorkspace.closeJob(self.currentJobId);
+              } else if (window.JobPanel.currentDraftId && window.JobWorkspace) {
+                window.JobWorkspace.closeJob(window.JobPanel.currentDraftId);
+                window.JobPanel.currentDraftId = null;
+              }
+              self.close(true);
+              return;
+            }
+
+            // Required fields present - If there are unsaved changes, save first
             if (this.hasUnsavedChanges()) {
               this.saveForm((result) => {
                 // After saving (success or fail), close/remove from workspace
@@ -1014,43 +1214,102 @@
               return;
             }
 
-            // Save the form first if there are unsaved changes
-            self.saveForm((result) => {
-              // Only close/minimize on successful save; keep panel open on failure so user can fix errors
-              if (!result || !result.successful) {
-                console.log('Outside click save failed or incomplete, keeping panel open');
-                return;
-              }
+            // HYBRID BEHAVIOR for outside click - mirrors minimize button behavior
+            const form = document.querySelector('#job-panel .panel-body form');
+            const panelBody = document.querySelector('#job-panel .panel-body');
+            const jobIdInput = form?.querySelector('input[name="job_id"]');
+            let jobId = self.currentJobId || (jobIdInput ? jobIdInput.value : null);
+            const isDirty = self.hasUnsavedChanges();
 
-              // After saving successfully, minimize to workspace if we have a job ID
-              const jobId = normalizeJobId(result.jobId || self.currentJobId);
-
-              if (jobId && window.JobWorkspace) {
-                // Compute current meta from form
-                const form = document.querySelector('#job-panel .panel-body form');
-                const businessName = form?.querySelector('input[name="business_name"]')?.value ||
-                  form?.querySelector('input[name="contact_name"]')?.value ||
-                  'Unnamed Job';
-                const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-                const meta = {
-                  customerName: businessName,
-                  trailerColor: trailerColor,
-                  calendarColor: '#3B82F6'
-                };
-
-                if (!window.JobWorkspace.hasJob(jobId)) {
-                  // Add job to workspace if not already there
-                  window.JobWorkspace.addJobMinimized(jobId, meta);
-                } else {
-                  // Job exists in workspace - update meta (e.g. if name changed) then minimize
-                  window.JobWorkspace.updateJobMeta(jobId, meta);
-                  window.JobWorkspace.minimizeJob(jobId);
-                }
-              } else {
-                // No workspace or no job ID, just close the panel
-                self.close(true);
-              }
+            // Helper to get job metadata from form
+            const getJobMeta = () => ({
+              customerName: form?.querySelector('input[name="business_name"]')?.value ||
+                form?.querySelector('input[name="contact_name"]')?.value ||
+                'Unnamed Job',
+              trailerColor: form?.querySelector('input[name="trailer_color"]')?.value || '',
+              calendarColor: '#3B82F6'
             });
+
+            // Capture current panel HTML for potential unsaved state restoration
+            const currentHtml = panelBody ? panelBody.innerHTML : null;
+
+            // Check for missing required fields
+            const missingFields = self.getRequiredMissing(form);
+            const hasMissingRequired = missingFields.length > 0;
+
+            if (hasMissingRequired) {
+              // MISSING REQUIRED FIELDS: Minimize as draft immediately, NO DB save attempt
+              console.log('Outside click with missing required fields:', missingFields);
+
+              // Use shared helper - reuses existing draft if present, always closes panel
+              self.minimizeAsDraft({
+                jobId: jobId,
+                meta: getJobMeta(),
+                currentHtml: currentHtml
+              });
+              return;
+            }
+
+            // REQUIRED FIELDS PRESENT: Follow hybrid minimize behavior
+            if (jobId && window.JobWorkspace) {
+              // EXISTING JOB: Minimize immediately, save in background if dirty
+              const currentMeta = getJobMeta();
+
+              if (!window.JobWorkspace.hasJob(jobId)) {
+                window.JobWorkspace.openJob(jobId, currentMeta);
+              }
+
+              // Minimize immediately
+              window.JobWorkspace.minimizeJob(jobId);
+
+              // If dirty, save in background
+              if (isDirty) {
+                window.JobPanel.isSwitchingJobs = true;
+                self.saveForm((result) => {
+                  window.JobPanel.isSwitchingJobs = false;
+                  if (result.successful) {
+                    if (window.JobWorkspace.clearUnsaved) {
+                      window.JobWorkspace.clearUnsaved(jobId);
+                    }
+                    if (window.JobWorkspace.updateJobMeta) {
+                      window.JobWorkspace.updateJobMeta(jobId, currentMeta);
+                    }
+                  } else {
+                    if (window.JobWorkspace.markUnsaved) {
+                      window.JobWorkspace.markUnsaved(jobId, result.responseHtml || currentHtml);
+                    }
+                  }
+                });
+              }
+
+            } else {
+              // NEW JOB: Must save first to get an ID, then minimize
+              window.JobPanel.isSwitchingJobs = true;
+
+              self.saveForm((result) => {
+                window.JobPanel.isSwitchingJobs = false;
+
+                if (result.successful && result.jobId) {
+                  // Success: add to workspace and minimize
+                  const newJobId = result.jobId;
+                  self.setCurrentJobId(newJobId);
+                  const meta = getJobMeta();
+
+                  if (!window.JobWorkspace.hasJob(newJobId)) {
+                    window.JobWorkspace.openJob(newJobId, meta);
+                  }
+                  window.JobWorkspace.minimizeJob(newJobId);
+
+                } else {
+                  // Failed to save new job - create/update draft and minimize
+                  self.minimizeAsDraft({
+                    jobId: null,
+                    meta: getJobMeta(),
+                    currentHtml: result.responseHtml || currentHtml
+                  });
+                }
+              });
+            }
           }
         });
       },
@@ -1255,12 +1514,65 @@
         });
       },
       /**
+       * Check which required fields are missing from the form (Alpine version).
+       * Required fields: business_name, start_dt, end_dt, calendar
+       * @param {HTMLFormElement} form - The form element
+       * @returns {string[]} - Array of missing field names (empty if all present)
+       */
+      getRequiredMissing(form) {
+        if (!form) return ['form'];
+        const missing = [];
+
+        // Business name - required and must not be whitespace-only
+        const businessName = form.querySelector('input[name="business_name"]');
+        if (!businessName || !businessName.value.trim()) {
+          missing.push('business_name');
+        }
+
+        // Start date - required
+        const startDt = form.querySelector('input[name="start_dt"]');
+        if (!startDt || !startDt.value.trim()) {
+          missing.push('start_dt');
+        }
+
+        // End date - required
+        const endDt = form.querySelector('input[name="end_dt"]');
+        if (!endDt || !endDt.value.trim()) {
+          missing.push('end_dt');
+        }
+
+        // Calendar - required (select element)
+        const calendar = form.querySelector('select[name="calendar"]');
+        if (!calendar || !calendar.value) {
+          missing.push('calendar');
+        }
+
+        return missing;
+      },
+      /**
+       * Check if any required fields are missing (Alpine version).
+       * @param {HTMLFormElement} form - The form element
+       * @returns {boolean} - True if any required fields are missing
+       */
+      hasRequiredMissing(form) {
+        return this.getRequiredMissing(form).length > 0;
+      },
+      /**
        * Save the form without causing page navigation (Alpine version).
        * Uses HTMX if the form has hx-post, otherwise uses fetch().
        * Handles draft promotion automatically on successful save.
-       * @param {Function} callback - Called with result object: { successful, jobId, responseHtml, status }
+       * @param {Object|Function} optionsOrCallback - Options object or callback function
+       * @param {Function} callback - Called with result object: { successful, jobId, responseHtml, status, reason }
        */
-      saveForm(callback) {
+      saveForm(optionsOrCallback, callback) {
+        // Handle backwards compatibility: saveForm(callback) vs saveForm(options, callback)
+        let options = { mode: 'autosave' };
+        if (typeof optionsOrCallback === 'function') {
+          callback = optionsOrCallback;
+        } else if (optionsOrCallback && typeof optionsOrCallback === 'object') {
+          options = { ...options, ...optionsOrCallback };
+        }
+
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (!panelBody) {
           console.warn('Panel body not found');
@@ -1276,6 +1588,32 @@
         }
 
         const self = this;
+        const mode = options.mode || 'autosave';
+
+        // Check for missing required fields
+        const missingFields = this.getRequiredMissing(form);
+        const hasMissing = missingFields.length > 0;
+
+        if (mode === 'manual') {
+          // Manual save mode: run HTML5 validation and show messages
+          if (hasMissing) {
+            // Trigger HTML5 validation display
+            if (!form.reportValidity()) {
+              if (window.showToast) {
+                window.showToast('Please fill in all required fields before saving.', 'warning');
+              }
+              if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
+              return;
+            }
+          }
+        } else {
+          // Autosave mode: don't show validation popups, just return unsuccessful
+          if (hasMissing) {
+            console.log('Alpine saveForm autosave skipped: missing required fields', missingFields);
+            if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
+            return;
+          }
+        }
 
         /**
          * Handle draft promotion after successful save

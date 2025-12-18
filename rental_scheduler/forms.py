@@ -8,6 +8,16 @@ from .utils.phone import format_phone
 class JobForm(forms.ModelForm):
     """Form for editing job details with validation"""
     
+    # Explicitly define business_name as required (model has blank=True, but form requires it)
+    business_name = forms.CharField(
+        required=True,
+        max_length=150,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
+            'placeholder': 'Enter business name'
+        })
+    )
+    
     # Override date fields to accept both datetime-local and date-only formats
     start_dt = forms.DateTimeField(
         required=True,
@@ -30,6 +40,7 @@ class JobForm(forms.ModelForm):
     class Meta:
         model = Job
         fields = [
+            'calendar',  # Added calendar as a required field
             'business_name', 'contact_name', 'phone',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'start_dt', 'end_dt', 'all_day',
@@ -38,10 +49,10 @@ class JobForm(forms.ModelForm):
             'notes', 'repair_notes', 'quote', 'status'
         ]
         widgets = {
-            'business_name': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'Enter business name'
+            'calendar': forms.Select(attrs={
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
+            # business_name widget is defined in the class body (not here) to ensure required=True
             'contact_name': forms.TextInput(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
                 'placeholder': 'Enter contact name'
@@ -113,16 +124,26 @@ class JobForm(forms.ModelForm):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Make business_name required
-        self.fields['business_name'].required = True
-        self.fields['start_dt'].required = True
-        self.fields['end_dt'].required = True
+        # Make calendar required (not defined at class level)
+        self.fields['calendar'].required = True
+        # Note: business_name, start_dt, end_dt are already required=True at class definition level
+        
+        # Only show active calendars
+        self.fields['calendar'].queryset = Calendar.objects.filter(is_active=True)
         
         # Add required asterisks to labels
-        required_fields = ['business_name', 'start_dt', 'end_dt']
+        required_fields = ['calendar', 'business_name', 'start_dt', 'end_dt']
         for field_name in required_fields:
             if field_name in self.fields:
                 self.fields[field_name].label = f"{self.fields[field_name].label} *"
+    
+    def clean_business_name(self):
+        """Validate that business_name is not empty or whitespace-only."""
+        business_name = self.cleaned_data.get('business_name')
+        # Explicitly check for None, empty string, or whitespace-only
+        if business_name is None or not str(business_name).strip():
+            raise ValidationError('Business name is required.')
+        return str(business_name).strip()
     
     def clean_phone(self):
         """Clean and format phone number using shared formatter."""
@@ -134,6 +155,13 @@ class JobForm(forms.ModelForm):
         from rental_scheduler.constants import MIN_VALID_YEAR, MAX_VALID_YEAR, MAX_JOB_SPAN_DAYS
         
         cleaned_data = super().clean()
+        
+        # Validate business_name is not empty or whitespace-only
+        # This is a critical required field check that must happen in clean() to ensure it's always run
+        business_name = cleaned_data.get('business_name')
+        if business_name is None or not str(business_name).strip():
+            self.add_error('business_name', 'Business name is required.')
+        
         start_dt = cleaned_data.get('start_dt')
         end_dt = cleaned_data.get('end_dt')
         all_day = cleaned_data.get('all_day', False)

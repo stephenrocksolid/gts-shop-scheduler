@@ -118,7 +118,7 @@ Date Call Received
   <!-- Schedule Information Section -->
   <div style="background: #f8fafc;
               border-radius: 12px;
-              border: 1px solid #e2e8f0;">
+              border: 1px solid #e2e8f0">
     <div style="padding: 8px;">
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <div style="display: flex; align-items: center; gap: 8px;">
@@ -156,7 +156,17 @@ Date Call Received
                 <input type="text"
                        name="start_dt"
                        id="{{ form.start_dt.id_for_label }}"
-                       value="{% if form.data.start_dt %}{{ form.data.start_dt }}{% elif form.instance.pk and form.instance.start_dt %}{% if form.instance.all_day %}{{ form.instance.start_dt|date:'Y-m-d' }}{% else %}{{ form.instance.start_dt|date:'Y-m-d\TH:i' }}{% endif %}{% else %}{{ form.initial.start_dt }}{% endif %}"
+                       value="{% if form.data.start_dt %}
+                                {{ form.data.start_dt }}
+                              {% elif form.instance.pk and form.instance.start_dt %}
+                                {% if form.instance.all_day %}
+                                  {{ form.instance.start_dt|date:'Y-m-d' }}
+                                {% else %}
+                                  {{ form.instance.start_dt|date:'Y-m-d\TH:i' }}
+                                {% endif %}
+                              {% else %}
+                                {{ form.initial.start_dt }}
+                              {% endif %}"
                        required
                        placeholder="Select date"
                        style="flex: 1;
@@ -166,9 +176,11 @@ Date Call Received
                               font-size: 12px;
                               cursor: pointer;
                               background: #fff;
-                              text-align: left;">
+                              text-align: left">
                 {% if form.start_dt.errors %}
-                  <p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.start_dt.errors.0 }}</p>
+                  <p style="color: #dc2626; font-size: 10px; margin: 0;">
+{{ form.start_dt.errors.0 }}
+                  </p>
                 {% endif %}
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
@@ -183,7 +195,17 @@ Date Call Received
                 <input type="text"
                        name="end_dt"
                        id="{{ form.end_dt.id_for_label }}"
-                       value="{% if form.data.end_dt %}{{ form.data.end_dt }}{% elif form.instance.pk and form.instance.end_dt %}{% if form.instance.all_day %}{{ form.instance.end_dt|date:'Y-m-d' }}{% else %}{{ form.instance.end_dt|date:'Y-m-d\TH:i' }}{% endif %}{% else %}{{ form.initial.end_dt }}{% endif %}"
+                       value="{% if form.data.end_dt %}
+                                {{ form.data.end_dt }}
+                              {% elif form.instance.pk and form.instance.end_dt %}
+                                {% if form.instance.all_day %}
+                                  {{ form.instance.end_dt|date:'Y-m-d' }}
+                                {% else %}
+                                  {{ form.instance.end_dt|date:'Y-m-d\TH:i' }}
+                                {% endif %}
+                              {% else %}
+                                {{ form.initial.end_dt }}
+                              {% endif %}"
                        required
                        placeholder="Select date"
                        style="flex: 1;
@@ -193,9 +215,11 @@ Date Call Received
                               font-size: 12px;
                               cursor: pointer;
                               background: #fff;
-                              text-align: left;">
+                              text-align: left">
                 {% if form.end_dt.errors %}
-                  <p style="color: #dc2626; font-size: 10px; margin: 0;">{{ form.end_dt.errors.0 }}</p>
+                  <p style="color: #dc2626; font-size: 10px; margin: 0;">
+{{ form.end_dt.errors.0 }}
+                  </p>
                 {% endif %}
               </div>
             </div>
@@ -1399,6 +1423,96 @@ Quote Amount
 
     document.body.addEventListener('htmx:load', function () {
       setTimeout(initializeFormChangeTracking, 100);
+    });
+  })();
+
+  // HTMX form validation interceptor - validates required fields before allowing submission
+  // This only applies to explicit "Save Job" button clicks, not programmatic saveForm() calls
+  (function () {
+    // Guard against multiple bindings (template can be swapped via HTMX)
+    if (window._jobFormRequiredValidationBound) return;
+    window._jobFormRequiredValidationBound = true;
+
+    /**
+     * Check which required fields are missing from the form.
+     * Required fields: business_name, start_dt, end_dt, calendar
+     */
+    function getRequiredMissing(form) {
+      if (!form) return ['form'];
+      const missing = [];
+
+      // Business name - required and must not be whitespace-only
+      const businessName = form.querySelector('input[name="business_name"]');
+      if (!businessName || !businessName.value.trim()) {
+        missing.push('business_name');
+      }
+
+      // Start date - required
+      const startDt = form.querySelector('input[name="start_dt"]');
+      if (!startDt || !startDt.value.trim()) {
+        missing.push('start_dt');
+      }
+
+      // End date - required
+      const endDt = form.querySelector('input[name="end_dt"]');
+      if (!endDt || !endDt.value.trim()) {
+        missing.push('end_dt');
+      }
+
+      // Calendar - required (select element)
+      const calendar = form.querySelector('select[name="calendar"]');
+      if (!calendar || !calendar.value) {
+        missing.push('calendar');
+      }
+
+      return missing;
+    }
+
+    // Intercept HTMX form submission to validate required fields
+    document.body.addEventListener('htmx:beforeRequest', function (event) {
+      const form = event.target.closest('form');
+      
+      // Only validate for job form submissions (the main form with hx-post to job_create_submit)
+      if (!form || !form.getAttribute('hx-post')?.includes('job')) {
+        return;
+      }
+
+      // Check if this is a "natural" submit (user clicked Save button) vs programmatic
+      // Programmatic calls use htmx.trigger() which we can detect by checking if 
+      // window.JobPanel.isSwitchingJobs is true (set during minimize/close flows)
+      if (window.JobPanel && window.JobPanel.isSwitchingJobs) {
+        // This is a programmatic call from minimize/close, skip validation
+        // (saveForm already handles validation for autosave mode)
+        return;
+      }
+
+      const missingFields = getRequiredMissing(form);
+      if (missingFields.length > 0) {
+        // Prevent the HTMX request from proceeding
+        event.preventDefault();
+
+        // Show user-friendly error
+        if (window.showToast) {
+          window.showToast('Please fill in all required fields (Business Name, Start, End, Calendar) before saving.', 'warning');
+        }
+
+        // Focus the first missing field
+        if (missingFields.includes('business_name')) {
+          const field = form.querySelector('input[name="business_name"]');
+          if (field) field.focus();
+        } else if (missingFields.includes('start_dt')) {
+          const field = form.querySelector('input[name="start_dt"]');
+          if (field) field.focus();
+        } else if (missingFields.includes('end_dt')) {
+          const field = form.querySelector('input[name="end_dt"]');
+          if (field) field.focus();
+        } else if (missingFields.includes('calendar')) {
+          const field = form.querySelector('select[name="calendar"]');
+          if (field) field.focus();
+        }
+
+        console.log('HTMX form submission blocked: missing required fields', missingFields);
+      }
     });
   })();
 </script>
