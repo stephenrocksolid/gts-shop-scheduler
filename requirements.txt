@@ -15,7 +15,7 @@ pycparser==2.22
 pydyf==0.11.0
 pyphen==0.17.2
 python-dotenv==1.0.1
-pywin32==311
+pywin32==311; sys_platform == 'win32'
 six==1.17.0
 sqlparse==0.5.3
 tinycss2==1.4.0
