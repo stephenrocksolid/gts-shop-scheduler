@@ -1,10 +1,12 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}{{ title }}{% endblock %}
+{% block title %}
+{{ title }}
+{% endblock %}
 
 {% block extra_css %}
-<style>
+    <style>
 /* Compact table styling for job list */
 #job-table-container table {
     font-size: 0.875rem;
@@ -29,143 +31,205 @@
     padding: 0.125rem 0.5rem !important;
     font-size: 0.75rem !important;
 }
-</style>
+    </style>
 {% endblock %}
 
 {% block extra_js %}
 {% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
-        <div class="flex gap-3">
-            <a href="{% url 'rental_scheduler:calendar' %}" 
-               class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 shadow-md hover:shadow-lg">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                </svg>
+    <div class="container mx-auto px-4 py-8">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">
+{{ title }}
+            </h1>
+            <div class="flex gap-3">
+                <a href="{% url 'rental_scheduler:calendar' %}"
+                   class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 shadow-md hover:shadow-lg">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
+</path>
+                    </svg>
                 View Calendar
-            </a>
-        </div>
-    </div>
-
-    <!-- Unified Search Bar -->
-    <div class="bg-white rounded-lg shadow-md mb-6 p-6">
-        <form method="get" id="search-form">
-            <!-- Filters Section -->
-            <div class="mb-4">
-                <div class="flex flex-row gap-4 items-center flex-wrap">
-                    <!-- Calendar Filter -->
-                    <div style="flex: 0 0 320px; min-width: 320px; display: flex; align-items: center; gap: 0.75rem;">
-                        <label class="text-sm font-medium text-gray-700" style="margin: 0; white-space: nowrap;">Calendars</label>
-                        <div class="relative" style="flex: 1; min-width: 200px;">
-                            <button type="button" id="calendar-dropdown-btn" 
-                                    class="w-full flex items-center justify-between px-4 py-2 text-base border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <span id="calendar-selected-text">
-                                    {% if selected_calendars %}
-                                        {{ selected_calendars|length }} calendar(s) selected
-                                    {% else %}
-                                        All Calendars
-                                    {% endif %}
-                                </span>
-                                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                </svg>
-                            </button>
-                            <div id="calendar-dropdown" class="hidden absolute w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto" style="z-index: 1000;">
-                                {% for calendar in calendars %}
-                                <label class="flex items-center px-4 py-2 hover:bg-gray-50 cursor-pointer">
-                                    <input type="checkbox" name="calendars" value="{{ calendar.id }}" 
-                                           {% if calendar.id in selected_calendars %}checked{% endif %}
-                                           class="calendar-checkbox w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                                    <span class="ml-3 flex items-center">
-                                        <span class="inline-block w-3 h-3 rounded mr-2" style="background-color: {{ calendar.color }};"></span>
-                                        <span class="text-sm text-gray-700">{{ calendar.name }}</span>
-                                    </span>
-                                </label>
-                                {% endfor %}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Events Date Filter -->
-                    <div style="flex: 1; display: flex; align-items: center; gap: 1rem;">
-                        <label class="text-sm font-medium text-gray-700" style="margin: 0;">Events</label>
-                        <div class="flex items-center gap-4 flex-wrap">
-                            <label class="flex items-center cursor-pointer">
-                                <input type="radio" name="date_filter" value="all" 
-                                       {% if date_filter == 'all' %}checked{% endif %}
-                                       class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                                <span class="ml-2 text-sm text-gray-700">All Events</span>
-                            </label>
-                            <label class="flex items-center cursor-pointer">
-                                <input type="radio" name="date_filter" value="future" 
-                                       {% if date_filter == 'future' %}checked{% endif %}
-                                       class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                                <span class="ml-2 text-sm text-gray-700">All Future Events</span>
-                            </label>
-                            <label class="flex items-center cursor-pointer">
-                                <input type="radio" name="date_filter" value="custom" 
-                                       {% if date_filter == 'custom' %}checked{% endif %}
-                                       class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
-                                <span class="ml-2 text-sm text-gray-700">Custom Date Range</span>
-                            </label>
-                            <div id="custom-date-range" class="flex items-center gap-2 {% if date_filter != 'custom' %}hidden{% endif %}">
-                                <input type="date" name="start_date" value="{{ start_date }}"
-                                       class="px-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <span class="text-sm text-gray-500">to</span>
-                                <input type="date" name="end_date" value="{{ end_date }}"
-                                       class="px-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="flex items-center gap-3">
-                <div class="flex-1 relative">
-                    <div class="absolute inset-y-0 left-0 flex items-center pointer-events-none" style="padding-left: 16px;">
-                        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                        </svg>
-                    </div>
-                    <input type="text" 
-                           name="search" 
-                           id="search-input" 
-                           value="{{ search_query }}"
-                           class="w-full pr-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                           style="padding-left: 48px;"
-                           placeholder="Search jobs by name, contact, phone, address, city, state, trailer info, notes..."
-                           autocomplete="off">
-                </div>
-                <button type="submit" 
-                        class="inline-flex items-center gap-2 px-6 py-3 text-base font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                    </svg>
-                    Search
-                </button>
-                <a href="{% url 'rental_scheduler:job_list' %}" 
-                   class="inline-flex items-center gap-2 px-4 py-3 text-base font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
-                    Clear
                 </a>
             </div>
-            
-            {% if search_query %}
-            <div class="mt-3 text-sm text-gray-600">
-                Searching for: <span class="font-semibold text-gray-900">{{ search_query }}</span>
-            </div>
+        </div>
+
+        <!-- Unified Search Bar -->
+        <div class="bg-white rounded-lg shadow-md mb-6 p-6">
+            <form method="get" id="search-form">
+                <!-- Filters Section -->
+                <div class="mb-4">
+                    <div class="flex flex-row gap-4 items-center flex-wrap">
+                        <!-- Calendar Filter -->
+                        <div style="flex: 0 0 320px;
+                                    min-width: 320px;
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.75rem">
+                            <label class="text-sm font-medium text-gray-700"
+                                   style="margin: 0;
+                                          white-space: nowrap">
+Calendars
+                            </label>
+                            <div class="relative" style="flex: 1; min-width: 200px;">
+                                <button type="button"
+                                        id="calendar-dropdown-btn"
+                                        class="w-full flex items-center justify-between px-4 py-2 text-base border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <span id="calendar-selected-text">
+                                        {% if selected_calendars %}
+                                        {{ selected_calendars|length }} calendar(s) selected
+                                        {% else %}
+                                        All Calendars
+                                        {% endif %}
+                                    </span>
+                                    <svg class="w-5 h-5 text-gray-400"
+                                         fill="none"
+                                         stroke="currentColor"
+                                         viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7">
+</path>
+                                    </svg>
+                                </button>
+                                <div id="calendar-dropdown"
+                                     class="hidden absolute w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto"
+                                     style="z-index: 1000">
+                                    {% for calendar in calendars %}
+                                        <label class="flex items-center px-4 py-2 hover:bg-gray-50 cursor-pointer">
+                                            <input type="checkbox"
+                                                   name="calendars"
+                                                   value="{{ calendar.id }}"
+                                                   {% if calendar.id in selected_calendars %}
+                                                       checked
+                                                   {% endif %}
+                                                   class="calendar-checkbox w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                            <span class="ml-3 flex items-center">
+                                                <span class="inline-block w-3 h-3 rounded mr-2"
+                                                      style="background-color: {{ calendar.color }}"></span>
+                                                <span class="text-sm text-gray-700">{{ calendar.name }}</span>
+                                            </span>
+                                        </label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Events Date Filter -->
+                        <div style="flex: 1; display: flex; align-items: center; gap: 1rem;">
+                            <label class="text-sm font-medium text-gray-700" style="margin: 0;">
+Events
+                            </label>
+                            <div class="flex items-center gap-4 flex-wrap">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio"
+                                           name="date_filter"
+                                           value="all"
+                                           {% if date_filter == 'all' %}
+                                               checked
+                                           {% endif %}
+                                           class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                    <span class="ml-2 text-sm text-gray-700">All Events</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio"
+                                           name="date_filter"
+                                           value="future"
+                                           {% if date_filter == 'future' %}
+                                               checked
+                                           {% endif %}
+                                           class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                    <span class="ml-2 text-sm text-gray-700">All Future Events</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio"
+                                           name="date_filter"
+                                           value="custom"
+                                           {% if date_filter == 'custom' %}
+                                               checked
+                                           {% endif %}
+                                           class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                    <span class="ml-2 text-sm text-gray-700">Custom Date Range</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio"
+                                           name="date_filter"
+                                           value="two_years"
+                                           {% if date_filter == 'two_years' %}
+                                               checked
+                                           {% endif %}
+                                           class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                    <span class="ml-2 text-sm text-gray-700">Events within 2 years</span>
+                                </label>
+                                <div id="custom-date-range"
+                                     class="flex items-center gap-2
+                                            {% if date_filter != 'custom' %}
+                                                hidden
+                                            {% endif %}">
+                                    <input type="date"
+                                           name="start_date"
+                                           value="{{ start_date }}"
+                                           class="px-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <span class="text-sm text-gray-500">to</span>
+                                    <input type="date"
+                                           name="end_date"
+                                           value="{{ end_date }}"
+                                           class="px-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <div class="flex-1 relative">
+                        <div class="absolute inset-y-0 left-0 flex items-center pointer-events-none"
+                             style="padding-left: 16px">
+                            <svg class="w-5 h-5 text-gray-400"
+                                 fill="none"
+                                 stroke="currentColor"
+                                 viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z">
+</path>
+                            </svg>
+                        </div>
+                        <input type="text"
+                               name="search"
+                               id="search-input"
+                               value="{{ search_query }}"
+                               class="w-full pr-4 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               style="padding-left: 48px"
+                               placeholder="Search jobs by name, contact, phone, address, city, state, trailer info, notes..."
+                               autocomplete="off">
+                    </div>
+                    <button type="submit"
+                            class="inline-flex items-center gap-2 px-6 py-3 text-base font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z">
+</path>
+                        </svg>
+                    Search
+                    </button>
+                    <a href="{% url 'rental_scheduler:job_list' %}"
+                       class="inline-flex items-center gap-2 px-4 py-3 text-base font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+</path>
+                        </svg>
+                    Clear
+                    </a>
+                </div>
+
+                {% if search_query %}
+                    <div class="mt-3 text-sm text-gray-600">
+                                                        Searching for: <span class="font-semibold text-gray-900">{{ search_query }}</span>
+                </div>
             {% endif %}
         </form>
     </div>
 
     <!-- Jobs Table Container -->
     <div id="job-table-container">
-        {% include 'rental_scheduler/partials/job_list_table.html' with jobs=jobs current_sort=current_sort current_direction=current_direction search_query=search_query selected_calendars=selected_calendars date_filter=date_filter start_date=start_date end_date=end_date %}
+{% include 'rental_scheduler/partials/job_list_table.html' with jobs=jobs current_sort=current_sort current_direction=current_direction search_query=search_query selected_calendars=selected_calendars date_filter=date_filter start_date=start_date end_date=end_date %}
     </div>
 </div>
 
@@ -177,47 +241,47 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentHighlightIndex = -1;
     let jobRows = [];
     let hasSubmitted = false;
-    
+
     // Calendar dropdown
     const calendarDropdownBtn = document.getElementById('calendar-dropdown-btn');
     const calendarDropdown = document.getElementById('calendar-dropdown');
     const calendarCheckboxes = document.querySelectorAll('.calendar-checkbox');
     const calendarSelectedText = document.getElementById('calendar-selected-text');
-    
+
     // Date filter radios
     const dateFilterRadios = document.querySelectorAll('.date-filter-radio');
     const customDateRange = document.getElementById('custom-date-range');
-    
+
     // Toggle calendar dropdown
     calendarDropdownBtn.addEventListener('click', function(e) {
         e.preventDefault();
         calendarDropdown.classList.toggle('hidden');
     });
-    
+
     // Close dropdown when clicking outside
     document.addEventListener('click', function(e) {
         if (!calendarDropdownBtn.contains(e.target) && !calendarDropdown.contains(e.target)) {
             calendarDropdown.classList.add('hidden');
         }
     });
-    
+
     // Update selected text when checkboxes change
     calendarCheckboxes.forEach(checkbox => {
         checkbox.addEventListener('change', function() {
             const checkedCount = document.querySelectorAll('.calendar-checkbox:checked').length;
             const totalCount = calendarCheckboxes.length;
-            
+
             if (checkedCount === 0 || checkedCount === totalCount) {
                 calendarSelectedText.textContent = 'All Calendars';
             } else {
                 calendarSelectedText.textContent = checkedCount + ' calendar(s) selected';
             }
-            
+
             // Save to localStorage
             saveFiltersToLocalStorage();
         });
     });
-    
+
     // Toggle custom date range visibility
     dateFilterRadios.forEach(radio => {
         radio.addEventListener('change', function() {
@@ -226,12 +290,12 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 customDateRange.classList.add('hidden');
             }
-            
+
             // Save to localStorage
             saveFiltersToLocalStorage();
         });
     });
-    
+
     // Save filters to localStorage
     function saveFiltersToLocalStorage() {
         const filters = {

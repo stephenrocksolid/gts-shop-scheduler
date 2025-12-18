@@ -10,6 +10,14 @@
     const STORAGE_KEY = 'gts-job-workspace';
     const MAX_TABS = 10; // Limit number of open jobs
 
+    /**
+     * Normalize job ID to string for consistent Map key usage
+     * This prevents issues where numeric IDs (123) and string IDs ("123") are treated differently
+     */
+    function normalizeJobId(jobId) {
+        return jobId != null ? String(jobId) : null;
+    }
+
     class JobWorkspace {
         constructor() {
             this.openJobs = new Map(); // jobId -> jobData
@@ -55,6 +63,9 @@
          * Open a job and add it to workspace
          */
         openJob(jobId, jobData) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
             // Check if already open
             if (this.openJobs.has(jobId)) {
                 // Just make it active and show panel
@@ -80,7 +91,7 @@
                 timestamp: Date.now()
             });
 
-            this.activeJobId = jobId;
+            this.activeJobId = jobId; // Already normalized above
 
             // Save and render
             this.saveToStorage();
@@ -90,7 +101,7 @@
             if (window.JobPanel) {
                 window.JobPanel.setTitle('Edit Job');
                 window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
-                window.JobPanel.setCurrentJobId(jobId);
+                window.JobPanel.setCurrentJobId(jobId); // Pass normalized ID
 
                 // Update minimize button after a short delay to ensure panel is ready
                 setTimeout(() => {
@@ -105,6 +116,9 @@
          * Add a job to workspace in minimized state (doesn't make it active)
          */
         addJobMinimized(jobId, jobData) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
             // Check if already open
             if (this.openJobs.has(jobId)) {
                 return; // Already exists, don't modify
@@ -134,9 +148,42 @@
         }
 
         /**
+         * Update metadata for an existing job in the workspace
+         * @param {string} jobId - The job ID
+         * @param {Object} meta - Metadata to update
+         * @param {string} [meta.customerName] - Customer name for display
+         * @param {string} [meta.trailerColor] - Trailer color
+         * @param {string} [meta.calendarColor] - Calendar color
+         */
+        updateJobMeta(jobId, meta) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
+            const job = this.openJobs.get(jobId);
+            if (!job) return;
+
+            // Update fields if provided (use nullish coalescing to preserve existing values)
+            if (meta.customerName !== undefined) {
+                job.customerName = meta.customerName || job.customerName;
+            }
+            if (meta.trailerColor !== undefined) {
+                job.trailerColor = meta.trailerColor;
+            }
+            if (meta.calendarColor !== undefined) {
+                job.calendarColor = meta.calendarColor;
+            }
+
+            this.saveToStorage();
+            this.render();
+        }
+
+        /**
          * Minimize a job (keep in workspace but hide panel)
          */
         minimizeJob(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
             const job = this.openJobs.get(jobId);
             if (!job) return;
 
@@ -156,6 +203,9 @@
          * Close a job completely (remove from workspace)
          */
         closeJob(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
             if (!this.openJobs.has(jobId)) return;
 
             this.openJobs.delete(jobId);
@@ -181,6 +231,9 @@
          * Switch to a job (restore from minimized state)
          */
         switchToJob(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
             const job = this.openJobs.get(jobId);
             if (!job) return;
 
@@ -188,22 +241,28 @@
             if (window.JobPanel && window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges()) {
                 // Save the form first
                 window.JobPanel.saveForm(() => {
-                    // After saving, add to workspace if it has a job ID
-                    const currentJobId = window.JobPanel.currentJobId;
-                    if (currentJobId && !this.hasJob(currentJobId)) {
+                    // After saving, add to workspace or update meta if it has a job ID
+                    const currentJobId = normalizeJobId(window.JobPanel.currentJobId);
+                    if (currentJobId) {
                         // Get job details from the form
                         const form = document.querySelector('#job-panel .panel-body form');
                         const businessName = form?.querySelector('input[name="business_name"]')?.value ||
                             form?.querySelector('input[name="contact_name"]')?.value ||
                             'Unnamed Job';
                         const trailerColor = form?.querySelector('input[name="trailer_color"]')?.value || '';
-
-                        // Add to workspace as minimized
-                        this.addJobMinimized(currentJobId, {
+                        const meta = {
                             customerName: businessName,
                             trailerColor: trailerColor,
                             calendarColor: '#3B82F6'
-                        });
+                        };
+
+                        if (!this.hasJob(currentJobId)) {
+                            // Add to workspace as minimized
+                            this.addJobMinimized(currentJobId, meta);
+                        } else {
+                            // Update meta for existing job (e.g. if name changed)
+                            this.updateJobMeta(currentJobId, meta);
+                        }
                     }
 
                     // Now switch to the selected job
@@ -219,24 +278,66 @@
          * Actually perform the job switch (called after unsaved check)
          */
         doSwitchToJob(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
             const job = this.openJobs.get(jobId);
             if (!job) return;
 
             job.isMinimized = false;
             this.activeJobId = jobId;
 
-            // Load job edit form in panel
             if (window.JobPanel) {
-                window.JobPanel.setTitle('Edit Job');
-                window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
-                window.JobPanel.setCurrentJobId(jobId);
+                // Check if we have unsavedHtml to restore (for drafts or failed saves)
+                if (job.unsavedHtml) {
+                    // Restore from cached HTML instead of loading from server
+                    const title = job.isDraft ? 'New Job (Unsaved)' : 'Edit Job (Unsaved)';
+                    window.JobPanel.setTitle(title);
+                    window.JobPanel.showContent(job.unsavedHtml);
 
-                // Update minimize button after a short delay to ensure panel is ready
-                setTimeout(() => {
-                    if (window.JobPanel.updateMinimizeButton) {
-                        window.JobPanel.updateMinimizeButton();
+                    // Set the job ID context (for drafts, store the draft ID so we can promote later)
+                    if (job.isDraft) {
+                        window.JobPanel.currentDraftId = jobId;
+                        window.JobPanel.setCurrentJobId(null); // No real job ID yet
+                    } else {
+                        window.JobPanel.currentDraftId = null;
+                        window.JobPanel.setCurrentJobId(jobId);
                     }
-                }, 100);
+
+                    // Update minimize button after a short delay
+                    setTimeout(() => {
+                        if (window.JobPanel.updateMinimizeButton) {
+                            window.JobPanel.updateMinimizeButton();
+                        }
+                    }, 100);
+
+                } else if (job.isDraft) {
+                    // Draft without HTML (shouldn't happen, but handle gracefully)
+                    window.JobPanel.setTitle('New Job');
+                    window.JobPanel.load('/jobs/new/partial/');
+                    window.JobPanel.currentDraftId = jobId;
+                    window.JobPanel.setCurrentJobId(null);
+
+                    setTimeout(() => {
+                        if (window.JobPanel.updateMinimizeButton) {
+                            window.JobPanel.updateMinimizeButton();
+                        }
+                    }, 100);
+
+                } else {
+                    // Normal case: load job from server
+                    window.JobPanel.setTitle('Edit Job');
+                    window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                    window.JobPanel.setCurrentJobId(jobId);
+                    window.JobPanel.currentDraftId = null;
+
+                    // Update minimize button after a short delay to ensure panel is ready
+                    setTimeout(() => {
+                        if (window.JobPanel.updateMinimizeButton) {
+                            window.JobPanel.updateMinimizeButton();
+                        }
+                    }, 100);
+                }
             }
 
             this.saveToStorage();
@@ -247,6 +348,8 @@
          * Check if a job is in the workspace
          */
         hasJob(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return false;
             return this.openJobs.has(jobId);
         }
 
@@ -255,6 +358,166 @@
          */
         getActiveJobId() {
             return this.activeJobId;
+        }
+
+        /**
+         * Mark a job as having unsaved changes
+         * @param {string} jobId - The job ID
+         * @param {string} html - The HTML content to restore (optional, capped at 100KB)
+         */
+        markUnsaved(jobId, html) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
+            const job = this.openJobs.get(jobId);
+            if (!job) return;
+
+            job.unsaved = true;
+            // Cap HTML size to avoid localStorage overflow (100KB max)
+            if (html && html.length <= 100000) {
+                job.unsavedHtml = html;
+            } else if (html) {
+                console.warn('JobWorkspace: unsavedHtml too large, not storing');
+                job.unsavedHtml = null;
+            }
+
+            this.saveToStorage();
+            this.render();
+        }
+
+        /**
+         * Clear unsaved state for a job
+         * @param {string} jobId - The job ID
+         */
+        clearUnsaved(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return;
+
+            const job = this.openJobs.get(jobId);
+            if (!job) return;
+
+            job.unsaved = false;
+            job.unsavedHtml = null;
+
+            this.saveToStorage();
+            this.render();
+        }
+
+        /**
+         * Check if a job has unsaved changes
+         * @param {string} jobId - The job ID
+         * @returns {boolean}
+         */
+        isUnsaved(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return false;
+
+            const job = this.openJobs.get(jobId);
+            return job ? !!job.unsaved : false;
+        }
+
+        /**
+         * Get the unsaved HTML for a job (if any)
+         * @param {string} jobId - The job ID
+         * @returns {string|null}
+         */
+        getUnsavedHtml(jobId) {
+            jobId = normalizeJobId(jobId);
+            if (!jobId) return null;
+
+            const job = this.openJobs.get(jobId);
+            return job ? job.unsavedHtml || null : null;
+        }
+
+        /**
+         * Create a draft workspace entry for a new unsaved job
+         * Draft entries have temporary IDs and are marked as isDraft
+         * @param {Object} data - Draft job data
+         * @param {string} data.customerName - Customer name for display
+         * @param {string} data.trailerColor - Trailer color
+         * @param {string} data.calendarColor - Calendar color
+         * @param {string} data.html - Panel HTML content to restore
+         * @returns {string} The draft ID
+         */
+        createDraft(data) {
+            // Check max tabs limit
+            if (this.openJobs.size >= MAX_TABS) {
+                if (window.showToast) {
+                    window.showToast(`Maximum ${MAX_TABS} jobs can be open at once`, 'warning');
+                }
+                return null;
+            }
+
+            // Generate a unique draft ID
+            const draftId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+            // Add to workspace as a draft
+            this.openJobs.set(draftId, {
+                jobId: draftId,
+                customerName: data.customerName || 'New Job',
+                trailerColor: data.trailerColor || '',
+                calendarColor: data.calendarColor || '#3B82F6',
+                isMinimized: true,
+                timestamp: Date.now(),
+                isDraft: true,
+                unsaved: true,
+                unsavedHtml: data.html || null
+            });
+
+            this.saveToStorage();
+            this.render();
+
+            return draftId;
+        }
+
+        /**
+         * Promote a draft to a real job after successful save
+         * @param {string} draftId - The draft ID to promote
+         * @param {string} realJobId - The real job ID from the server
+         * @param {Object} updatedMeta - Optional updated metadata
+         */
+        promoteDraft(draftId, realJobId, updatedMeta = {}) {
+            draftId = normalizeJobId(draftId);
+            realJobId = normalizeJobId(realJobId);
+
+            if (!draftId || !realJobId) return;
+
+            const draft = this.openJobs.get(draftId);
+            if (!draft) return;
+
+            // Remove the draft entry
+            this.openJobs.delete(draftId);
+
+            // Create the real job entry
+            const realJob = {
+                ...draft,
+                jobId: realJobId,
+                isDraft: false,
+                unsaved: false,
+                unsavedHtml: null,
+                ...updatedMeta
+            };
+
+            this.openJobs.set(realJobId, realJob);
+
+            // Update active job ID if the draft was active
+            if (this.activeJobId === draftId) {
+                this.activeJobId = realJobId;
+            }
+
+            this.saveToStorage();
+            this.render();
+
+            console.log(`JobWorkspace: Promoted draft ${draftId} to job ${realJobId}`);
+        }
+
+        /**
+         * Check if an ID is a draft
+         * @param {string} id - The ID to check
+         * @returns {boolean}
+         */
+        isDraftId(id) {
+            return id && String(id).startsWith('draft-');
         }
 
         /**
@@ -328,12 +591,26 @@
             if (job.isMinimized) {
                 tab.classList.add('minimized');
             }
+            if (job.unsaved) {
+                tab.classList.add('unsaved');
+            }
+            if (job.isDraft) {
+                tab.classList.add('draft');
+            }
 
             // Color indicator (small circle)
             const colorIndicator = document.createElement('div');
             colorIndicator.className = 'workspace-tab-color';
             colorIndicator.style.backgroundColor = job.calendarColor;
             tab.appendChild(colorIndicator);
+
+            // Unsaved indicator (red dot)
+            if (job.unsaved || job.isDraft) {
+                const unsavedDot = document.createElement('div');
+                unsavedDot.className = 'workspace-tab-unsaved-dot';
+                unsavedDot.title = job.isDraft ? 'New job (not saved)' : 'Unsaved changes';
+                tab.appendChild(unsavedDot);
+            }
 
             // Customer name
             const name = document.createElement('span');
@@ -568,7 +845,7 @@
 
             // Minimize to workspace
             minimizeBtn.addEventListener('click', () => {
-                const currentJobId = window.JobPanel.currentJobId;
+                const currentJobId = normalizeJobId(window.JobPanel.currentJobId);
                 if (currentJobId && window.JobWorkspace) {
                     // Save first if there are changes
                     if (window.JobPanel.saveForm) {
@@ -617,16 +894,42 @@
 
         /**
          * Save workspace state to localStorage
+         * Note: unsavedHtml is size-limited to prevent localStorage overflow
          */
         saveToStorage() {
             try {
+                // Create a copy of jobs with size-limited unsavedHtml
+                const jobsToSave = Array.from(this.openJobs.entries()).map(([key, job]) => {
+                    const jobCopy = { ...job };
+                    // Cap unsavedHtml at 100KB per job to prevent localStorage overflow
+                    if (jobCopy.unsavedHtml && jobCopy.unsavedHtml.length > 100000) {
+                        jobCopy.unsavedHtml = null; // Don't save if too large
+                    }
+                    return [key, jobCopy];
+                });
+
                 const state = {
-                    jobs: Array.from(this.openJobs.entries()),
+                    jobs: jobsToSave,
                     activeJobId: this.activeJobId
                 };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
             } catch (error) {
                 console.warn('JobWorkspace: Error saving to localStorage', error);
+                // If quota exceeded, try saving without unsavedHtml
+                try {
+                    const jobsWithoutHtml = Array.from(this.openJobs.entries()).map(([key, job]) => {
+                        const jobCopy = { ...job };
+                        jobCopy.unsavedHtml = null; // Remove large content
+                        return [key, jobCopy];
+                    });
+                    const state = {
+                        jobs: jobsWithoutHtml,
+                        activeJobId: this.activeJobId
+                    };
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                } catch (e2) {
+                    console.error('JobWorkspace: Could not save even without HTML', e2);
+                }
             }
         }
 
@@ -640,9 +943,20 @@
 
                 const state = JSON.parse(saved);
 
-                // Restore jobs
+                // Restore jobs with normalized IDs
                 if (state.jobs && Array.isArray(state.jobs)) {
-                    this.openJobs = new Map(state.jobs);
+                    this.openJobs = new Map();
+                    state.jobs.forEach(([key, value]) => {
+                        const normalizedKey = normalizeJobId(key);
+                        if (normalizedKey) {
+                            value.jobId = normalizedKey; // Also normalize the stored jobId
+                            // Ensure backwards compatibility for new fields
+                            value.unsaved = value.unsaved || false;
+                            value.unsavedHtml = value.unsavedHtml || null;
+                            value.isDraft = value.isDraft || false;
+                            this.openJobs.set(normalizedKey, value);
+                        }
+                    });
                 }
 
                 // Restore active job (but don't open panel yet - wait for user action)

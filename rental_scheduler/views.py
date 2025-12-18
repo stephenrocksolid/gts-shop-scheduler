@@ -718,6 +718,7 @@ def get_job_calendar_data(request):
                             'calendar_id': job.calendar.id,
                             'calendar_name': job.calendar.name,
                             # Minimal info for tooltip/display
+                            'display_name': job.display_name,
                             'phone': job.get_phone(),
                             'trailer_color': job.trailer_color,
                             # Recurring flags only (not full rule object)
@@ -750,6 +751,7 @@ def get_job_calendar_data(request):
                         'calendar_id': job.calendar.id,
                         'calendar_name': job.calendar.name,
                         # Minimal info for tooltip/display
+                        'display_name': job.display_name,
                         'phone': job.get_phone(),
                         'trailer_color': job.trailer_color,
                         # Recurring flags only (not full rule object)

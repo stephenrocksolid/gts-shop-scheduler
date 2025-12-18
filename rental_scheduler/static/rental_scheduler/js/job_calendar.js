@@ -110,6 +110,7 @@
             this.statusFilter = document.getElementById('status-filter');
             this.searchFilter = document.getElementById('search-filter');
             this.loadingEl = document.getElementById('calendar-loading');
+            this.noCalendarsOverlay = document.getElementById('calendar-no-calendars');
         }
 
         /**
@@ -951,7 +952,7 @@
                                         // Job is not in workspace, open it fresh
                                         const props = ev.extendedProps;
                                         window.JobWorkspace.openJob(jobId, {
-                                            customerName: props.business_name || props.contact_name || 'Job',
+                                            customerName: props.display_name || props.business_name || props.contact_name || ev.title || 'Job',
                                             trailerColor: props.trailer_color || '',
                                             calendarColor: props.calendar_color || '#3B82F6'
                                         });
@@ -977,7 +978,7 @@
                                     // Job is not in workspace, open it fresh
                                     const props = ev.extendedProps;
                                     window.JobWorkspace.openJob(jobId, {
-                                        customerName: props.business_name || props.contact_name || 'Job',
+                                        customerName: props.display_name || props.business_name || props.contact_name || ev.title || 'Job',
                                         trailerColor: props.trailer_color || '',
                                         calendarColor: props.calendar_color || '#3B82F6'
                                     });
@@ -1486,6 +1487,16 @@
 
             popover.innerHTML = checkboxesHTML;
 
+            // Set initial indeterminate state for "All" checkbox if partially selected
+            const selectedCount = this.selectedCalendars.size;
+            const totalCount = calendars.length;
+            if (selectedCount > 0 && selectedCount < totalCount) {
+                const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
+                if (allCheckbox) {
+                    allCheckbox.indeterminate = true;
+                }
+            }
+
             // Prevent scroll events from propagating to calendar (prevents week navigation)
             popover.addEventListener('wheel', (e) => {
                 e.stopPropagation();
@@ -1523,9 +1534,12 @@
                             checkbox.checked = true;
                         }
 
-                        // Update "All" checkbox
+                        // Update "All" checkbox with indeterminate state
                         const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
-                        allCheckbox.checked = this.selectedCalendars.size === calendars.length;
+                        const selectedCount = this.selectedCalendars.size;
+                        const totalCount = calendars.length;
+                        allCheckbox.checked = selectedCount === totalCount;
+                        allCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
 
                         // Save selected calendars
                         try {
@@ -1566,6 +1580,9 @@
                         const allCheckbox = e.target;
                         const checkboxes = popover.querySelectorAll('input[type="checkbox"][data-calendar-id]:not([data-calendar-id="all"])');
 
+                        // Clear indeterminate state when clicking "All"
+                        allCheckbox.indeterminate = false;
+
                         if (allCheckbox.checked) {
                             // Select all
                             this.selectedCalendars = new Set(calendars.map(cal => cal.id));
@@ -1584,9 +1601,12 @@
                             this.selectedCalendars.delete(id);
                         }
 
-                        // Update "All" checkbox
+                        // Update "All" checkbox with indeterminate state
                         const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
-                        allCheckbox.checked = this.selectedCalendars.size === calendars.length;
+                        const selectedCount = this.selectedCalendars.size;
+                        const totalCount = calendars.length;
+                        allCheckbox.checked = selectedCount === totalCount;
+                        allCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCount;
                     }
 
                     // Update button text
@@ -1810,6 +1830,16 @@
          * Hardened to handle empty/non-JSON responses gracefully
          */
         fetchEvents(info, successCallback, failureCallback) {
+            // If no calendars are selected, return empty events immediately (no network request)
+            if (!this.selectedCalendars || this.selectedCalendars.size === 0) {
+                successCallback([]);
+                this.updateNoCalendarsOverlay(true);
+                return;
+            }
+
+            // Hide the no-calendars overlay since we have calendars selected
+            this.updateNoCalendarsOverlay(false);
+
             this.showLoading();
 
             // Build params with selected calendars
@@ -1819,10 +1849,8 @@
             });
 
             // Add selected calendars as comma-separated string
-            if (this.selectedCalendars && this.selectedCalendars.size > 0) {
-                const calendarIds = Array.from(this.selectedCalendars).join(',');
-                params.append('calendar', calendarIds);
-            }
+            const calendarIds = Array.from(this.selectedCalendars).join(',');
+            params.append('calendar', calendarIds);
 
             // Add other filters
             if (this.currentFilters.status) {
@@ -2483,7 +2511,7 @@
                                     // Job is not in workspace, open it fresh
                                     const props = info.event.extendedProps;
                                     window.JobWorkspace.openJob(jobId, {
-                                        customerName: props.business_name || props.contact_name || 'Job',
+                                        customerName: props.display_name || props.business_name || props.contact_name || info.event.title || 'Job',
                                         trailerColor: props.trailer_color || '',
                                         calendarColor: props.calendar_color || '#3B82F6'
                                     });
@@ -2510,7 +2538,7 @@
                                 // Job is not in workspace, open it fresh
                                 const props = info.event.extendedProps;
                                 window.JobWorkspace.openJob(jobId, {
-                                    customerName: props.business_name || props.contact_name || 'Job',
+                                    customerName: props.display_name || props.business_name || props.contact_name || info.event.title || 'Job',
                                     trailerColor: props.trailer_color || '',
                                     calendarColor: props.calendar_color || '#3B82F6'
                                 });
@@ -3344,6 +3372,58 @@
             if (this.loadingEl) {
                 this.loadingEl.classList.add('hidden');
             }
+        }
+
+        /**
+         * Update the no-calendars overlay visibility
+         * @param {boolean} show - Whether to show the overlay
+         */
+        updateNoCalendarsOverlay(show) {
+            if (!this.noCalendarsOverlay) {
+                this.noCalendarsOverlay = document.getElementById('calendar-no-calendars');
+            }
+            if (this.noCalendarsOverlay) {
+                if (show) {
+                    this.noCalendarsOverlay.classList.remove('hidden');
+                } else {
+                    this.noCalendarsOverlay.classList.add('hidden');
+                }
+            }
+        }
+
+        /**
+         * Select all calendars and refresh the calendar
+         * Called from the no-calendars overlay "Select all" button
+         */
+        selectAllCalendars() {
+            const calendars = window.calendarConfig?.calendars || [];
+            this.selectedCalendars = new Set(calendars.map(cal => cal.id));
+
+            // Update the checkbox UI in the popover
+            const popover = document.getElementById('calendar-multi-select-popover');
+            if (popover) {
+                const allCheckbox = popover.querySelector('input[data-calendar-id="all"]');
+                if (allCheckbox) {
+                    allCheckbox.checked = true;
+                    allCheckbox.indeterminate = false;
+                }
+                const checkboxes = popover.querySelectorAll('input[type="checkbox"][data-calendar-id]:not([data-calendar-id="all"])');
+                checkboxes.forEach(cb => cb.checked = true);
+            }
+
+            // Save to localStorage
+            try {
+                localStorage.setItem('gts-selected-calendars', JSON.stringify(Array.from(this.selectedCalendars)));
+            } catch (error) {
+                console.warn('Error saving calendar selection:', error);
+            }
+
+            // Update button text
+            this.updateCalendarButtonText();
+
+            // Hide the overlay and refresh calendar
+            this.updateNoCalendarsOverlay(false);
+            this.debouncedRefetch();
         }
 
         /**

@@ -185,6 +185,9 @@ class TestCalendarAPIPayload:
         assert 'calendar_id' in props
         assert 'phone' in props
         assert 'trailer_color' in props
+        assert 'display_name' in props
+        # display_name should match the job's display_name property
+        assert props['display_name'] == "Test Business"
 
 
 @pytest.mark.django_db

@@ -38,8 +38,8 @@ MAX_MULTI_DAY_EXPANSION_DAYS = 120
 # Intentionally more conservative than hard limits.
 # =============================================================================
 
-WARN_DAYS_IN_FUTURE = 365
-"""Warn user if scheduling more than this many days in the future."""
+WARN_DAYS_IN_FUTURE = 1095
+"""Warn user if scheduling more than this many days (3 years) in the future."""
 
 WARN_JOB_SPAN_DAYS = 60
 """Warn user if job spans more than this many days."""

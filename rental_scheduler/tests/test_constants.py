@@ -38,8 +38,8 @@ class TestConstants:
         assert isinstance(MAX_MULTI_DAY_EXPANSION_DAYS, int)
     
     def test_warn_days_in_future(self):
-        """WARN_DAYS_IN_FUTURE should be set for UX warnings."""
-        assert WARN_DAYS_IN_FUTURE == 365
+        """WARN_DAYS_IN_FUTURE should be set for UX warnings (3 years)."""
+        assert WARN_DAYS_IN_FUTURE == 1095
         assert isinstance(WARN_DAYS_IN_FUTURE, int)
     
     def test_warn_job_span_days(self):

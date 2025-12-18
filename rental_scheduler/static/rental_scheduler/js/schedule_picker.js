@@ -116,6 +116,13 @@
                         enforceEndAfterStart();
                     }
                 };
+                // End picker: onOpen jumps to minDate if no date selected yet
+                // This prevents the calendar opening on an invalid month when Start is far in the future
+                config.onOpen = function (selectedDates, dateStr, instance) {
+                    if (selectedDates.length === 0 && instance.config.minDate) {
+                        instance.jumpToDate(instance.config.minDate);
+                    }
+                };
             } else {
                 // Start picker: onChange updates end's minDate and enforces constraint
                 config.onChange = function (selectedDates) {

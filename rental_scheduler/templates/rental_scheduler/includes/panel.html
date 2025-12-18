@@ -1,8 +1,11 @@
 {% comment %} reusable floating panel {% endcomment %}
 <div id="job-panel"
      class="fixed z-50 hidden"
-     role="dialog" aria-modal="false" aria-labelledby="job-panel-title"
-     style="top: 0; left: 0;">
+     role="dialog"
+     aria-modal="false"
+     aria-labelledby="job-panel-title"
+     style="top: 0;
+            left: 0">
 
   <style>
     #job-panel { 
@@ -295,33 +298,90 @@
       border: 1px solid #d1d5db !important;
       background: white !important;
     }
+    
+    /* Hide flatpickr's original input (keeps ISO value for form submission) */
+    #job-panel input[data-fp-original="true"] {
+      display: none !important;
+    }
+    
+    /* Style flatpickr's visible altInput to match panel form inputs */
+    #job-panel .flatpickr-input {
+      font-size: 12px !important;
+      padding: 4px 8px !important;
+      border: 1px solid #d1d5db !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+      cursor: pointer;
+      width: 100%;
+    }
+    
+    #job-panel .flatpickr-input:focus {
+      outline: none;
+      border-color: #3b82f6 !important;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
   </style>
 
   <div class="panel-frame">
-    <div class="panel-resize-handle" id="panel-resize-handle-right"></div>
-    <div class="panel-resize-handle-bottom" id="panel-resize-handle-bottom"></div>
-    <div class="panel-resize-handle-corner" id="panel-resize-handle-corner"></div>
+    <div class="panel-resize-handle" id="panel-resize-handle-right">
+    </div>
+    <div class="panel-resize-handle-bottom" id="panel-resize-handle-bottom">
+    </div>
+    <div class="panel-resize-handle-corner" id="panel-resize-handle-corner">
+    </div>
     <div class="panel-header">
       <div style="flex: 1;">
-        <h2 id="job-panel-title" class="font-semibold text-gray-800">Job</h2>
+        <h2 id="job-panel-title" class="font-semibold text-gray-800">
+Job
+        </h2>
       </div>
-      <div id="panel-calendar-container" style="display: none; align-items: center; gap: 8px; flex: 1; justify-content: center;">
-        <label style="font-weight: 600; color: #374151; margin: 0; font-size: 12px; white-space: nowrap;">Calendar</label>
-        <div id="panel-calendar-selector" style="min-width: 180px;"></div>
+      <div id="panel-calendar-container"
+           style="display: none;
+                  align-items: center;
+                  gap: 8px;
+                  flex: 1;
+                  justify-content: center">
+        <label style="font-weight: 600;
+                      color: #374151;
+                      margin: 0;
+                      font-size: 12px;
+                      white-space: nowrap">
+Calendar
+        </label>
+        <div id="panel-calendar-selector" style="min-width: 180px;">
+        </div>
       </div>
-      <div class="space-x-2" style="display: flex; align-items: center; flex: 1; justify-content: flex-end;">
-        <button class="btn btn-delete" id="panel-delete-btn" style="display: none;">Delete</button>
-        <button class="btn" id="panel-workspace-minimize-btn" title="Minimize to workspace" style="display: none;">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="2" y1="14" x2="14" y2="14"></line>
+      <div class="space-x-2"
+           style="display: flex;
+                  align-items: center;
+                  flex: 1;
+                  justify-content: flex-end">
+        <button class="btn btn-delete" id="panel-delete-btn" style="display: none;">
+Delete
+        </button>
+        <button class="btn"
+                id="panel-workspace-minimize-btn"
+                title="Minimize to workspace"
+                style="display: none">
+          <svg width="16"
+               height="16"
+               viewBox="0 0 16 16"
+               fill="none"
+               stroke="currentColor"
+               stroke-width="2">
+<line x1="2" y1="14" x2="14" y2="14"></line>
           </svg>
         </button>
-        <button class="btn btn-close">✕</button>
+        <button class="btn btn-close">
+✕
+        </button>
       </div>
     </div>
     <div class="panel-body p-3">
       <!-- HTMX will swap content here -->
-      <div class="text-sm text-gray-500">Loading…</div>
+      <div class="text-sm text-gray-500">
+Loading…
+      </div>
     </div>
   </div>
 </div>
@@ -339,7 +399,6 @@
     const handleRight = document.getElementById('panel-resize-handle-right');
     const handleBottom = document.getElementById('panel-resize-handle-bottom');
     const handleCorner = document.getElementById('panel-resize-handle-corner');
-    const minimizeBtn = document.getElementById('panel-minimize-btn');
     
     const STORAGE_KEY_WIDTH = 'gts-panel-width';
     const STORAGE_KEY_HEIGHT = 'gts-panel-height';
@@ -347,19 +406,6 @@
     const MAX_WIDTH = window.innerWidth * 0.95;
     const MIN_HEIGHT = 100;
     const MAX_HEIGHT = window.innerHeight * 0.99;
-    
-    // Minimize button handler
-    if (minimizeBtn) {
-      minimizeBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        panel.style.width = '400px';
-        panel.style.height = '200px';
-        // Save the size
-        localStorage.setItem(STORAGE_KEY_WIDTH, 400);
-        localStorage.setItem(STORAGE_KEY_HEIGHT, 200);
-      });
-    }
     
     // Load saved dimensions
     const savedWidth = localStorage.getItem(STORAGE_KEY_WIDTH);

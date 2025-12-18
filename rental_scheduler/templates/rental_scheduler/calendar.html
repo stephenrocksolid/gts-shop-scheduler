@@ -62,6 +62,20 @@
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
 
+    /* No calendars selected overlay styling */
+    .calendar-no-calendars {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 999;
+        background: rgba(255, 255, 255, 0.98);
+        padding: 3rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        text-align: center;
+    }
+
     /* Spinner animation */
     @keyframes spin {
         to {
@@ -212,12 +226,17 @@
         flex-direction: column;
     }
 
+    /* Fix search input padding to prevent text from overlaying icon */
+    #calendar-search-input {
+        padding-left: 36px !important;
+    }
+
     #calendar-search-panel.open {
         height: 50vh;
     }
 
     #search-panel-content {
-        padding: 1rem;
+        padding: 0.5rem 1rem;
         height: 100%;
         display: flex;
         flex-direction: column;
@@ -228,7 +247,7 @@
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
-        margin-top: 1rem;
+        margin-top: 0.5rem;
     }
 
     #search-results-container::-webkit-scrollbar {
@@ -274,25 +293,29 @@
         font-size: 0.75rem !important;
     }
 
-    /* Search button styling - white with grey border when collapsed, blue when expanded */
-    .fc-searchButton-button {
+    /* Search & Today toggle button styling - white with grey border when inactive, blue when expanded */
+    .fc-searchButton-button,
+    .fc-todaySidebarButton-button {
         background-color: white !important;
         border-color: #d1d5db !important;
         color: #374151 !important;
     }
 
-    .fc-searchButton-button:hover {
+    .fc-searchButton-button:hover,
+    .fc-todaySidebarButton-button:hover {
         background-color: #f9fafb !important;
         border-color: #9ca3af !important;
     }
 
-    .fc-searchButton-button.active {
+    .fc-searchButton-button.active,
+    .fc-todaySidebarButton-button.active {
         background-color: #2563eb !important;
         border-color: #2563eb !important;
         color: white !important;
     }
 
-    .fc-searchButton-button.active:hover {
+    .fc-searchButton-button.active:hover,
+    .fc-todaySidebarButton-button.active:hover {
         background-color: #1d4ed8 !important;
         border-color: #1d4ed8 !important;
         color: white !important;
@@ -737,6 +760,10 @@
         flex-grow: 0;
     }
 
+    .today-sidebar.hidden {
+        display: none !important;
+    }
+
     .resize-handle {
         position: absolute;
         left: -4px;
@@ -1065,7 +1092,7 @@ full-bleed
     <!-- Search Panel -->
     <div id="calendar-search-panel">
         <div id="search-panel-content">
-            <form method="get" id="calendar-search-form" class="mb-4">
+            <form method="get" id="calendar-search-form" class="mb-2">
                 <!-- Filters and Search on Same Row -->
                 <div class="flex flex-row gap-4 items-center flex-wrap">
                     <!-- Calendar Filter -->
@@ -1142,6 +1169,13 @@ Events
                                        class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
                                 <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events in Current View</span>
                             </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio"
+                                       name="date_filter"
+                                       value="two_years"
+                                       class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Events within 2 years</span>
+                            </label>
                         </div>
                         <!-- Hidden inputs to store current view dates -->
                         <input type="hidden" name="start_date" id="search-view-start-date">
@@ -1186,13 +1220,23 @@ Events
                             </svg>
                         Clear
                         </button>
+                        <button type="button"
+                                id="calendar-close-search-btn"
+                                class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors duration-200 whitespace-nowrap"
+                                title="Close the search area">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7">
+</path>
+                            </svg>
+                        Close Search
+                        </button>
                     </div>
                 </div>
             </form>
 
             <!-- Search Results -->
             <div id="search-results-container">
-                <div id="search-results" class="text-center text-gray-500 py-8">
+                <div id="search-results" class="text-center text-gray-500 py-0">
                 Enter search criteria and click Search to see results.
                 </div>
             </div>
@@ -1215,6 +1259,30 @@ Events
 Loading calendar...
                             </p>
                         </div>
+                    </div>
+                </div>
+
+                <!-- No Calendars Selected State -->
+                <div id="calendar-no-calendars" class="calendar-no-calendars hidden">
+                    <div class="flex flex-col items-center space-y-4">
+                        <svg class="w-16 h-16 text-gray-400"
+                             fill="none"
+                             stroke="currentColor"
+                             viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
+</path>
+                        </svg>
+                        <p class="text-gray-600 text-lg font-medium">
+No calendars selected
+                        </p>
+                        <p class="text-gray-500 text-sm">
+Select one or more calendars to view events
+                        </p>
+                        <button type="button"
+                                id="calendar-select-all-btn"
+                                class="mt-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                            Select All Calendars
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1588,7 +1656,9 @@ Today
                     const checkedCount = document.querySelectorAll('.search-calendar-checkbox:checked').length;
                     const totalCount = searchCalendarCheckboxes.length;
 
-                    if (checkedCount === 0 || checkedCount === totalCount) {
+                    if (checkedCount === 0) {
+                        searchCalendarSelectedText.textContent = 'No Calendars';
+                    } else if (checkedCount === totalCount) {
                         searchCalendarSelectedText.textContent = 'All Calendars';
                     } else {
                         searchCalendarSelectedText.textContent = checkedCount + ' calendar(s) selected';
@@ -1673,9 +1743,9 @@ Today
                     searchInput.value = '';
                 }
 
-                // Uncheck all calendar checkboxes
+                // Check all calendar checkboxes (reset to default: all calendars selected)
                 document.querySelectorAll('.search-calendar-checkbox').forEach(cb => {
-                    cb.checked = false;
+                    cb.checked = true;
                 });
                 searchCalendarSelectedText.textContent = 'All Calendars';
 
@@ -1691,6 +1761,26 @@ Today
                 // Reset keyboard navigation
                 currentHighlightIndex = -1;
                 hasSubmitted = false;
+            });
+        }
+
+        // Handle close search area button click
+        const closeSearchBtn = document.getElementById('calendar-close-search-btn');
+        if (closeSearchBtn) {
+            closeSearchBtn.addEventListener('click', function () {
+                if (window.jobCalendar && window.jobCalendar.searchPanelOpen) {
+                    window.jobCalendar.toggleSearchPanel();
+                }
+            });
+        }
+
+        // Handle "Select All Calendars" button click (from no-calendars overlay)
+        const selectAllBtn = document.getElementById('calendar-select-all-btn');
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', function () {
+                if (window.jobCalendar) {
+                    window.jobCalendar.selectAllCalendars();
+                }
             });
         }
 
@@ -1717,6 +1807,14 @@ Today
                 document.querySelectorAll('.search-calendar-checkbox:checked').forEach(cb => {
                     selectedCalendars.push(cb.value);
                 });
+
+                // If no calendars are selected, show a friendly message and don't search
+                if (selectedCalendars.length === 0) {
+                    searchResults.innerHTML = '<div class="text-center text-gray-500 py-8"><p class="text-lg font-medium mb-2">No calendars selected</p><p class="text-sm">Please select one or more calendars to search for jobs.</p></div>';
+                    updateJobRows();
+                    return;
+                }
+
                 selectedCalendars.forEach(calId => {
                     params.append('calendars', calId);
                 });
