@@ -287,22 +287,22 @@ class JobListView(ListView):
             # "All Events": Upcoming first (soonest → latest), then Past (most recent → oldest)
             now = timezone.now()
             queryset = queryset.annotate(
-                _is_past=models.Case(
+                is_past_event=models.Case(
                     models.When(start_dt__lt=now, then=models.Value(1)),
                     default=models.Value(0),
                     output_field=models.IntegerField(),
                 ),
-                _future_sort=models.Case(
+                future_sort_key=models.Case(
                     models.When(start_dt__gte=now, then=models.F('start_dt')),
                     default=models.Value(None, output_field=models.DateTimeField()),
                     output_field=models.DateTimeField(),
                 ),
-                _past_sort=models.Case(
+                past_sort_key=models.Case(
                     models.When(start_dt__lt=now, then=models.F('start_dt')),
                     default=models.Value(None, output_field=models.DateTimeField()),
                     output_field=models.DateTimeField(),
                 ),
-            ).order_by('_is_past', '_future_sort', '-_past_sort')
+            ).order_by('is_past_event', 'future_sort_key', '-past_sort_key')
 
             self._effective_sort = 'smart'
             self._effective_direction = ''
@@ -1980,7 +1980,10 @@ class InvoiceDetailView(DetailView):
 # Job Modal Views
 def job_create_partial(request):
     """Return job creation form partial for panel"""
+    from rental_scheduler.utils.recurrence import get_recurrence_meta
+    
     call_reminder_notes = ''
+    recurrence_meta = None
     
     # Check if editing existing job
     if 'edit' in request.GET:
@@ -1988,6 +1991,9 @@ def job_create_partial(request):
             job_id = int(request.GET['edit'])
             job = get_object_or_404(Job, pk=job_id)
             form = JobForm(instance=job)
+            
+            # Compute recurrence metadata for display
+            recurrence_meta = get_recurrence_meta(job)
             
             # Load call reminder notes if job has a call reminder
             if job.has_call_reminder:
@@ -2032,7 +2038,8 @@ def job_create_partial(request):
     
     return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {
         'form': form,
-        'call_reminder_notes': call_reminder_notes
+        'call_reminder_notes': call_reminder_notes,
+        'recurrence_meta': recurrence_meta,
     })
 
 

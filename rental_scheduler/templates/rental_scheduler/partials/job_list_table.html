@@ -140,6 +140,35 @@
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200" id="job-table-body">
                     {% for job in jobs %}
+                        {% if date_filter == 'all' and current_sort == 'smart' %}
+                            {% if forloop.first %}
+                                {# First row: show Upcoming or Past header based on first job #}
+                                {% if job.is_past_event %}
+                                    <tr class="bg-gray-100 border-t-2 border-gray-300">
+                                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                                            Past Events
+                                        </td>
+                                    </tr>
+                                {% else %}
+                                    <tr class="bg-blue-50 border-t-2 border-blue-200">
+                                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
+                                            Upcoming Events
+                                        </td>
+                                    </tr>
+                                {% endif %}
+                            {% else %}
+                                {# Subsequent rows: insert Past header when is_past_event changes from 0 to 1 #}
+                                {% ifchanged job.is_past_event %}
+                                    {% if job.is_past_event %}
+                                        <tr class="bg-gray-100 border-t-2 border-gray-300">
+                                            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                                                Past Events
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+                                {% endifchanged %}
+                            {% endif %}
+                        {% endif %}
                         {% include 'rental_scheduler/partials/job_row.html' with job=job %}
                     {% endfor %}
                 </tbody>

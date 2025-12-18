@@ -143,6 +143,16 @@ Events
                                 <label class="flex items-center cursor-pointer">
                                     <input type="radio"
                                            name="date_filter"
+                                           value="past"
+                                           {% if date_filter == 'past' %}
+                                               checked
+                                           {% endif %}
+                                           class="date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                    <span class="ml-2 text-sm text-gray-700">Past Events</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="radio"
+                                           name="date_filter"
                                            value="custom"
                                            {% if date_filter == 'custom' %}
                                                checked

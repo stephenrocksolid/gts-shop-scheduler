@@ -1122,6 +1122,13 @@ Calendars
                             <div id="search-calendar-dropdown"
                                  class="hidden absolute w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto"
                                  style="z-index: 1000">
+                                <!-- All Calendars select-all row -->
+                                <label class="flex items-center px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-200">
+                                    <input type="checkbox"
+                                           id="search-calendar-all-checkbox"
+                                           class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                    <span class="ml-3 text-sm font-semibold text-gray-900">All Calendars</span>
+                                </label>
                                 {% for calendar in calendars %}
                                     <label class="flex items-center px-4 py-2 hover:bg-gray-50 cursor-pointer">
                                         <input type="checkbox"
@@ -1161,6 +1168,13 @@ Events
                                        value="future"
                                        class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
                                 <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">All Future</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio"
+                                       name="date_filter"
+                                       value="past"
+                                       class="search-date-filter-radio w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <span class="ml-2 text-sm text-gray-700 whitespace-nowrap">Past</span>
                             </label>
                             <label class="flex items-center cursor-pointer">
                                 <input type="radio"
@@ -1587,12 +1601,38 @@ Today
         const searchCalendarDropdownBtn = document.getElementById('search-calendar-dropdown-btn');
         const searchCalendarDropdown = document.getElementById('search-calendar-dropdown');
         const searchCalendarCheckboxes = document.querySelectorAll('.search-calendar-checkbox');
+        const searchCalendarAllCheckbox = document.getElementById('search-calendar-all-checkbox');
         const searchCalendarSelectedText = document.getElementById('search-calendar-selected-text');
         const searchDateFilterRadios = document.querySelectorAll('.search-date-filter-radio');
         const searchForm = document.getElementById('calendar-search-form');
         const searchResults = document.getElementById('search-results');
         const searchResultsContainer = document.getElementById('search-results-container');
         const searchInput = document.getElementById('calendar-search-input');
+
+        /**
+         * Updates the search calendar UI:
+         * - Sets button label based on selection count
+         * - Sets select-all checkbox checked/indeterminate state
+         */
+        function updateSearchCalendarUI() {
+            const checkedCount = document.querySelectorAll('.search-calendar-checkbox:checked').length;
+            const totalCount = searchCalendarCheckboxes.length;
+
+            // Update button label
+            if (checkedCount === 0) {
+                searchCalendarSelectedText.textContent = 'No Calendars';
+            } else if (checkedCount === totalCount) {
+                searchCalendarSelectedText.textContent = 'All Calendars';
+            } else {
+                searchCalendarSelectedText.textContent = checkedCount + ' calendar(s) selected';
+            }
+
+            // Update select-all checkbox state
+            if (searchCalendarAllCheckbox) {
+                searchCalendarAllCheckbox.checked = checkedCount === totalCount;
+                searchCalendarAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < totalCount;
+            }
+        }
 
         // Keyboard navigation state
         let currentHighlightIndex = -1;
@@ -1649,23 +1689,49 @@ Today
             }
         });
 
-        // Update selected text when checkboxes change
+        // Handle select-all checkbox change
+        if (searchCalendarAllCheckbox) {
+            searchCalendarAllCheckbox.addEventListener('change', function () {
+                const isChecked = this.checked;
+                // Clear indeterminate when user explicitly clicks
+                this.indeterminate = false;
+                // Check/uncheck all individual calendar checkboxes
+                searchCalendarCheckboxes.forEach(cb => {
+                    cb.checked = isChecked;
+                });
+                updateSearchCalendarUI();
+            });
+        }
+
+        // Update UI when individual checkboxes change
         if (searchCalendarCheckboxes) {
             searchCalendarCheckboxes.forEach(checkbox => {
                 checkbox.addEventListener('change', function () {
-                    const checkedCount = document.querySelectorAll('.search-calendar-checkbox:checked').length;
-                    const totalCount = searchCalendarCheckboxes.length;
-
-                    if (checkedCount === 0) {
-                        searchCalendarSelectedText.textContent = 'No Calendars';
-                    } else if (checkedCount === totalCount) {
-                        searchCalendarSelectedText.textContent = 'All Calendars';
-                    } else {
-                        searchCalendarSelectedText.textContent = checkedCount + ' calendar(s) selected';
-                    }
+                    updateSearchCalendarUI();
                 });
             });
         }
+
+        // Initialize search calendar checkboxes on page load
+        (function initSearchCalendarDefaults() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const calendarParams = urlParams.getAll('calendars');
+
+            if (calendarParams.length > 0) {
+                // URL has specific calendars - check only those
+                searchCalendarCheckboxes.forEach(cb => {
+                    cb.checked = calendarParams.includes(cb.value);
+                });
+            } else {
+                // No URL params - default to all calendars checked
+                searchCalendarCheckboxes.forEach(cb => {
+                    cb.checked = true;
+                });
+            }
+
+            // Update UI to reflect initial state
+            updateSearchCalendarUI();
+        })();
 
         // Get calendar instance function
         function getCalendarInstance() {
@@ -1747,7 +1813,15 @@ Today
                 document.querySelectorAll('.search-calendar-checkbox').forEach(cb => {
                     cb.checked = true;
                 });
-                searchCalendarSelectedText.textContent = 'All Calendars';
+
+                // Reset select-all checkbox to checked (not indeterminate)
+                if (searchCalendarAllCheckbox) {
+                    searchCalendarAllCheckbox.checked = true;
+                    searchCalendarAllCheckbox.indeterminate = false;
+                }
+
+                // Update UI via helper
+                updateSearchCalendarUI();
 
                 // Reset date filter to "All Events"
                 const allEventsRadio = document.querySelector('.search-date-filter-radio[value="all"]');
