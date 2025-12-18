@@ -6,3 +6,17 @@
         line-height: 1.5;
     }
 }
+
+/* ==========================================================================
+   FRIENDLY DATE PICKER - GLOBAL STYLES
+   Hide the original input when flatpickr creates an altInput for display.
+   This ensures consistent behavior across all pages using GtsDateInputs.
+   ========================================================================== */
+input[data-fp-original="true"] {
+    display: none !important;
+}
+
+/* Style flatpickr alt inputs consistently across the app */
+.flatpickr-input {
+    cursor: pointer;
+}

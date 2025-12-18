@@ -972,9 +972,19 @@
 
             // Update date picker value only if it's different
             if (datePicker) {
-                const dateStr = this.formatDateForInput(targetDate);
-                if (datePicker.value !== dateStr) {
-                    datePicker.value = dateStr;
+                // Check if we have a flatpickr instance
+                if (this._todayPickerInstance && this._todayPickerInstance.setDate) {
+                    const currentSelected = this._todayPickerInstance.selectedDates[0];
+                    // Only update if dates are different (avoid infinite loops)
+                    if (!currentSelected || !this.isSameDay(currentSelected, targetDate)) {
+                        this._todayPickerInstance.setDate(targetDate, false);
+                    }
+                } else {
+                    // Fallback to native input
+                    const dateStr = this.formatDateForInput(targetDate);
+                    if (datePicker.value !== dateStr) {
+                        datePicker.value = dateStr;
+                    }
                 }
             }
 
@@ -1155,6 +1165,7 @@
          * Initialize date picker controls for the Today panel
          */
         initializeDatePickerControls() {
+            const self = this;
             const prevDayBtn = document.getElementById('prevDayBtn');
             const nextDayBtn = document.getElementById('nextDayBtn');
             const todayBtn = document.getElementById('todayBtn');
@@ -1166,54 +1177,87 @@
                 return;
             }
 
+            // Helper: get current date from picker (flatpickr instance or input value)
+            const getCurrentDate = () => {
+                if (this._todayPickerInstance && this._todayPickerInstance.selectedDates.length > 0) {
+                    return this._todayPickerInstance.selectedDates[0];
+                }
+                // Fallback: parse from input value
+                const val = datePicker.value;
+                if (!val) return new Date();
+                if (window.GtsDateInputs && window.GtsDateInputs.parseISOLocal) {
+                    const parsed = window.GtsDateInputs.parseISOLocal(val);
+                    if (parsed && !isNaN(parsed.getTime())) return parsed;
+                }
+                // Manual parse fallback
+                const parts = val.split('-').map(Number);
+                if (parts.length === 3) {
+                    return new Date(parts[0], parts[1] - 1, parts[2]);
+                }
+                return new Date();
+            };
+
+            // Helper: set date on picker
+            const setPickerDate = (date) => {
+                if (this._todayPickerInstance && this._todayPickerInstance.setDate) {
+                    this._todayPickerInstance.setDate(date, false);
+                } else {
+                    datePicker.value = this.formatDateForInput(date);
+                }
+                this.renderTodayPanel(date);
+            };
+
             // Set initial date to today
             const today = new Date();
-            datePicker.value = this.formatDateForInput(today);
+
+            // Initialize with friendly date input when available
+            if (window.GtsDateInputs && window.GtsDateInputs.initFriendlyDateInput) {
+                this._todayPickerInstance = window.GtsDateInputs.initFriendlyDateInput(datePicker, {
+                    enableTime: false,
+                    defaultDate: today,
+                    onChange: function (selectedDates, dateStr, instance) {
+                        const d = selectedDates?.[0];
+                        if (d && !isNaN(d.getTime())) {
+                            self.renderTodayPanel(d);
+                        }
+                    }
+                });
+            } else {
+                // Fallback: use native date input
+                datePicker.value = this.formatDateForInput(today);
+                datePicker.addEventListener('change', () => {
+                    const date = getCurrentDate();
+                    this.renderTodayPanel(date);
+                });
+            }
 
             // Initial render with today's date
             this.renderTodayPanel(today);
 
             // Previous day button
             prevDayBtn.addEventListener('click', () => {
-                const [year, month, day] = datePicker.value.split('-').map(Number);
-                const currentDate = new Date(year, month - 1, day);
+                const currentDate = getCurrentDate();
                 currentDate.setDate(currentDate.getDate() - 1);
-                datePicker.value = this.formatDateForInput(currentDate);
-                // Trigger change event to update the panel
-                datePicker.dispatchEvent(new Event('change'));
+                setPickerDate(currentDate);
             });
 
             // Next day button
             nextDayBtn.addEventListener('click', () => {
-                const [year, month, day] = datePicker.value.split('-').map(Number);
-                const currentDate = new Date(year, month - 1, day);
+                const currentDate = getCurrentDate();
                 currentDate.setDate(currentDate.getDate() + 1);
-                datePicker.value = this.formatDateForInput(currentDate);
-                // Trigger change event to update the panel
-                datePicker.dispatchEvent(new Event('change'));
+                setPickerDate(currentDate);
             });
 
             // Today button
             todayBtn.addEventListener('click', () => {
                 const today = new Date();
-                datePicker.value = this.formatDateForInput(today);
-                // Trigger change event to update the panel
-                datePicker.dispatchEvent(new Event('change'));
-            });
-
-            // Date picker change
-            datePicker.addEventListener('change', () => {
-                const [year, month, day] = datePicker.value.split('-').map(Number);
-                const selectedDate = new Date(year, month - 1, day);
-                this.renderTodayPanel(selectedDate);
+                setPickerDate(today);
             });
 
             // Title button click - go to today
             titleBtn.addEventListener('click', () => {
                 const today = new Date();
-                datePicker.value = this.formatDateForInput(today);
-                // Trigger change event to update the panel
-                datePicker.dispatchEvent(new Event('change'));
+                setPickerDate(today);
             });
         }
 
@@ -1782,68 +1826,114 @@
          * Initialize Jump to Date functionality
          */
         initializeJumpToDate(input) {
-            // Helper: format Date -> YYYY-MM-DD (local)
+            const self = this;
+
+            // Helper: format Date -> YYYY-MM-DD (local) - use shared module when available
             const fmt = (d) => {
+                if (window.GtsDateInputs && window.GtsDateInputs.formatISODate) {
+                    return window.GtsDateInputs.formatISODate(d);
+                }
+                // Fallback
                 const pad = (n) => String(n).padStart(2, '0');
                 return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            };
+
+            // Helper: parse ISO date safely (local timezone)
+            const parseISO = (str) => {
+                if (window.GtsDateInputs && window.GtsDateInputs.parseISOLocal) {
+                    return window.GtsDateInputs.parseISOLocal(str);
+                }
+                // Fallback - parse as local date
+                if (!str) return null;
+                const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (m) {
+                    return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+                }
+                return new Date(str);
             };
 
             // Pick initial date from URL (?date=YYYY-MM-DD) or today
             const params = new URLSearchParams(window.location.search);
             const urlDate = params.get('date');
-            const initialDate = urlDate ? new Date(urlDate) : new Date();
+            const initialDate = urlDate ? parseISO(urlDate) : new Date();
 
-            // Set input value (works for both flatpickr + native date)
-            input.value = fmt(initialDate);
+            // Handle invalid parse
+            const safeInitialDate = (initialDate && !isNaN(initialDate.getTime())) ? initialDate : new Date();
+
+            // Set input value
+            input.value = fmt(safeInitialDate);
 
             // If a date was provided via URL, navigate calendar there
-            if (urlDate) {
+            if (urlDate && safeInitialDate) {
                 try {
-                    this.calendar.gotoDate(initialDate);
+                    this.calendar.gotoDate(safeInitialDate);
                 } catch (e) {
                     console.warn('Failed to navigate to URL date:', e);
                 }
             }
 
-            // If Flatpickr is available, use it; else fall back to native date
-            if (window.flatpickr) {
-                flatpickr(input, {
+            // Store flatpickr instance reference for later sync
+            let fpInstance = null;
+
+            // Use shared friendly date input module when available
+            if (window.GtsDateInputs && window.GtsDateInputs.initFriendlyDateInput) {
+                fpInstance = window.GtsDateInputs.initFriendlyDateInput(input, {
+                    enableTime: false,
+                    defaultDate: safeInitialDate,
+                    onChange: function (selectedDates, dateStr, instance) {
+                        const d = selectedDates?.[0];
+                        if (!d) return;
+                        self.calendar.gotoDate(d);
+
+                        // Update URL param without reloading
+                        const sp = new URLSearchParams(window.location.search);
+                        sp.set('date', fmt(d));
+                        history.replaceState({}, '', `${location.pathname}?${sp.toString()}`);
+                    }
+                });
+            } else if (window.flatpickr) {
+                // Fallback: plain flatpickr without friendly features
+                fpInstance = flatpickr(input, {
                     dateFormat: 'Y-m-d',
                     allowInput: true,
                     defaultDate: input.value,
                     onChange: function (selectedDates) {
                         const d = selectedDates?.[0];
                         if (!d) return;
-                        this.calendar.gotoDate(d);
+                        self.calendar.gotoDate(d);
 
-                        // update URL param without reloading
                         const sp = new URLSearchParams(window.location.search);
                         sp.set('date', fmt(d));
                         history.replaceState({}, '', `${location.pathname}?${sp.toString()}`);
-                    }.bind(this)
+                    }
                 });
             } else {
                 // Native <input type="date"> fallback
                 input.type = 'date';
                 input.addEventListener('change', (e) => {
-                    const val = e.target.value; // YYYY-MM-DD
+                    const val = e.target.value;
                     if (!val) return;
-                    const d = new Date(val);
-                    this.calendar.gotoDate(d);
+                    const d = parseISO(val);
+                    if (d && !isNaN(d.getTime())) {
+                        self.calendar.gotoDate(d);
 
-                    const sp = new URLSearchParams(window.location.search);
-                    sp.set('date', val);
-                    history.replaceState({}, '', `${location.pathname}?${sp.toString()}`);
+                        const sp = new URLSearchParams(window.location.search);
+                        sp.set('date', val);
+                        history.replaceState({}, '', `${location.pathname}?${sp.toString()}`);
+                    }
                 });
             }
 
             // Keep picker synced when navigating via calendar arrows
-            // (listen to FullCalendar's datesSet)
             this.calendar.on('datesSet', (info) => {
-                // Use the current date in view (center)
-                const center = info.view.currentStart; // for month view: first visible day
-                // Use activeDate if you track it; otherwise use currentStart
-                input.value = fmt(center);
+                const center = info.view.currentStart;
+                if (fpInstance && fpInstance.setDate) {
+                    // Update flatpickr instance (this also updates the visible alt input)
+                    fpInstance.setDate(center, false);
+                } else {
+                    // Fallback: update raw input value
+                    input.value = fmt(center);
+                }
             });
         }
 

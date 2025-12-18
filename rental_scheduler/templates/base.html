@@ -130,6 +130,9 @@
         <!-- Flatpickr JS -->
         <script src="{% static 'rental_scheduler/js/flatpickr.min.js' %}"></script>
 
+        <!-- Shared Date Input Utilities (friendly date formats) -->
+        <script src="{% static 'rental_scheduler/js/date_inputs.js' %}"></script>
+
         <script>
         // Global toast utility (vanilla JS)
         window.showToast = function(message, type = 'info', duration = 5000) {
@@ -213,6 +216,29 @@
             
             document.body.addEventListener('htmx:sendError', function(evt) {
                 window.showToast('Network error. Please check your connection.', 'error');
+            });
+
+            // Initialize friendly date inputs on page load
+            if (window.GtsDateInputs && window.GtsDateInputs.initFriendlyDateInputs) {
+                window.GtsDateInputs.initFriendlyDateInputs(document);
+            }
+
+            // Initialize friendly date inputs after HTMX swaps
+            document.body.addEventListener('htmx:afterSwap', function(evt) {
+                if (window.GtsDateInputs && window.GtsDateInputs.initFriendlyDateInputs) {
+                    // Use the swap target as the root to only scan new content
+                    setTimeout(function() {
+                        window.GtsDateInputs.initFriendlyDateInputs(evt.target);
+                    }, 50);
+                }
+            });
+
+            document.body.addEventListener('htmx:load', function(evt) {
+                if (window.GtsDateInputs && window.GtsDateInputs.initFriendlyDateInputs) {
+                    setTimeout(function() {
+                        window.GtsDateInputs.initFriendlyDateInputs(evt.target);
+                    }, 50);
+                }
             });
         });
         </script>

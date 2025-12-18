@@ -76,6 +76,10 @@
    * Serialize panel body HTML for draft storage, preserving form state.
    * Unlike innerHTML alone, this persists checkbox/radio checked state and select values
    * by setting the corresponding HTML attributes to match runtime properties.
+   * 
+   * Uses parallel NodeList iteration (by index) to avoid invalid selectors when
+   * elements have empty IDs or names.
+   * 
    * @param {HTMLElement} panelBody - The panel body element to serialize
    * @returns {string} - HTML string with form state preserved
    */
@@ -86,53 +90,51 @@
       // Clone the panel body so we don't modify the live DOM
       const clone = panelBody.cloneNode(true);
 
-      // Persist checkbox and radio checked state as attributes
-      clone.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(input => {
-        const original = panelBody.querySelector(`#${CSS.escape(input.id)}`) ||
-          panelBody.querySelector(`input[name="${CSS.escape(input.name)}"][type="${input.type}"]`);
-        if (original) {
-          if (original.checked) {
-            input.setAttribute('checked', 'checked');
-          } else {
-            input.removeAttribute('checked');
-          }
+      // Persist checkbox and radio checked state as attributes using parallel iteration
+      const origCheckboxes = panelBody.querySelectorAll('input[type="checkbox"], input[type="radio"]');
+      const cloneCheckboxes = clone.querySelectorAll('input[type="checkbox"], input[type="radio"]');
+      for (let i = 0; i < origCheckboxes.length && i < cloneCheckboxes.length; i++) {
+        if (origCheckboxes[i].checked) {
+          cloneCheckboxes[i].setAttribute('checked', 'checked');
+        } else {
+          cloneCheckboxes[i].removeAttribute('checked');
         }
-      });
+      }
 
-      // Persist select element selected state
-      clone.querySelectorAll('select').forEach(select => {
-        const original = panelBody.querySelector(`#${CSS.escape(select.id)}`) ||
-          panelBody.querySelector(`select[name="${CSS.escape(select.name)}"]`);
-        if (original) {
-          // Clear all selected attributes first
-          select.querySelectorAll('option').forEach(opt => opt.removeAttribute('selected'));
-          // Set selected on the currently selected option(s)
-          Array.from(original.selectedOptions).forEach(origOpt => {
-            const cloneOpt = select.querySelector(`option[value="${CSS.escape(origOpt.value)}"]`);
-            if (cloneOpt) {
-              cloneOpt.setAttribute('selected', 'selected');
+      // Persist select element selected state using parallel iteration
+      const origSelects = panelBody.querySelectorAll('select');
+      const cloneSelects = clone.querySelectorAll('select');
+      for (let i = 0; i < origSelects.length && i < cloneSelects.length; i++) {
+        const origSelect = origSelects[i];
+        const cloneSelect = cloneSelects[i];
+        // Clear all selected attributes first
+        cloneSelect.querySelectorAll('option').forEach(opt => opt.removeAttribute('selected'));
+        // Set selected on the currently selected option(s) by matching value
+        Array.from(origSelect.selectedOptions).forEach(origOpt => {
+          const cloneOpts = cloneSelect.querySelectorAll('option');
+          for (let j = 0; j < cloneOpts.length; j++) {
+            if (cloneOpts[j].value === origOpt.value) {
+              cloneOpts[j].setAttribute('selected', 'selected');
+              break;
             }
-          });
-        }
-      });
+          }
+        });
+      }
 
-      // Persist textarea values (innerHTML doesn't capture typed content)
-      clone.querySelectorAll('textarea').forEach(textarea => {
-        const original = panelBody.querySelector(`#${CSS.escape(textarea.id)}`) ||
-          panelBody.querySelector(`textarea[name="${CSS.escape(textarea.name)}"]`);
-        if (original) {
-          textarea.textContent = original.value;
-        }
-      });
+      // Persist textarea values using parallel iteration (innerHTML doesn't capture typed content)
+      const origTextareas = panelBody.querySelectorAll('textarea');
+      const cloneTextareas = clone.querySelectorAll('textarea');
+      for (let i = 0; i < origTextareas.length && i < cloneTextareas.length; i++) {
+        cloneTextareas[i].textContent = origTextareas[i].value;
+      }
 
-      // Persist text/number/date input values
-      clone.querySelectorAll('input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="email"], input[type="tel"]').forEach(input => {
-        const original = panelBody.querySelector(`#${CSS.escape(input.id)}`) ||
-          panelBody.querySelector(`input[name="${CSS.escape(input.name)}"]`);
-        if (original) {
-          input.setAttribute('value', original.value);
-        }
-      });
+      // Persist text/number/date input values using parallel iteration
+      const inputSelector = 'input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="email"], input[type="tel"], input[type="hidden"]';
+      const origInputs = panelBody.querySelectorAll(inputSelector);
+      const cloneInputs = clone.querySelectorAll(inputSelector);
+      for (let i = 0; i < origInputs.length && i < cloneInputs.length; i++) {
+        cloneInputs[i].setAttribute('value', origInputs[i].value);
+      }
 
       return clone.innerHTML;
     } catch (e) {
@@ -239,26 +241,89 @@
   window.syncJobFormToggles = syncJobFormToggles;
 
   // ==========================================================================
+  // PANEL CALENDAR SELECTOR INITIALIZATION
+  // Clones the hidden calendar <select> to the panel header for visibility.
+  // This runs on draft restore (innerHTML) since inline scripts don't execute.
+  // ==========================================================================
+
+  /**
+   * Initialize the panel header calendar selector by cloning the hidden form select.
+   * Idempotent - safe to call multiple times (uses dataset guard).
+   * @param {HTMLElement} panelBody - The panel body element containing the form
+   */
+  function initPanelCalendarSelector(panelBody) {
+    if (!panelBody) return;
+
+    // Find the hidden calendar select inside the form
+    const calendarField = panelBody.querySelector('#calendar-field-container select[name="calendar"]');
+    const panelCalendarSelector = document.getElementById('panel-calendar-selector');
+    const panelCalendarContainer = document.getElementById('panel-calendar-container');
+
+    if (!calendarField || !panelCalendarSelector || !panelCalendarContainer) {
+      return; // Elements not found, nothing to do
+    }
+
+    // Check if we already have a header select that matches the current form
+    const existingHeaderSelect = panelCalendarSelector.querySelector('#calendar-header-select');
+
+    // Guard: if the header select already exists and has the same options, just sync value
+    if (existingHeaderSelect && existingHeaderSelect.dataset.calendarInitialized === '1') {
+      // Sync value from hidden field to header select (in case it changed)
+      existingHeaderSelect.value = calendarField.value;
+      panelCalendarContainer.style.display = 'flex';
+      return;
+    }
+
+    // Clone the select element for the header (visual display)
+    const clonedSelect = calendarField.cloneNode(true);
+    clonedSelect.id = 'calendar-header-select';
+    clonedSelect.removeAttribute('name'); // Remove name to avoid duplicate submission
+    clonedSelect.dataset.calendarInitialized = '1'; // Mark as initialized
+
+    // Clear any existing content in the selector container first
+    panelCalendarSelector.innerHTML = '';
+    // Add the cloned select to the header
+    panelCalendarSelector.appendChild(clonedSelect);
+
+    // Set the cloned select's value to match the hidden field's current value
+    clonedSelect.value = calendarField.value;
+
+    // Add event listener to sync changes from header dropdown to original hidden field
+    clonedSelect.addEventListener('change', function () {
+      // Update the original hidden field so it gets submitted with the form
+      calendarField.value = this.value;
+      // Dispatch change event on hidden field in case other code listens for it
+      calendarField.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // Show the container
+    panelCalendarContainer.style.display = 'flex';
+  }
+
+  // Expose globally for use by inline scripts and showContent
+  window.initPanelCalendarSelector = initPanelCalendarSelector;
+
+  // ==========================================================================
   // FRIENDLY DATE PICKER ENHANCEMENT
   // Wraps flatpickr to show user-friendly format (Dec 22, 2026) while
   // keeping ISO values for form submission. Supports flexible typed input.
+  // NOTE: These functions delegate to the shared GtsDateInputs module when available.
   // ==========================================================================
 
   /**
    * Parse a user-entered date string into a Date object.
-   * Supports many common formats:
-   *   - MM/DD/YY, MM/DD/YYYY (also with - or . separators)
-   *   - YYYY-MM-DD, YYYY/MM/DD
-   *   - Mon D, YYYY or Mon D YYYY (e.g. Dec 22, 2026)
-   *   - ISO datetime: YYYY-MM-DDTHH:MM
-   * Returns null if parsing fails.
+   * Delegates to GtsDateInputs.parseFlexibleDate when available.
    */
   function parseFlexibleDate(str) {
+    // Use shared module when available
+    if (window.GtsDateInputs && window.GtsDateInputs.parseFlexibleDate) {
+      return window.GtsDateInputs.parseFlexibleDate(str);
+    }
+    // Fallback: inline implementation (kept for backwards compatibility)
     if (!str || typeof str !== 'string') return null;
     str = str.trim();
     if (!str) return null;
 
-    // Month name map
     const months = {
       jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
       jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
@@ -266,7 +331,6 @@
 
     let year, month, day, hours = 0, minutes = 0;
 
-    // Try ISO datetime first: YYYY-MM-DDTHH:MM
     let m = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})T(\d{1,2}):(\d{2})$/);
     if (m) {
       year = parseInt(m[1], 10);
@@ -277,7 +341,6 @@
       return new Date(year, month, day, hours, minutes);
     }
 
-    // Try ISO date: YYYY-MM-DD or YYYY/MM/DD
     m = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
     if (m) {
       year = parseInt(m[1], 10);
@@ -286,20 +349,15 @@
       return new Date(year, month, day);
     }
 
-    // Try MM/DD/YY or MM/DD/YYYY (also - or . separators)
     m = str.match(/^(\d{1,2})[-\/.]\s*(\d{1,2})[-\/.]\s*(\d{2,4})$/);
     if (m) {
       month = parseInt(m[1], 10) - 1;
       day = parseInt(m[2], 10);
       year = parseInt(m[3], 10);
-      // Handle 2-digit year
-      if (year < 100) {
-        year = 2000 + year;
-      }
+      if (year < 100) year = 2000 + year;
       return new Date(year, month, day);
     }
 
-    // Try "Mon D, YYYY" or "Mon D YYYY" (e.g. Dec 22, 2026)
     m = str.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})$/);
     if (m) {
       const monthKey = m[1].toLowerCase().slice(0, 3);
@@ -311,7 +369,6 @@
       }
     }
 
-    // Try "Mon D, YYYY h:mm AM/PM" or similar with time
     m = str.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
     if (m) {
       const monthKey = m[1].toLowerCase().slice(0, 3);
@@ -333,13 +390,17 @@
 
   /**
    * Parse an ISO date/datetime-local string to a Date object using local time.
-   * Avoids timezone issues that occur with `new Date(isoString)`.
+   * Delegates to GtsDateInputs.parseISOLocal when available.
    */
   function parseISOLocal(str) {
+    // Use shared module when available
+    if (window.GtsDateInputs && window.GtsDateInputs.parseISOLocal) {
+      return window.GtsDateInputs.parseISOLocal(str);
+    }
+    // Fallback: inline implementation
     if (!str) return null;
     str = str.trim();
 
-    // YYYY-MM-DDTHH:MM
     let m = str.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
     if (m) {
       return new Date(
@@ -351,7 +412,6 @@
       );
     }
 
-    // YYYY-MM-DD
     m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (m) {
       return new Date(
@@ -366,25 +426,28 @@
 
   /**
    * Get flatpickr configuration enhanced for friendly display in #job-panel.
+   * Delegates to GtsDateInputs.buildFriendlyFlatpickrConfig when available.
    * @param {HTMLElement} el - The input element
    * @param {Object} baseConfig - Original config passed to flatpickr
    * @returns {Object} - Enhanced config
    */
   function getPanelFlatpickrConfig(el, baseConfig) {
+    // Use shared module when available
+    if (window.GtsDateInputs && window.GtsDateInputs.buildFriendlyFlatpickrConfig) {
+      return window.GtsDateInputs.buildFriendlyFlatpickrConfig(el, baseConfig, {
+        enableTime: baseConfig.enableTime === true
+      });
+    }
+
+    // Fallback: inline implementation
     const enableTime = baseConfig.enableTime === true;
     const inputName = el.name || '';
-
-    // Determine altFormat based on whether time is enabled
     const altFormat = enableTime ? 'M j, Y h:i K' : 'M j, Y';
 
-    // Build parseDate that tries flexible formats first, then falls back
     const customParseDate = function (dateStr, format) {
-      // Try our flexible parser first
       const parsed = parseFlexibleDate(dateStr);
       if (parsed && !isNaN(parsed.getTime())) {
-        // If time is enabled but user typed date-only, add default time
         if (enableTime && !dateStr.includes(':') && !dateStr.includes('T')) {
-          // Default: 9:00 AM for start, 5:00 PM for end
           if (inputName === 'start_dt') {
             parsed.setHours(9, 0, 0, 0);
           } else if (inputName === 'end_dt') {
@@ -393,12 +456,9 @@
         }
         return parsed;
       }
-      // Let flatpickr try its default parsing
       return undefined;
     };
 
-    // Merge with base config
-    // Force 12-hour time picker (AM/PM) when time is enabled
     const timeConfig = enableTime ? { time_24hr: false } : {};
 
     return Object.assign({}, baseConfig, timeConfig, {
@@ -408,11 +468,9 @@
       disableMobile: true,
       parseDate: customParseDate,
       onReady: function (selectedDates, dateStr, instance) {
-        // Mark the original input so CSS can hide it
         if (instance.input) {
           instance.input.setAttribute('data-fp-original', 'true');
         }
-        // Call original onReady if present
         if (baseConfig.onReady) {
           if (Array.isArray(baseConfig.onReady)) {
             baseConfig.onReady.forEach(fn => fn(selectedDates, dateStr, instance));
@@ -537,6 +595,7 @@
         const panelBody = document.querySelector('#job-panel .panel-body');
         if (panelBody) {
           initJobFormToggleUI(panelBody);
+          initPanelCalendarSelector(panelBody);
         }
       }, 100);
     }
@@ -545,10 +604,11 @@
   document.body.addEventListener('htmx:load', function (event) {
     setTimeout(() => {
       initPanelDatePickers();
-      // Initialize toggle UI (call reminder, recurrence)
+      // Initialize toggle UI (call reminder, recurrence) and calendar header
       const panelBody = document.querySelector('#job-panel .panel-body');
       if (panelBody) {
         initJobFormToggleUI(panelBody);
+        initPanelCalendarSelector(panelBody);
       }
     }, 100);
   });
@@ -1585,6 +1645,9 @@
       target.setAttribute('hx-get', url);
       target.setAttribute('hx-target', 'this');
       target.setAttribute('hx-swap', 'innerHTML');
+      // IMPORTANT: Set hx-trigger to a custom event to prevent default click behavior
+      // Without this, htmx.process() would make the panel body clickable for HTMX GET
+      target.setAttribute('hx-trigger', 'refresh');
       htmx.ajax('GET', url, {
         target: target,
         swap: 'innerHTML',
@@ -1596,13 +1659,19 @@
       const target = document.querySelector('#job-panel .panel-body');
       if (!target) return;
 
+      // IMPORTANT: Ensure hx-trigger is set to prevent click-based HTMX reloads
+      // This prevents clicking checkboxes from triggering an HTMX GET swap
+      target.setAttribute('hx-trigger', 'refresh');
+
       // Sanitize the HTML to fix any invalid value attributes (e.g., from old cached drafts)
       const sanitizedHtml = sanitizeDraftHtml(html);
       target.innerHTML = sanitizedHtml;
 
-      // Re-run HTMX processing so hx-* attributes work on restored content
+      // Re-run HTMX processing ONLY on the inner form content, not the panel body
+      // This ensures hx-* on form elements work, without activating hx-get behavior on panel body
       if (typeof htmx !== 'undefined') {
-        htmx.process(target);
+        const contentRoot = target.querySelector('form') || target.firstElementChild || target;
+        htmx.process(contentRoot);
       }
 
       executeOperation(() => {
@@ -1615,6 +1684,9 @@
       setTimeout(() => {
         // Initialize toggle UI (call reminder, recurrence) - idempotent
         initJobFormToggleUI(target);
+
+        // Initialize calendar header selector (clones hidden select to header)
+        initPanelCalendarSelector(target);
 
         // Initialize date pickers
         initPanelDatePickers();

@@ -18,6 +18,39 @@
         return jobId != null ? String(jobId) : null;
     }
 
+    /**
+     * Sanitize cached HTML before storing.
+     * Trims value attributes for input types that don't accept whitespace.
+     * @param {string} html - Raw HTML string
+     * @returns {string} - Sanitized HTML string
+     */
+    function sanitizeDraftHtml(html) {
+        if (!html || typeof html !== 'string') return html;
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            // Input types that cannot have whitespace in their value attribute
+            const strictValueTypes = ['number', 'date', 'datetime-local', 'time', 'month', 'week'];
+            const selector = strictValueTypes.map(t => `input[type="${t}"]`).join(', ');
+
+            const inputs = doc.querySelectorAll(selector);
+            inputs.forEach(input => {
+                if (input.hasAttribute('value')) {
+                    const rawValue = input.getAttribute('value');
+                    const trimmed = rawValue.trim();
+                    input.setAttribute('value', trimmed);
+                }
+            });
+
+            return doc.body.innerHTML;
+        } catch (e) {
+            console.warn('sanitizeDraftHtml: Error parsing HTML, returning original', e);
+            return html;
+        }
+    }
+
     class JobWorkspace {
         constructor() {
             this.openJobs = new Map(); // jobId -> jobData
@@ -373,9 +406,9 @@
             if (!job) return;
 
             job.unsaved = true;
-            // Cap HTML size to avoid localStorage overflow (100KB max)
+            // Sanitize and cap HTML size to avoid localStorage overflow (100KB max)
             if (html && html.length <= 100000) {
-                job.unsavedHtml = html;
+                job.unsavedHtml = sanitizeDraftHtml(html);
             } else if (html) {
                 console.warn('JobWorkspace: unsavedHtml too large, not storing');
                 job.unsavedHtml = null;
@@ -451,7 +484,7 @@
             // Generate a unique draft ID
             const draftId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-            // Add to workspace as a draft
+            // Add to workspace as a draft (sanitize HTML to fix invalid value attributes)
             this.openJobs.set(draftId, {
                 jobId: draftId,
                 customerName: data.customerName || 'New Job',
@@ -461,7 +494,7 @@
                 timestamp: Date.now(),
                 isDraft: true,
                 unsaved: true,
-                unsavedHtml: data.html || null
+                unsavedHtml: data.html ? sanitizeDraftHtml(data.html) : null
             });
 
             this.saveToStorage();

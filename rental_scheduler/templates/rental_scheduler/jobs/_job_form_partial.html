@@ -2,6 +2,7 @@
 <form hx-post="{% url 'rental_scheduler:job_create_submit' %}"
       hx-swap="none"
       hx-on::after-request="if(event.detail.successful) { if(window.JobPanel) { if(window.JobPanel.clearUnsavedChanges) { window.JobPanel.clearUnsavedChanges(); } if(!window.JobPanel.isSwitchingJobs) { const currentJobId = window.JobPanel.currentJobId; if(currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob(currentJobId)) { window.JobWorkspace.closeJob(currentJobId); } else { window.JobPanel.close(true); } } } if(window.jobCalendar && window.jobCalendar.calendar) { window.jobCalendar.calendar.refetchEvents(); } }"
+      novalidate
       style="display: flex;
              flex-direction: column;
              gap: 8px">
@@ -156,17 +157,7 @@ Date Call Received
                 <input type="text"
                        name="start_dt"
                        id="{{ form.start_dt.id_for_label }}"
-                       value="{% if form.data.start_dt %}
-                                {{ form.data.start_dt }}
-                              {% elif form.instance.pk and form.instance.start_dt %}
-                                {% if form.instance.all_day %}
-                                  {{ form.instance.start_dt|date:'Y-m-d' }}
-                                {% else %}
-                                  {{ form.instance.start_dt|date:'Y-m-d\TH:i' }}
-                                {% endif %}
-                              {% else %}
-                                {{ form.initial.start_dt }}
-                              {% endif %}"
+                       value="{% if form.data.start_dt %}{{ form.data.start_dt }}{% elif form.instance.pk and form.instance.start_dt %}{% if form.instance.all_day %}{{ form.instance.start_dt|date:'Y-m-d' }}{% else %}{{ form.instance.start_dt|date:'Y-m-d\TH:i' }}{% endif %}{% else %}{{ form.initial.start_dt }}{% endif %}"
                        required
                        placeholder="Select date"
                        style="flex: 1;
@@ -195,17 +186,7 @@ Date Call Received
                 <input type="text"
                        name="end_dt"
                        id="{{ form.end_dt.id_for_label }}"
-                       value="{% if form.data.end_dt %}
-                                {{ form.data.end_dt }}
-                              {% elif form.instance.pk and form.instance.end_dt %}
-                                {% if form.instance.all_day %}
-                                  {{ form.instance.end_dt|date:'Y-m-d' }}
-                                {% else %}
-                                  {{ form.instance.end_dt|date:'Y-m-d\TH:i' }}
-                                {% endif %}
-                              {% else %}
-                                {{ form.initial.end_dt }}
-                              {% endif %}"
+                       value="{% if form.data.end_dt %}{{ form.data.end_dt }}{% elif form.instance.pk and form.instance.end_dt %}{% if form.instance.all_day %}{{ form.instance.end_dt|date:'Y-m-d' }}{% else %}{{ form.instance.end_dt|date:'Y-m-d\TH:i' }}{% endif %}{% else %}{{ form.initial.end_dt }}{% endif %}"
                        required
                        placeholder="Select date"
                        style="flex: 1;
@@ -398,20 +379,189 @@ Call Reminder Notes
             </label>
 
             {% if form.instance.pk and form.instance.recurrence_parent %}
-              <!-- For recurring instances, show info message -->
-              <div style="background: #e0f2fe;
-                          border: 1px solid #7dd3fc;
-                          border-radius: 4px;
-                          padding: 6px;
+              <!-- Compact recurring instance hint -->
+              <div style="margin-top: 2px; font-size: 11px; color: #0369a1;">
+                <span>Part of series</span>
+                {% if recurrence_meta and recurrence_meta.occurrence_number %}
+                  <span style="margin-left: 4px;">• #{{ recurrence_meta.occurrence_number }}{% if recurrence_meta.total_occurrences %}/{{ recurrence_meta.total_occurrences }}{% elif recurrence_meta.is_forever %} (∞){% endif %}</span>
+                {% endif %}
+                <span style="margin-left: 4px;">•</span>
+                <a href="#"
+                   data-edit-series-url="{% url 'rental_scheduler:job_create_partial' %}?edit={{ form.instance.recurrence_parent.id }}"
+                   onclick="event.preventDefault(); JobPanel.load(this.dataset.editSeriesUrl);"
+                   style="text-decoration: underline; margin-left: 4px;">Edit series</a>
+              </div>
+            {% elif form.instance.pk and form.instance.recurrence_rule %}
+              <!-- Compact recurring parent hint + recurrence options -->
+              <div style="margin-top: 2px; font-size: 11px; color: #1d4ed8;">
+                <span>Series template</span>
+                {% if recurrence_meta and recurrence_meta.occurrence_number %}
+                  <span style="margin-left: 4px;">• #{{ recurrence_meta.occurrence_number }}{% if recurrence_meta.total_occurrences %}/{{ recurrence_meta.total_occurrences }}{% elif recurrence_meta.is_forever %} (∞){% endif %}</span>
+                {% endif %}
+                {% if recurrence_meta and recurrence_meta.summary %}
+                  <span style="margin-left: 4px;">• {{ recurrence_meta.summary }}</span>
+                {% endif %}
+              </div>
+              <div id="recurrence-options"
+                   class="recurrence-visible"
+                   style="grid-template-columns: 1fr 1fr;
+                          gap: 4px;
                           margin-top: 4px">
-                <p style="margin: 0; color: #0369a1; font-size: 12px;">
-                This is part of a recurring series.
-                  <a href="#"
-                     data-edit-series-url="{% url 'rental_scheduler:job_create_partial' %}?edit={{ form.instance.recurrence_parent.id }}"
-                     onclick="event.preventDefault(); JobPanel.load(this.dataset.editSeriesUrl);"
-                     style="text-decoration: underline;
-                            font-weight: 600">Edit the entire series</a>
-                </p>
+                <div>
+                  <label for="recurrence-type"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Repeats
+                  </label>
+                  <select id="recurrence-type"
+                          name="recurrence_type"
+                          style="width: 100%;
+                                 padding: 4px 8px;
+                                 border: 1px solid #d1d5db;
+                                 border-radius: 6px;
+                                 font-size: 12px;
+                                 background-color: #ffffff">
+                    <option value="monthly"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'monthly' %}
+                              selected
+                            {% endif %}>
+Monthly
+                    </option>
+                    <option value="yearly"
+                            {% if not form.instance.recurrence_rule or form.instance.recurrence_rule.type == 'yearly' %}
+                              selected
+                            {% endif %}>
+Yearly
+                    </option>
+                    <option value="weekly"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'weekly' %}
+                              selected
+                            {% endif %}>
+Weekly
+                    </option>
+                    <option value="daily"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.type == 'daily' %}
+                              selected
+                            {% endif %}>
+Daily
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="recurrence-interval"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Every
+                  </label>
+                  <input type="number"
+                         id="recurrence-interval"
+                         name="recurrence_interval"
+                         min="1"
+                         max="12"
+                         value="{% if form.instance.recurrence_rule %}{{ form.instance.recurrence_rule.interval|default:'1' }}{% else %}1{% endif %}"
+                         style="width: 100%;
+                                padding: 4px 8px;
+                                border: 1px solid #d1d5db;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                background-color: #ffffff">
+                </div>
+
+                <div>
+                  <label for="recurrence-end-mode"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Ends
+                  </label>
+                  <select id="recurrence-end-mode"
+                          name="recurrence_end"
+                          style="width: 100%;
+                                 padding: 4px 8px;
+                                 border: 1px solid #d1d5db;
+                                 border-radius: 6px;
+                                 font-size: 12px;
+                                 background-color: #ffffff">
+                    <option value="never"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.end == 'never' %}
+                              selected
+                            {% elif not form.instance.recurrence_rule %}
+                              selected
+                            {% elif form.instance.recurrence_rule and not form.instance.recurrence_rule.count and not form.instance.recurrence_rule.until_date %}
+                              selected
+                            {% endif %}>
+Never (Forever)
+                    </option>
+                    <option value="after_count"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}
+                              selected
+                            {% endif %}>
+After N occurrences
+                    </option>
+                    <option value="on_date"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}
+                              selected
+                            {% endif %}>
+On date
+                    </option>
+                  </select>
+                </div>
+
+                <div id="recurrence-count-container"
+                     style="{% if not form.instance.recurrence_rule or not form.instance.recurrence_rule.count %}display: none;{% endif %}">
+                  <label for="recurrence-count"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Number of occurrences
+                  </label>
+                  <input type="number"
+                         id="recurrence-count"
+                         name="recurrence_count"
+                         min="1"
+                         max="500"
+                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}{{ form.instance.recurrence_rule.count }}{% else %}12{% endif %}"
+                         placeholder="12"
+                         style="width: 100%;
+                                padding: 4px 8px;
+                                border: 1px solid #d1d5db;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                background-color: #ffffff">
+                </div>
+
+                <div id="recurrence-until-container"
+                     style="{% if not form.instance.recurrence_rule or not form.instance.recurrence_rule.until_date %}display: none;{% endif %}">
+                  <label for="recurrence-until"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+End date
+                  </label>
+                  <input type="date"
+                         id="recurrence-until"
+                         name="recurrence_until"
+                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}{% endif %}"
+                         style="width: 100%;
+                                padding: 4px 8px;
+                                border: 1px solid #d1d5db;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                background-color: #ffffff">
+                </div>
               </div>
             {% else %}
               <div id="recurrence-options"
@@ -480,11 +630,7 @@ Every
                          name="recurrence_interval"
                          min="1"
                          max="12"
-                         value="{% if form.instance.recurrence_rule %}
-                                  {{ form.instance.recurrence_rule.interval|default:'1' }}
-                                {% else %}
-                                  1
-                                {% endif %}"
+                         value="{% if form.instance.recurrence_rule %}{{ form.instance.recurrence_rule.interval|default:'1' }}{% else %}1{% endif %}"
                          style="width: 100%;
                                 padding: 4px 8px;
                                 border: 1px solid #d1d5db;
@@ -494,6 +640,49 @@ Every
                 </div>
 
                 <div>
+                  <label for="recurrence-end-mode"
+                         style="font-weight: 600;
+                                color: #374151;
+                                margin-bottom: 0;
+                                display: block;
+                                font-size: 12px">
+Ends
+                  </label>
+                  <select id="recurrence-end-mode"
+                          name="recurrence_end"
+                          style="width: 100%;
+                                 padding: 4px 8px;
+                                 border: 1px solid #d1d5db;
+                                 border-radius: 6px;
+                                 font-size: 12px;
+                                 background-color: #ffffff">
+                    <option value="never"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.end == 'never' %}
+                              selected
+                            {% elif not form.instance.recurrence_rule %}
+                              selected
+                            {% elif form.instance.recurrence_rule and not form.instance.recurrence_rule.count and not form.instance.recurrence_rule.until_date %}
+                              selected
+                            {% endif %}>
+Never (Forever)
+                    </option>
+                    <option value="after_count"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}
+                              selected
+                            {% endif %}>
+After N occurrences
+                    </option>
+                    <option value="on_date"
+                            {% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}
+                              selected
+                            {% endif %}>
+On date
+                    </option>
+                  </select>
+                </div>
+
+                <div id="recurrence-count-container"
+                     style="{% if not form.instance.recurrence_rule or not form.instance.recurrence_rule.count %}display: none;{% endif %}">
                   <label for="recurrence-count"
                          style="font-weight: 600;
                                 color: #374151;
@@ -507,12 +696,8 @@ Number of occurrences
                          name="recurrence_count"
                          min="1"
                          max="500"
-                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}
-                                  {{ form.instance.recurrence_rule.count }}
-                                {% else %}
-                                  50
-                                {% endif %}"
-                         placeholder="50"
+                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.count %}{{ form.instance.recurrence_rule.count }}{% else %}12{% endif %}"
+                         placeholder="12"
                          style="width: 100%;
                                 padding: 4px 8px;
                                 border: 1px solid #d1d5db;
@@ -521,21 +706,20 @@ Number of occurrences
                                 background-color: #ffffff">
                 </div>
 
-                <div>
+                <div id="recurrence-until-container"
+                     style="{% if not form.instance.recurrence_rule or not form.instance.recurrence_rule.until_date %}display: none;{% endif %}">
                   <label for="recurrence-until"
                          style="font-weight: 600;
                                 color: #374151;
                                 margin-bottom: 0;
                                 display: block;
                                 font-size: 12px">
-Or end by date
+End date
                   </label>
                   <input type="date"
                          id="recurrence-until"
                          name="recurrence_until"
-                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}
-                                  {{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}
-                                {% endif %}"
+                         value="{% if form.instance.recurrence_rule and form.instance.recurrence_rule.until_date %}{{ form.instance.recurrence_rule.until_date|date:'Y-m-d' }}{% endif %}"
                          style="width: 100%;
                                 padding: 4px 8px;
                                 border: 1px solid #d1d5db;
@@ -995,11 +1179,55 @@ Quote Amount
       }
     }
 
+    // Set up recurrence end mode toggle (Never/After N/On date)
+    function setupRecurrenceEndModeToggle() {
+      const endModeSelect = document.getElementById('recurrence-end-mode');
+      const countContainer = document.getElementById('recurrence-count-container');
+      const untilContainer = document.getElementById('recurrence-until-container');
+      const countInput = document.getElementById('recurrence-count');
+      const untilInput = document.getElementById('recurrence-until');
+
+      if (endModeSelect && countContainer && untilContainer) {
+        function toggleEndModeFields() {
+          const mode = endModeSelect.value;
+          
+          if (mode === 'never') {
+            countContainer.style.display = 'none';
+            untilContainer.style.display = 'none';
+            // Clear values so they don't get submitted
+            if (countInput) countInput.value = '';
+            if (untilInput) untilInput.value = '';
+          } else if (mode === 'after_count') {
+            countContainer.style.display = '';
+            untilContainer.style.display = 'none';
+            // Set default count if empty
+            if (countInput && !countInput.value) countInput.value = '12';
+            if (untilInput) untilInput.value = '';
+          } else if (mode === 'on_date') {
+            countContainer.style.display = 'none';
+            untilContainer.style.display = '';
+            if (countInput) countInput.value = '';
+          }
+        }
+
+        // Set initial state
+        toggleEndModeFields();
+
+        // Prevent duplicate listeners
+        if (endModeSelect._hasEndModeListener) return;
+        endModeSelect._hasEndModeListener = true;
+
+        // Add change listener
+        endModeSelect.addEventListener('change', toggleEndModeFields);
+      }
+    }
+
     // Function to initialize all form event handlers
     function initializeAllFormHandlers() {
       initializeFormToggles();
       setupCallReminderToggle();
       setupRecurrenceToggle();
+      setupRecurrenceEndModeToggle();
     }
 
     // Initial setup with delay
@@ -1413,17 +1641,21 @@ Quote Amount
       }
     }
 
-    // Initialize immediately and after HTMX content swaps
+    // Initialize immediately
     initializeFormChangeTracking();
 
-    // Re-initialize after HTMX content swaps
-    document.body.addEventListener('htmx:afterSwap', function () {
-      setTimeout(initializeFormChangeTracking, 100);
-    });
+    // Re-initialize after HTMX content swaps (only bind listeners once)
+    if (!window._formChangeTrackingListenersBound) {
+      window._formChangeTrackingListenersBound = true;
 
-    document.body.addEventListener('htmx:load', function () {
-      setTimeout(initializeFormChangeTracking, 100);
-    });
+      document.body.addEventListener('htmx:afterSwap', function () {
+        setTimeout(initializeFormChangeTracking, 100);
+      });
+
+      document.body.addEventListener('htmx:load', function () {
+        setTimeout(initializeFormChangeTracking, 100);
+      });
+    }
   })();
 
   // HTMX form validation interceptor - validates required fields before allowing submission
@@ -1507,8 +1739,21 @@ Quote Amount
           const field = form.querySelector('input[name="end_dt"]');
           if (field) field.focus();
         } else if (missingFields.includes('calendar')) {
-          const field = form.querySelector('select[name="calendar"]');
-          if (field) field.focus();
+          // Focus the visible header calendar select, not the hidden form field
+          let headerSelect = document.getElementById('calendar-header-select');
+          
+          // If header select doesn't exist, try to initialize it
+          if (!headerSelect && window.initPanelCalendarSelector) {
+            const panelBody = document.querySelector('#job-panel .panel-body');
+            if (panelBody) {
+              window.initPanelCalendarSelector(panelBody);
+              headerSelect = document.getElementById('calendar-header-select');
+            }
+          }
+          
+          if (headerSelect) {
+            headerSelect.focus();
+          }
         }
 
         console.log('HTMX form submission blocked: missing required fields', missingFields);

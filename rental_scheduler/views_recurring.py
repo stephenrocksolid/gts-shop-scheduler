@@ -180,15 +180,22 @@ def job_create_api_recurring(request):
                 count = recurrence.get('count')
                 until_date_str = recurrence.get('until_date')
                 
+                # Check for "forever" series
+                is_forever = recurrence.get('end') == 'never' or recurrence.get('forever', False)
+                
+                # If neither count nor until_date is provided and no explicit 'end' mode, default to forever
+                if not is_forever and not count and not until_date_str:
+                    is_forever = True
+                
                 # Validate count if provided
-                if count:
+                if count and not is_forever:
                     count_int = int(count)
                     if count_int > 500:
                         return JsonResponse({'error': 'Recurrence count cannot exceed 500 occurrences.'}, status=400)
                 
                 # Parse until_date if provided
                 until_date = None
-                if until_date_str:
+                if until_date_str and not is_forever:
                     try:
                         until_date = timezone.make_aware(datetime.fromisoformat(until_date_str))
                     except (ValueError, TypeError):
@@ -198,17 +205,24 @@ def job_create_api_recurring(request):
                 job.create_recurrence_rule(
                     recurrence_type=recur_type,
                     interval=interval,
-                    count=int(count) if count else None,
+                    count=int(count) if count and not is_forever else None,
                     until_date=until_date
                 )
                 
-                # Generate recurring instances
-                instances = job.generate_recurring_instances(
-                    count=int(count) if count else None,
-                    until_date=until_date
-                )
-                
-                print(f"DEBUG: Generated {len(instances)} recurring instances")
+                # Store 'end' flag for forever series
+                if is_forever:
+                    rule = job.recurrence_rule or {}
+                    rule['end'] = 'never'
+                    job.recurrence_rule = rule
+                    job.save(update_fields=['recurrence_rule'])
+                    print(f"DEBUG: Created forever recurring job {job.id}")
+                else:
+                    # Generate recurring instances for non-forever series
+                    instances = job.generate_recurring_instances(
+                        count=int(count) if count else None,
+                        until_date=until_date
+                    )
+                    print(f"DEBUG: Generated {len(instances)} recurring instances")
                 
             except Exception as e:
                 print(f"DEBUG: Error creating recurrence: {e}")
@@ -585,4 +599,68 @@ def _format_job_response(job):
     }
     
     return response
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def materialize_occurrence_api(request):
+    """
+    Materialize a virtual occurrence into a real Job row.
+    
+    This is called when a user interacts with a virtual occurrence (edit, complete, etc.)
+    and we need to create a real Job instance for it.
+    
+    POST /api/recurrence/materialize/
+    {
+        "parent_id": 123,
+        "original_start": "2026-02-20T10:00:00"
+    }
+    
+    Returns:
+    {
+        "job_id": 456,
+        "created": true,  // false if already existed
+        "job": { ... }    // full job data
+    }
+    """
+    try:
+        data = json.loads(request.body)
+        
+        parent_id = data.get('parent_id')
+        original_start = data.get('original_start')
+        
+        if not parent_id:
+            return JsonResponse({'error': 'parent_id is required'}, status=400)
+        if not original_start:
+            return JsonResponse({'error': 'original_start is required'}, status=400)
+        
+        # Get the parent job
+        parent = get_object_or_404(Job, pk=parent_id)
+        
+        # Verify it's a recurring parent
+        if not parent.is_recurring_parent:
+            return JsonResponse({
+                'error': 'Job is not a recurring parent'
+            }, status=400)
+        
+        # Materialize the occurrence
+        from rental_scheduler.utils.recurrence import materialize_occurrence
+        
+        job, created = materialize_occurrence(parent, original_start)
+        
+        # Return the job data
+        response_data = {
+            'job_id': job.id,
+            'created': created,
+            'job': _format_job_response(job),
+        }
+        
+        return JsonResponse(response_data)
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
 
