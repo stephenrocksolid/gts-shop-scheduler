@@ -3,12 +3,17 @@ DEBUG=True
 SECRET_KEY=your-secret-key-here-change-this-in-production
 ALLOWED_HOSTS=localhost,127.0.0.1
 
-# Database Settings (for PostgreSQL - currently using SQLite)
-# DB_NAME=gts_scheduler
-# DB_USER=postgres
-# DB_PASSWORD=your_password_here
-# DB_HOST=localhost
-# DB_PORT=5432
+# Database Settings
+# If DB_NAME is set, Django uses PostgreSQL. Otherwise, it falls back to SQLite.
+# 
+# For PostgreSQL (recommended for production and performance testing):
+DB_NAME=gts_scheduler
+DB_USER=postgres
+DB_PASSWORD=your_password_here
+DB_HOST=localhost
+DB_PORT=5432
+#
+# To use SQLite instead, comment out or remove DB_NAME above.
 
 # Time Zone
 TIME_ZONE=America/New_York

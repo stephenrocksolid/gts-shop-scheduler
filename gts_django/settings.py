@@ -47,6 +47,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'django.middleware.gzip.GZipMiddleware',  # Compress JSON responses for faster transfer
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -81,13 +82,50 @@ WSGI_APPLICATION = 'gts_django.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
+# Use PostgreSQL if DB_NAME is set, otherwise fall back to SQLite
 
-DATABASES = {
+if os.getenv('DB_NAME'):
+    # PostgreSQL configuration via environment variables
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('DB_NAME'),
+            'USER': os.getenv('DB_USER', 'postgres'),
+            'PASSWORD': os.getenv('DB_PASSWORD', ''),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PORT': os.getenv('DB_PORT', '5432'),
+            'OPTIONS': {
+                'connect_timeout': 10,
+            },
+            # Use server-side cursors for large result sets
+            'DISABLE_SERVER_SIDE_CURSORS': False,
+        }
+    }
+else:
+    # SQLite fallback for simple local development
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+
+
+# Cache configuration for calendar API performance
+# LocMemCache is suitable for single-worker dev; for multi-worker prod, use Redis
+CACHES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'gts-calendar-cache',
+        'TIMEOUT': 60,  # Default 60 second TTL
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+        }
     }
 }
+
+# Calendar events cache TTL (seconds) - can be overridden in environment
+CALENDAR_EVENTS_CACHE_TTL = int(os.getenv('CALENDAR_EVENTS_CACHE_TTL', '30'))
 
 
 # Password validation

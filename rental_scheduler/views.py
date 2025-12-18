@@ -186,6 +186,9 @@ class JobListView(ListView):
         elif date_filter == 'future':
             now = timezone.now()
             queryset = queryset.filter(start_dt__gte=now)
+        elif date_filter == 'past':
+            now = timezone.now()
+            queryset = queryset.filter(start_dt__lt=now)
         elif date_filter == 'two_years':
             now = timezone.now()
             two_years_from_now = now + timedelta(days=730)  # 2 years = 730 days
@@ -242,18 +245,6 @@ class JobListView(ListView):
                 queryset = queryset.filter(word_query)
         
         # Sorting
-        # For two_years filter, default to ascending (soonest first) unless specified otherwise
-        if date_filter == 'two_years' and 'sort' not in self.request.GET:
-            default_sort = 'start_dt'
-            default_direction = 'asc'
-        else:
-            default_sort = '-start_dt'
-            default_direction = 'desc'
-
-        sort_by = self.request.GET.get('sort', default_sort)
-        sort_direction = self.request.GET.get('direction', default_direction)
-        
-        # Validate sort field
         allowed_sort_fields = {
             'start_dt': 'start_dt',
             'end_dt': 'end_dt',
@@ -263,19 +254,59 @@ class JobListView(ListView):
             'calendar__name': 'calendar__name',
             'repeat_type': 'repeat_type',
         }
-        
-        if sort_by.lstrip('-') in allowed_sort_fields:
+
+        sort_by = (self.request.GET.get('sort') or '').strip()
+        sort_direction = (self.request.GET.get('direction') or '').strip().lower()
+
+        # If the user explicitly requested a sort, honor it.
+        if sort_by and sort_by.lstrip('-') in allowed_sort_fields:
             sort_field = allowed_sort_fields[sort_by.lstrip('-')]
-            if sort_direction == 'desc' or sort_by.startswith('-'):
+
+            effective_desc = sort_direction == 'desc' or sort_by.startswith('-')
+            if effective_desc:
                 sort_field = f'-{sort_field}'
-            queryset = queryset.order_by(sort_field)
-        else:
-            # Default sorting based on filter
-            if date_filter == 'two_years':
-                queryset = queryset.order_by('start_dt')
+                self._effective_direction = 'desc'
             else:
-                queryset = queryset.order_by('-start_dt')
-        
+                self._effective_direction = 'asc'
+
+            self._effective_sort = sort_by.lstrip('-')
+            queryset = queryset.order_by(sort_field)
+            return queryset
+
+        # Default sorting when the user hasn't selected a column sort.
+        # Keep the experience consistent between the jobs page and the calendar search panel (which pulls from /jobs/).
+        if date_filter in {'future', 'two_years', 'custom'}:
+            queryset = queryset.order_by('start_dt')
+            self._effective_sort = 'start_dt'
+            self._effective_direction = 'asc'
+        elif date_filter == 'past':
+            queryset = queryset.order_by('-start_dt')
+            self._effective_sort = 'start_dt'
+            self._effective_direction = 'desc'
+        else:
+            # "All Events": Upcoming first (soonest → latest), then Past (most recent → oldest)
+            now = timezone.now()
+            queryset = queryset.annotate(
+                _is_past=models.Case(
+                    models.When(start_dt__lt=now, then=models.Value(1)),
+                    default=models.Value(0),
+                    output_field=models.IntegerField(),
+                ),
+                _future_sort=models.Case(
+                    models.When(start_dt__gte=now, then=models.F('start_dt')),
+                    default=models.Value(None, output_field=models.DateTimeField()),
+                    output_field=models.DateTimeField(),
+                ),
+                _past_sort=models.Case(
+                    models.When(start_dt__lt=now, then=models.F('start_dt')),
+                    default=models.Value(None, output_field=models.DateTimeField()),
+                    output_field=models.DateTimeField(),
+                ),
+            ).order_by('_is_past', '_future_sort', '-_past_sort')
+
+            self._effective_sort = 'smart'
+            self._effective_direction = ''
+
         return queryset
     
     def get_context_data(self, **kwargs):
@@ -283,8 +314,8 @@ class JobListView(ListView):
         context['title'] = 'Jobs'
         
         # Add sorting context
-        context['current_sort'] = self.request.GET.get('sort', 'start_dt')
-        context['current_direction'] = self.request.GET.get('direction', 'desc')
+        context['current_sort'] = getattr(self, '_effective_sort', self.request.GET.get('sort', 'start_dt'))
+        context['current_direction'] = getattr(self, '_effective_direction', self.request.GET.get('direction', 'desc'))
         
         # Add search filter context for maintaining state
         context['search_query'] = self.request.GET.get('search', '')
@@ -531,6 +562,8 @@ def get_job_calendar_data(request):
     _perf_serialize_start = None
     _perf_reminders_start = None
     _perf_reminders_end = None
+    _perf_virtual_start = None
+    _perf_virtual_end = None
     _event_count = 0
     _cache_hit = False
     _query_count_jobs = 0
@@ -603,6 +636,237 @@ def get_job_calendar_data(request):
                     logger.info(f"[PERF] job_calendar_data: CACHE HIT, total={total_time_ms:.1f}ms")
                 
                 return response
+        
+        # =====================================================================
+        # POSTGRES FAST PATH: Use calendar_feed() function for single-query performance
+        # =====================================================================
+        if connection.vendor == 'postgresql' and request_start_date and request_end_date:
+            _perf_db_start = perf_time.perf_counter()
+            
+            try:
+                # Parse calendar IDs for SQL array parameter
+                pg_calendar_ids = None
+                if calendar_filter:
+                    if ',' in calendar_filter:
+                        pg_calendar_ids = [int(cid.strip()) for cid in calendar_filter.split(',') if cid.strip().isdigit()]
+                    else:
+                        try:
+                            pg_calendar_ids = [int(calendar_filter)]
+                        except ValueError:
+                            pass
+                
+                # Get timezone from Django settings
+                from django.conf import settings as django_settings
+                pg_timezone = getattr(django_settings, 'TIME_ZONE', 'America/New_York')
+                
+                # Call the calendar_feed function - returns complete JSONB payload
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT calendar_feed(
+                            %s::date,           -- p_req_start
+                            %s::date,           -- p_req_end
+                            %s::int[],          -- p_calendar_ids (NULL = all)
+                            %s,                 -- p_status (NULL = all)
+                            %s,                 -- p_search (NULL = no filter)
+                            %s,                 -- p_tz
+                            %s                  -- p_max_expand_days
+                        )
+                        """,
+                        [
+                            request_start_date.isoformat(),
+                            request_end_date.isoformat(),
+                            pg_calendar_ids,
+                            status_filter or None,
+                            search_filter or None,
+                            pg_timezone,
+                            MAX_MULTI_DAY_EXPANSION_DAYS,
+                        ]
+                    )
+                    result = cursor.fetchone()
+                
+                _perf_db_end = perf_time.perf_counter()
+                
+                # Parse the JSONB result
+                import json as json_module
+                events = json_module.loads(result[0]) if result and result[0] else []
+                
+                # Capture query count (should be 1 for the main call)
+                if settings.DEBUG:
+                    _query_count_jobs = 1
+                    _query_count_total = 1
+                
+                # =========================================================
+                # VIRTUAL OCCURRENCES: Still handled in Python for now
+                # (Forever-recurring series need Python's recurrence logic)
+                # =========================================================
+                _perf_virtual_start = perf_time.perf_counter()
+                
+                try:
+                    from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
+                    
+                    # Find "forever" recurring parents
+                    forever_parents_qs = Job.objects.select_related('calendar').filter(
+                        is_deleted=False,
+                        recurrence_parent__isnull=True,
+                        recurrence_rule__isnull=False,
+                    ).exclude(status='canceled')
+                    
+                    if pg_calendar_ids:
+                        forever_parents_qs = forever_parents_qs.filter(calendar_id__in=pg_calendar_ids)
+                    if status_filter:
+                        forever_parents_qs = forever_parents_qs.filter(status=status_filter)
+                    if search_filter:
+                        forever_parents_qs = forever_parents_qs.filter(
+                            models.Q(business_name__icontains=search_filter) |
+                            models.Q(contact_name__icontains=search_filter) |
+                            models.Q(phone__icontains=search_filter) |
+                            models.Q(trailer_color__icontains=search_filter)
+                        )
+                    
+                    for parent in forever_parents_qs:
+                        if not is_forever_series(parent):
+                            continue
+                        
+                        materialized_starts = set(
+                            Job.objects.filter(recurrence_parent=parent).values_list('recurrence_original_start', flat=True)
+                        )
+                        
+                        occurrences = generate_occurrences_in_window(
+                            parent, request_start_date, request_end_date, safety_cap=100
+                        )
+                        
+                        for occ in occurrences:
+                            if occ.get('is_parent') or occ['start_dt'] in materialized_starts:
+                                continue
+                            
+                            occ_start = occ['start_dt']
+                            occ_end = occ['end_dt']
+                            phone_formatted = format_phone(parent.get_phone()) if parent.get_phone() else ""
+                            
+                            business_name = parent.business_name or ""
+                            contact_name = parent.contact_name or ""
+                            if business_name and contact_name:
+                                title = f"{business_name} ({contact_name})"
+                            elif business_name:
+                                title = business_name
+                            elif contact_name:
+                                title = contact_name
+                            else:
+                                title = "No Name Provided"
+                            if phone_formatted:
+                                title += f" - {phone_formatted}"
+                            
+                            calendar_color = parent.calendar.color or '#3B82F6'
+                            occ_start_local = timezone.localtime(occ_start)
+                            occ_end_local = timezone.localtime(occ_end)
+                            
+                            if parent.all_day:
+                                start_str = f"{occ_start_local.date().isoformat()}T12:00:00"
+                                end_str = f"{(occ_end_local.date() + timedelta(days=1)).isoformat()}T12:00:00"
+                            else:
+                                start_str = occ_start_local.strftime('%Y-%m-%dT%H:%M:%S')
+                                end_str = occ_end_local.strftime('%Y-%m-%dT%H:%M:%S')
+                            
+                            virtual_event = {
+                                'id': f"virtual-job-{parent.id}-{occ_start.isoformat()}",
+                                'title': title,
+                                'start': start_str,
+                                'end': end_str,
+                                'allDay': parent.all_day,
+                                'backgroundColor': calendar_color,
+                                'borderColor': calendar_color,
+                                'extendedProps': {
+                                    'type': 'virtual_job',
+                                    'recurrence_parent_id': parent.id,
+                                    'recurrence_original_start': occ_start.isoformat(),
+                                    'status': 'uncompleted',
+                                    'calendar_id': parent.calendar.id,
+                                    'calendar_name': parent.calendar.name,
+                                    'display_name': parent.display_name,
+                                    'phone': parent.get_phone(),
+                                    'trailer_color': parent.trailer_color,
+                                    'is_recurring_parent': False,
+                                    'is_recurring_instance': True,
+                                    'is_virtual': True,
+                                }
+                            }
+                            events.append(virtual_event)
+                            
+                            # Virtual call reminder
+                            if parent.has_call_reminder and parent.call_reminder_weeks_prior:
+                                try:
+                                    reminder_dt = get_call_reminder_sunday(occ_start, parent.call_reminder_weeks_prior)
+                                    reminder_date = reminder_dt.date()
+                                    if request_start_date <= reminder_date <= request_end_date:
+                                        reminder_color = parent.calendar.call_reminder_color or '#F59E0B'
+                                        events.append({
+                                            'id': f"virtual-call-reminder-{parent.id}-{occ_start.isoformat()}",
+                                            'title': f"📞 {title}",
+                                            'start': f"{reminder_date.isoformat()}T12:00:00",
+                                            'end': f"{(reminder_date + timedelta(days=1)).isoformat()}T12:00:00",
+                                            'backgroundColor': reminder_color,
+                                            'borderColor': reminder_color,
+                                            'allDay': True,
+                                            'extendedProps': {
+                                                'type': 'virtual_call_reminder',
+                                                'recurrence_parent_id': parent.id,
+                                                'recurrence_original_start': occ_start.isoformat(),
+                                                'status': 'uncompleted',
+                                                'calendar_id': parent.calendar.id,
+                                                'calendar_name': parent.calendar.name,
+                                                'display_name': parent.display_name,
+                                                'phone': parent.get_phone(),
+                                                'weeks_prior': parent.call_reminder_weeks_prior,
+                                                'job_date': occ_start_local.date().isoformat(),
+                                                'is_virtual': True,
+                                            }
+                                        })
+                                except Exception:
+                                    pass
+                except Exception as virtual_err:
+                    logger.warning(f"Error generating virtual occurrences (Postgres path): {virtual_err}")
+                
+                _perf_virtual_end = perf_time.perf_counter()
+                
+                # Build response
+                _event_count = len(events)
+                _perf_total = perf_time.perf_counter() - _perf_start
+                
+                response_data = {'status': 'success', 'events': events}
+                
+                try:
+                    cache.set(cache_key, response_data, timeout=cache_ttl)
+                except Exception as cache_err:
+                    logger.warning(f"Failed to cache calendar data: {cache_err}")
+                
+                response = JsonResponse(response_data, json_dumps_params={'separators': (',', ':')})
+                
+                if settings.DEBUG:
+                    db_time_ms = (_perf_db_end - _perf_db_start) * 1000
+                    virtual_time_ms = (_perf_virtual_end - _perf_virtual_start) * 1000
+                    total_time_ms = _perf_total * 1000
+                    response['Server-Timing'] = (
+                        f'db;dur={db_time_ms:.1f};desc="Postgres calendar_feed", '
+                        f'virtual;dur={virtual_time_ms:.1f};desc="Virtual Occurrences", '
+                        f'total;dur={total_time_ms:.1f};desc="Total"'
+                    )
+                    response['X-Cache'] = 'MISS'
+                    response['X-DB-Backend'] = 'postgresql'
+                    logger.info(
+                        f"[PERF] job_calendar_data (POSTGRES): events={_event_count}, "
+                        f"db={db_time_ms:.1f}ms, virtual={virtual_time_ms:.1f}ms, total={total_time_ms:.1f}ms"
+                    )
+                
+                return response
+                
+            except Exception as pg_err:
+                # Log and fall through to ORM path
+                logger.warning(f"Postgres calendar_feed failed, falling back to ORM: {pg_err}")
+        
+        # =====================================================================
+        # SQLITE/ORM FALLBACK PATH
+        # =====================================================================
         
         # Build queryset - optimized to select only necessary fields for calendar display
         # Use Subquery annotations instead of prefetch_related for call_reminders
@@ -1009,6 +1273,183 @@ def get_job_calendar_data(request):
             _query_count_total = len(connection.queries)
             _query_count_reminders = _query_count_total - _query_count_jobs
         
+        # =====================================================================
+        # VIRTUAL OCCURRENCES: Generate on-the-fly for "forever" recurring series
+        # =====================================================================
+        _perf_virtual_start = perf_time.perf_counter()
+        
+        if request_start_date and request_end_date:
+            try:
+                from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
+                
+                # Build calendar filter for recurring parents
+                virtual_calendar_ids = None
+                if calendar_filter:
+                    if ',' in calendar_filter:
+                        virtual_calendar_ids = [int(cid.strip()) for cid in calendar_filter.split(',') if cid.strip().isdigit()]
+                    else:
+                        try:
+                            virtual_calendar_ids = [int(calendar_filter)]
+                        except ValueError:
+                            pass
+                
+                # Find "forever" recurring parents that could have occurrences in the window
+                # A forever series has recurrence_rule with end='never' or no count/until_date
+                forever_parents_qs = Job.objects.select_related('calendar').filter(
+                    is_deleted=False,
+                    recurrence_parent__isnull=True,  # Only parents
+                    recurrence_rule__isnull=False,   # Has a recurrence rule
+                ).exclude(
+                    status='canceled'
+                )
+                
+                if virtual_calendar_ids:
+                    forever_parents_qs = forever_parents_qs.filter(calendar_id__in=virtual_calendar_ids)
+                
+                # Apply status filter if provided
+                if status_filter:
+                    forever_parents_qs = forever_parents_qs.filter(status=status_filter)
+                
+                # Apply search filter if provided
+                if search_filter:
+                    forever_parents_qs = forever_parents_qs.filter(
+                        models.Q(business_name__icontains=search_filter) |
+                        models.Q(contact_name__icontains=search_filter) |
+                        models.Q(phone__icontains=search_filter) |
+                        models.Q(trailer_color__icontains=search_filter)
+                    )
+                
+                for parent in forever_parents_qs:
+                    # Skip if not a forever series
+                    if not is_forever_series(parent):
+                        continue
+                    
+                    # Get already-materialized instance starts for this parent (including soft-deleted)
+                    materialized_starts = set(
+                        Job.objects.filter(
+                            recurrence_parent=parent
+                        ).values_list('recurrence_original_start', flat=True)
+                    )
+                    
+                    # Generate virtual occurrences in the window
+                    occurrences = generate_occurrences_in_window(
+                        parent,
+                        request_start_date,
+                        request_end_date,
+                        safety_cap=100  # Limit per parent per request
+                    )
+                    
+                    for occ in occurrences:
+                        # Skip parent occurrence (already in real jobs query) and materialized ones
+                        if occ.get('is_parent'):
+                            continue
+                        if occ['start_dt'] in materialized_starts:
+                            continue
+                        
+                        # Build virtual job event
+                        occ_start = occ['start_dt']
+                        occ_end = occ['end_dt']
+                        
+                        # Format phone number
+                        phone_formatted = format_phone(parent.get_phone()) if parent.get_phone() else ""
+                        
+                        # Build title
+                        business_name = parent.business_name or ""
+                        contact_name = parent.contact_name or ""
+                        if business_name and contact_name:
+                            title = f"{business_name} ({contact_name})"
+                        elif business_name:
+                            title = business_name
+                        elif contact_name:
+                            title = contact_name
+                        else:
+                            title = "No Name Provided"
+                        if phone_formatted:
+                            title += f" - {phone_formatted}"
+                        
+                        # Get calendar color
+                        calendar_color = parent.calendar.color if parent.calendar.color else '#3B82F6'
+                        
+                        # Format dates
+                        occ_start_local = timezone.localtime(occ_start)
+                        occ_end_local = timezone.localtime(occ_end)
+                        
+                        if parent.all_day:
+                            start_str = f"{occ_start_local.date().isoformat()}T12:00:00"
+                            end_str = f"{(occ_end_local.date() + timedelta(days=1)).isoformat()}T12:00:00"
+                        else:
+                            start_str = occ_start_local.strftime('%Y-%m-%dT%H:%M:%S')
+                            end_str = occ_end_local.strftime('%Y-%m-%dT%H:%M:%S')
+                        
+                        virtual_event = {
+                            'id': f"virtual-job-{parent.id}-{occ_start.isoformat()}",
+                            'title': title,
+                            'start': start_str,
+                            'end': end_str,
+                            'allDay': parent.all_day,
+                            'backgroundColor': calendar_color,
+                            'borderColor': calendar_color,
+                            'extendedProps': {
+                                'type': 'virtual_job',
+                                'recurrence_parent_id': parent.id,
+                                'recurrence_original_start': occ_start.isoformat(),
+                                'status': 'uncompleted',  # Virtual occurrences are always uncompleted
+                                'calendar_id': parent.calendar.id,
+                                'calendar_name': parent.calendar.name,
+                                'display_name': parent.display_name,
+                                'phone': parent.get_phone(),
+                                'trailer_color': parent.trailer_color,
+                                'is_recurring_parent': False,
+                                'is_recurring_instance': True,  # Will be when materialized
+                                'is_virtual': True,
+                            }
+                        }
+                        events.append(virtual_event)
+                        
+                        # Also emit virtual call reminder if parent has call reminder enabled
+                        if parent.has_call_reminder and parent.call_reminder_weeks_prior:
+                            try:
+                                reminder_dt = get_call_reminder_sunday(occ_start, parent.call_reminder_weeks_prior)
+                                reminder_date = reminder_dt.date()
+                                
+                                # Only include if reminder date is in the window
+                                if request_start_date <= reminder_date <= request_end_date:
+                                    reminder_color = parent.calendar.call_reminder_color or '#F59E0B'
+                                    reminder_title = f"📞 {title}"
+                                    reminder_end_dt = reminder_date + timedelta(days=1)
+                                    
+                                    virtual_reminder_event = {
+                                        'id': f"virtual-call-reminder-{parent.id}-{occ_start.isoformat()}",
+                                        'title': reminder_title,
+                                        'start': f"{reminder_date.isoformat()}T12:00:00",
+                                        'end': f"{reminder_end_dt.isoformat()}T12:00:00",
+                                        'backgroundColor': reminder_color,
+                                        'borderColor': reminder_color,
+                                        'allDay': True,
+                                        'extendedProps': {
+                                            'type': 'virtual_call_reminder',
+                                            'recurrence_parent_id': parent.id,
+                                            'recurrence_original_start': occ_start.isoformat(),
+                                            'status': 'uncompleted',
+                                            'calendar_id': parent.calendar.id,
+                                            'calendar_name': parent.calendar.name,
+                                            'display_name': parent.display_name,
+                                            'phone': parent.get_phone(),
+                                            'weeks_prior': parent.call_reminder_weeks_prior,
+                                            'job_date': occ_start_local.date().isoformat(),
+                                            'is_virtual': True,
+                                        }
+                                    }
+                                    events.append(virtual_reminder_event)
+                            except Exception as vr_err:
+                                logger.warning(f"Error creating virtual call reminder: {vr_err}")
+                
+            except Exception as virtual_err:
+                logger.error(f"Error generating virtual occurrences: {virtual_err}")
+                # Continue without virtual events if there's an error
+        
+        _perf_virtual_end = perf_time.perf_counter()
+        
         # Build response with performance metrics
         _event_count = len(events)
         _perf_serialize_end = perf_time.perf_counter()
@@ -1032,12 +1473,14 @@ def get_job_calendar_data(request):
         if settings.DEBUG:
             db_time_ms = (_perf_db_end - _perf_db_start) * 1000 if _perf_db_start and _perf_db_end else 0
             reminders_time_ms = (_perf_reminders_end - _perf_reminders_start) * 1000 if _perf_reminders_start and _perf_reminders_end else 0
+            virtual_time_ms = (_perf_virtual_end - _perf_virtual_start) * 1000 if _perf_virtual_start and _perf_virtual_end else 0
             serialize_time_ms = (_perf_serialize_end - _perf_serialize_start) * 1000 if _perf_serialize_start else 0
             total_time_ms = _perf_total * 1000
             
             response['Server-Timing'] = (
                 f'db;dur={db_time_ms:.1f};desc="Jobs DB", '
                 f'reminders;dur={reminders_time_ms:.1f};desc="Reminders DB", '
+                f'virtual;dur={virtual_time_ms:.1f};desc="Virtual Occurrences", '
                 f'serialize;dur={serialize_time_ms:.1f};desc="Serialization", '
                 f'total;dur={total_time_ms:.1f};desc="Total"'
             )
@@ -1699,33 +2142,41 @@ def job_create_submit(request):
                 messages.error(request, 'Recurrence interval must be at least 1.')
                 return redirect('rental_scheduler:job_list')
 
-            recurrence_count_raw = request.POST.get('recurrence_count')
+            # Parse recurrence end mode (never, after_count, on_date)
+            recurrence_end_mode = request.POST.get('recurrence_end', 'never')
             count = None
-            if recurrence_count_raw:
-                try:
-                    count = int(recurrence_count_raw)
-                except (TypeError, ValueError):
-                    messages.error(request, 'Recurrence count must be a whole number.')
-                    return redirect('rental_scheduler:job_list')
-
-                if count < 1:
-                    messages.error(request, 'Recurrence count must be at least 1.')
-                    return redirect('rental_scheduler:job_list')
-
-                if count > 500:
-                    messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
-                    return redirect('rental_scheduler:job_list')
-
-            recurrence_until_raw = request.POST.get('recurrence_until')
             until_date = None
-            if recurrence_until_raw:
-                try:
-                    until_date = datetime.strptime(recurrence_until_raw, DATE_ONLY_FMT).date()
-                except ValueError:
-                    messages.error(request, 'Recurrence end date must be a valid date (YYYY-MM-DD).')
-                    return redirect('rental_scheduler:job_list')
+            is_forever = False
             
-            # Create recurrence rule
+            if recurrence_end_mode == 'never':
+                # "Forever" series - no count or until_date
+                is_forever = True
+            elif recurrence_end_mode == 'after_count':
+                recurrence_count_raw = request.POST.get('recurrence_count')
+                if recurrence_count_raw:
+                    try:
+                        count = int(recurrence_count_raw)
+                    except (TypeError, ValueError):
+                        messages.error(request, 'Recurrence count must be a whole number.')
+                        return redirect('rental_scheduler:job_list')
+
+                    if count < 1:
+                        messages.error(request, 'Recurrence count must be at least 1.')
+                        return redirect('rental_scheduler:job_list')
+
+                    if count > 500:
+                        messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+                        return redirect('rental_scheduler:job_list')
+            elif recurrence_end_mode == 'on_date':
+                recurrence_until_raw = request.POST.get('recurrence_until')
+                if recurrence_until_raw:
+                    try:
+                        until_date = datetime.strptime(recurrence_until_raw, DATE_ONLY_FMT).date()
+                    except ValueError:
+                        messages.error(request, 'Recurrence end date must be a valid date (YYYY-MM-DD).')
+                        return redirect('rental_scheduler:job_list')
+            
+            # Create recurrence rule with end mode flag
             job.create_recurrence_rule(
                 recurrence_type=recurrence_type,
                 interval=recurrence_interval,
@@ -1733,9 +2184,17 @@ def job_create_submit(request):
                 until_date=until_date
             )
             
-            # Generate recurring instances
-            job.generate_recurring_instances()
-            logger.info(f"Created recurring job {job.id} with {recurrence_type} recurrence")
+            # Store 'end' flag in recurrence_rule for forever series
+            if is_forever:
+                rule = job.recurrence_rule or {}
+                rule['end'] = 'never'
+                job.recurrence_rule = rule
+                job.save(update_fields=['recurrence_rule'])
+                logger.info(f"Created forever recurring job {job.id} with {recurrence_type} recurrence")
+            else:
+                # Generate recurring instances for non-forever series
+                job.generate_recurring_instances()
+                logger.info(f"Created recurring job {job.id} with {recurrence_type} recurrence ({count or 'until ' + str(until_date)} occurrences)")
         
         logger.info(f"Job saved successfully: {job.id}")
         # Return a simple success response that triggers the close action

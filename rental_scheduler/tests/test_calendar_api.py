@@ -492,34 +492,40 @@ class TestCalendarAPICallReminderAnnotations:
         """Job-linked call reminders should have notes annotated correctly."""
         from rental_scheduler.models import CallReminder
         
+        # Create a job 3 weeks in the future with weeks_prior=2
+        # This ensures the reminder (1 week before job's week Sunday) falls within the request window
         now = timezone.now()
+        job_date = now + timedelta(weeks=3)  # 3 weeks in future
         job = Job.objects.create(
             calendar=calendar,
             business_name="Test Business",
-            start_dt=now + timedelta(days=7),  # Job in future
-            end_dt=now + timedelta(days=7, hours=2),
+            start_dt=job_date,
+            end_dt=job_date + timedelta(hours=2),
             status='uncompleted',
             has_call_reminder=True,
-            call_reminder_weeks_prior=2,  # Reminder 1 week prior
+            call_reminder_weeks_prior=2,  # Reminder 1 week prior (weeks_prior=2 in DB)
         )
         
-        # Create a call reminder linked to this job
+        # Create a call reminder linked to this job with notes
+        # The reminder_date here is separate from the computed reminder date
         CallReminder.objects.create(
             job=job,
             calendar=calendar,
-            reminder_date=now.date(),
+            reminder_date=now.date() + timedelta(weeks=2),  # ~2 weeks from now
             notes="Please call customer about scheduling",
             completed=False,
         )
         
-        start = now.date() - timedelta(days=1)
-        end = now.date() + timedelta(days=14)
+        # Request window should cover both now and 4 weeks out
+        start = now.date() - timedelta(days=7)
+        end = now.date() + timedelta(weeks=4)
         
         url = reverse('rental_scheduler:job_calendar_data')
         response = api_client.get(url, {
             'start': start.isoformat(),
             'end': end.isoformat(),
             'calendar': calendar.id,
+            'fresh': '1',  # Bypass cache
         })
         
         assert response.status_code == 200
@@ -531,7 +537,7 @@ class TestCalendarAPICallReminderAnnotations:
             if e.get('extendedProps', {}).get('type') == 'call_reminder' 
             and e.get('extendedProps', {}).get('job_id') == job.id
         ]
-        assert len(reminder_events) >= 1
+        assert len(reminder_events) >= 1, f"Expected call reminder event for job {job.id}"
         
         props = reminder_events[0]['extendedProps']
         assert props.get('has_notes') is True
@@ -573,3 +579,304 @@ class TestCalendarAPICallReminderAnnotations:
         props = reminder_events[0]['extendedProps']
         assert props.get('has_notes') is True
         assert 'Standalone' in props.get('notes_preview', '')
+
+
+@pytest.mark.django_db
+class TestCalendarAPIPostgres:
+    """Tests specific to PostgreSQL performance path."""
+    
+    def test_postgres_backend_detection(self, api_client, calendar):
+        """Verify PostgreSQL backend is detected and used."""
+        from django.db import connection
+        
+        # Only run meaningful assertions on PostgreSQL
+        if connection.vendor != 'postgresql':
+            pytest.skip("Test only applicable to PostgreSQL backend")
+        
+        # Create a test job - use noon to avoid timezone edge cases
+        today = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        job = Job.objects.create(
+            calendar=calendar,
+            business_name="Postgres Test Job",
+            contact_name="Test Contact",
+            start_dt=today,
+            end_dt=today + timedelta(hours=2),
+            all_day=False,
+            status='uncompleted',
+        )
+        
+        start = today.date() - timedelta(days=1)
+        end = today.date() + timedelta(days=1)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+            'fresh': '1',  # Bypass cache
+        })
+        
+        assert response.status_code == 200
+        
+        # Check that the Postgres path was used (indicated by X-DB-Backend header in DEBUG mode)
+        from django.conf import settings
+        if settings.DEBUG:
+            assert response.get('X-DB-Backend') == 'postgresql'
+        
+        data = response.json()
+        assert data['status'] == 'success'
+        
+        # Verify the job appears in results (at least one event)
+        job_events = [
+            e for e in data['events']
+            if e.get('extendedProps', {}).get('job_id') == job.id
+        ]
+        assert len(job_events) >= 1, "Expected at least 1 event for the job"
+        
+        job.delete()
+    
+    def test_postgres_query_count_single_query(self, api_client, calendar):
+        """PostgreSQL path should use minimal queries (ideally 1 for main data)."""
+        from django.db import connection, reset_queries
+        from django.conf import settings
+        
+        if connection.vendor != 'postgresql':
+            pytest.skip("Test only applicable to PostgreSQL backend")
+        
+        # Create multiple jobs and reminders
+        now = timezone.now()
+        jobs = []
+        for i in range(5):
+            job = Job.objects.create(
+                calendar=calendar,
+                business_name=f"Postgres Query Test {i}",
+                start_dt=now + timedelta(days=i),
+                end_dt=now + timedelta(days=i, hours=2),
+                all_day=False,
+                status='uncompleted',
+            )
+            jobs.append(job)
+        
+        start = now.date() - timedelta(days=1)
+        end = now.date() + timedelta(days=10)
+        
+        # Reset query log
+        reset_queries()
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+            'fresh': '1',
+        })
+        
+        assert response.status_code == 200
+        
+        # Count queries - should be very low (1 for main call + a few for virtual occurrences check)
+        # The main calendar_feed function is 1 query, virtual occurrences add 1-2 more
+        query_count = len(connection.queries)
+        
+        # Should be significantly fewer queries than the number of jobs
+        # With ORM path, it would be at least 1 per job for call reminders
+        MAX_EXPECTED_POSTGRES_QUERIES = 10  # Very generous limit
+        assert query_count <= MAX_EXPECTED_POSTGRES_QUERIES, (
+            f"Expected <= {MAX_EXPECTED_POSTGRES_QUERIES} queries on Postgres, got {query_count}"
+        )
+        
+        # Cleanup
+        for job in jobs:
+            job.delete()
+    
+    def test_postgres_multiday_expansion(self, api_client, calendar):
+        """PostgreSQL path should correctly expand multi-day jobs."""
+        from django.db import connection
+        
+        if connection.vendor != 'postgresql':
+            pytest.skip("Test only applicable to PostgreSQL backend")
+        
+        # Use a future date at noon to avoid timezone edge cases
+        base_date = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        
+        # Create a 5-day job (starts tomorrow noon, ends 4 days later at noon)
+        job = Job.objects.create(
+            calendar=calendar,
+            business_name="Multi-Day Postgres Test",
+            start_dt=base_date,
+            end_dt=base_date + timedelta(days=4),
+            all_day=False,
+            status='uncompleted',
+        )
+        
+        # Request window encompasses the entire job with margin
+        start = base_date.date() - timedelta(days=1)
+        end = base_date.date() + timedelta(days=10)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+            'fresh': '1',
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Find all events for this job
+        job_events = [
+            e for e in data['events']
+            if e.get('extendedProps', {}).get('job_id') == job.id
+        ]
+        
+        # Should have at least 4 events (one per day) - could be 5 depending on timing
+        assert len(job_events) >= 4, f"Expected >= 4 day events, got {len(job_events)}"
+        assert len(job_events) <= 6, f"Expected <= 6 day events, got {len(job_events)}"
+        
+        # All should be marked as multi-day
+        for event in job_events:
+            assert event['extendedProps']['is_multi_day'] is True
+        
+        job.delete()
+    
+    def test_postgres_call_reminder_included(self, api_client, calendar):
+        """PostgreSQL path should include job-linked call reminders."""
+        from django.db import connection
+        
+        if connection.vendor != 'postgresql':
+            pytest.skip("Test only applicable to PostgreSQL backend")
+        
+        # Create a job with call reminder in 2 weeks
+        now = timezone.now()
+        job_date = now + timedelta(weeks=3)
+        job = Job.objects.create(
+            calendar=calendar,
+            business_name="Call Reminder Postgres Test",
+            start_dt=job_date,
+            end_dt=job_date + timedelta(hours=2),
+            all_day=False,
+            status='uncompleted',
+            has_call_reminder=True,
+            call_reminder_weeks_prior=2,
+            call_reminder_completed=False,
+        )
+        
+        # Request window should include the reminder date (2 weeks before job)
+        start = now.date()
+        end = job_date.date() + timedelta(days=1)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+            'fresh': '1',
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Find call reminder events for this job
+        reminder_events = [
+            e for e in data['events']
+            if e.get('extendedProps', {}).get('type') == 'call_reminder'
+            and e.get('extendedProps', {}).get('job_id') == job.id
+        ]
+        
+        assert len(reminder_events) == 1, "Expected 1 call reminder event"
+        assert '📞' in reminder_events[0]['title']
+        
+        job.delete()
+    
+    def test_postgres_standalone_reminder_included(self, api_client, calendar):
+        """PostgreSQL path should include standalone call reminders."""
+        from django.db import connection
+        from rental_scheduler.models import CallReminder
+        
+        if connection.vendor != 'postgresql':
+            pytest.skip("Test only applicable to PostgreSQL backend")
+        
+        reminder_date = timezone.now().date() + timedelta(days=2)
+        reminder = CallReminder.objects.create(
+            calendar=calendar,
+            reminder_date=reminder_date,
+            notes="Postgres standalone test",
+            completed=False,
+        )
+        
+        start = reminder_date - timedelta(days=1)
+        end = reminder_date + timedelta(days=1)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+            'fresh': '1',
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Find standalone reminder
+        standalone_events = [
+            e for e in data['events']
+            if e.get('extendedProps', {}).get('type') == 'standalone_call_reminder'
+            and e.get('extendedProps', {}).get('reminder_id') == reminder.id
+        ]
+        
+        assert len(standalone_events) == 1
+        assert 'Postgres standalone' in standalone_events[0]['title']
+        
+        reminder.delete()
+    
+    def test_postgres_search_filter(self, api_client, calendar):
+        """PostgreSQL path should respect search filters."""
+        from django.db import connection
+        
+        if connection.vendor != 'postgresql':
+            pytest.skip("Test only applicable to PostgreSQL backend")
+        
+        now = timezone.now()
+        job1 = Job.objects.create(
+            calendar=calendar,
+            business_name="Alpha Corp",
+            start_dt=now,
+            end_dt=now + timedelta(hours=2),
+            status='uncompleted',
+        )
+        job2 = Job.objects.create(
+            calendar=calendar,
+            business_name="Beta Inc",
+            start_dt=now,
+            end_dt=now + timedelta(hours=2),
+            status='uncompleted',
+        )
+        
+        start = now.date() - timedelta(days=1)
+        end = now.date() + timedelta(days=1)
+        
+        url = reverse('rental_scheduler:job_calendar_data')
+        response = api_client.get(url, {
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'calendar': calendar.id,
+            'search': 'Alpha',
+            'fresh': '1',
+        })
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Should only return Alpha Corp
+        job_events = [
+            e for e in data['events']
+            if e.get('extendedProps', {}).get('type') == 'job'
+        ]
+        
+        job_ids = {e.get('extendedProps', {}).get('job_id') for e in job_events}
+        assert job1.id in job_ids
+        assert job2.id not in job_ids
+        
+        job1.delete()
+        job2.delete()
