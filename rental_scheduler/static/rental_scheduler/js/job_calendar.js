@@ -38,6 +38,13 @@
             this.refetchDebounceTimer = null;
             this.refetchDebounceMs = 150; // Debounce refetch calls within this window
 
+            // AbortController for cancelling in-flight fetch requests
+            this.fetchAbortController = null;
+
+            // Debounced UI update tracking - consolidates repeated renderTodayPanel + forceEqualWeekHeights
+            this.uiUpdateTimer = null;
+            this.uiUpdateDebounceMs = 50; // Consolidate UI updates within this window
+
             // Search panel state - load from localStorage
             const savedSearchPanelState = localStorage.getItem('gts-calendar-search-open');
             this.searchPanelOpen = savedSearchPanelState === 'true';
@@ -209,23 +216,34 @@
                 eventContent: this.renderEventContent.bind(this),
                 dayCellContent: this.renderDayCellContent.bind(this),
                 // Hook calendar events to update Today panel and save position
-                eventsSet: () => {
-                    this.renderTodayPanel();
-                    this.forceEqualWeekHeights();
+                // Use debounced scheduleUIUpdate() to consolidate repeated calls
+                eventsSet: (events) => {
+                    // Performance mark: FullCalendar has finished rendering events
+                    if (typeof performance !== 'undefined' && performance.mark) {
+                        performance.mark('cal-events-set');
+                        console.debug(`[PERF] eventsSet: ${events.length} events rendered`);
+                    }
+                    // Build per-day event index for O(1) Today panel lookups
+                    this._buildEventDayIndex(events);
+                    this.scheduleUIUpdate();
                 },
                 datesSet: () => {
-                    this.renderTodayPanel();
                     this.saveCurrentDate();
-                    this.forceEqualWeekHeights();
+                    this.scheduleUIUpdate();
                 },
                 loading: (isLoading) => {
                     if (!isLoading) {
-                        this.renderTodayPanel();
+                        this.scheduleUIUpdate();
                     }
                 },
-                eventAdd: () => this.renderTodayPanel(),
-                eventChange: () => this.renderTodayPanel(),
-                eventRemove: () => this.renderTodayPanel(),
+                // Handle window resize - recalculate week heights
+                windowResize: () => {
+                    this._lastDaygridHeight = null; // Force recalculation
+                    this.forceEqualWeekHeights();
+                },
+                eventAdd: () => this.scheduleUIUpdate(),
+                eventChange: () => this.scheduleUIUpdate(),
+                eventRemove: () => this.scheduleUIUpdate(),
                 eventMouseEnter: this.handleEventMouseEnter.bind(this),
                 eventMouseLeave: this.handleEventMouseLeave.bind(this)
             });
@@ -234,6 +252,9 @@
 
             // Force equal week heights after render
             this.forceEqualWeekHeights();
+
+            // Set up ResizeObserver for responsive height adjustments
+            this.setupResizeObserver();
 
             // Style the custom buttons after render
             this.styleCustomButtons();
@@ -721,46 +742,81 @@
         }
 
         /**
+         * Debounced UI update - consolidates repeated renderTodayPanel + forceEqualWeekHeights calls
+         * into a single execution per animation frame
+         */
+        scheduleUIUpdate() {
+            if (this.uiUpdateTimer) {
+                clearTimeout(this.uiUpdateTimer);
+            }
+            this.uiUpdateTimer = setTimeout(() => {
+                this.uiUpdateTimer = null;
+                this.renderTodayPanel();
+                this.forceEqualWeekHeights();
+            }, this.uiUpdateDebounceMs);
+        }
+
+        /**
          * Force all week rows to have equal height (25% each)
+         * OPTIMIZED: Uses single rAF instead of multiple timeouts to reduce layout thrash.
+         * Called at explicit call sites: after render, toggles, and windowResize.
          */
         forceEqualWeekHeights() {
-            // Use multiple timeouts to catch different render stages
-            const applyHeights = () => {
-                // Find the daygrid body
-                const daygridBody = document.querySelector('.fc-daygrid-body');
-                if (!daygridBody) return;
+            // Skip if already scheduled
+            if (this._weekHeightRafPending) return;
+            this._weekHeightRafPending = true;
 
-                // Get the total available height
-                const totalHeight = daygridBody.offsetHeight;
-                const weekHeight = Math.floor(totalHeight / 4); // Exact pixel height for each week
+            requestAnimationFrame(() => {
+                this._weekHeightRafPending = false;
+                this._applyWeekHeights();
+            });
+        }
 
-                // Find all week rows
-                const weekRows = document.querySelectorAll('.fc-daygrid-body table tbody tr');
+        /**
+         * Internal: Apply equal heights to week rows
+         * OPTIMIZED: Only writes to 4 row elements, not individual cells.
+         * Uses CSS inherit on cells via stylesheet rather than inline styles.
+         */
+        _applyWeekHeights() {
+            // Find the daygrid body
+            const daygridBody = document.querySelector('.fc-daygrid-body');
+            if (!daygridBody) return;
 
-                if (weekRows.length === 4 && weekHeight > 0) {
-                    weekRows.forEach((row) => {
-                        // Set explicit pixel heights
-                        row.style.setProperty('height', `${weekHeight}px`, 'important');
-                        row.style.setProperty('max-height', `${weekHeight}px`, 'important');
-                        row.style.setProperty('min-height', `${weekHeight}px`, 'important');
-                        row.style.setProperty('overflow', 'hidden', 'important');
+            // Get the total available height
+            const totalHeight = daygridBody.offsetHeight;
 
-                        // Also set on the cells within the row
-                        const cells = row.querySelectorAll('td');
-                        cells.forEach(cell => {
-                            cell.style.setProperty('height', `${weekHeight}px`, 'important');
-                            cell.style.setProperty('max-height', `${weekHeight}px`, 'important');
-                            cell.style.setProperty('overflow', 'hidden', 'important');
-                        });
-                    });
-                }
-            };
+            // Skip if height hasn't changed (avoid redundant style writes)
+            if (this._lastDaygridHeight === totalHeight) return;
+            this._lastDaygridHeight = totalHeight;
 
-            // Apply immediately
-            setTimeout(applyHeights, 10);
-            // Apply again after a delay to catch late renders
-            setTimeout(applyHeights, 100);
-            setTimeout(applyHeights, 250);
+            const weekHeight = Math.floor(totalHeight / 4); // Exact pixel height for each week
+            if (weekHeight <= 0) return;
+
+            // Find all week rows
+            const weekRows = document.querySelectorAll('.fc-daygrid-body table tbody tr');
+            if (weekRows.length !== 4) return;
+
+            // OPTIMIZED: Only write to rows, not cells
+            // CSS handles cell heights via inherit/100% (see job_calendar.css)
+            weekRows.forEach((row) => {
+                // Set explicit pixel heights on rows only
+                row.style.setProperty('height', `${weekHeight}px`, 'important');
+                row.style.setProperty('max-height', `${weekHeight}px`, 'important');
+                row.style.setProperty('overflow', 'hidden', 'important');
+            });
+        }
+
+        /**
+         * Set up ResizeObserver to handle container resize
+         * DISABLED: ResizeObserver was causing forced reflows during initial render.
+         * Height adjustments are now handled at explicit call sites:
+         * - after calendar.render()
+         * - after toggleSearchPanel() / toggleTodaySidebar() transitions
+         * - in windowResize FullCalendar callback
+         */
+        setupResizeObserver() {
+            // DISABLED - see comment above
+            return;
         }
 
         /**
@@ -805,6 +861,65 @@
             return a.getFullYear() === b.getFullYear() &&
                 a.getMonth() === b.getMonth() &&
                 a.getDate() === b.getDate();
+        }
+
+        /**
+         * Format a date as YYYY-MM-DD key for the event index
+         */
+        _dateKey(date) {
+            const d = date instanceof Date ? date : new Date(date);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        /**
+         * Build a per-day index of events for O(1) Today panel lookups
+         * Called from eventsSet hook
+         */
+        _buildEventDayIndex(events) {
+            // Initialize or clear the index
+            this._eventsByDay = new Map();
+
+            for (const ev of events) {
+                if (!ev.start) continue;
+
+                const evStart = new Date(ev.start);
+                let evEnd = ev.end ? new Date(ev.end) : null;
+
+                // Handle all-day events (exclusive end in FullCalendar)
+                if (ev.allDay) {
+                    evEnd = evEnd ? new Date(evEnd.getTime() - 1) : new Date(evStart);
+                } else {
+                    evEnd = evEnd || new Date(evStart);
+                }
+
+                // Add event to each day it spans
+                const startDate = this.startOfDay(evStart);
+                const endDate = this.startOfDay(evEnd);
+
+                let current = new Date(startDate);
+                const maxDays = 60; // Safety cap to prevent runaway loops
+                let dayCount = 0;
+
+                while (current <= endDate && dayCount < maxDays) {
+                    const key = this._dateKey(current);
+                    if (!this._eventsByDay.has(key)) {
+                        this._eventsByDay.set(key, []);
+                    }
+                    this._eventsByDay.get(key).push(ev);
+                    current.setDate(current.getDate() + 1);
+                    dayCount++;
+                }
+            }
+        }
+
+        /**
+         * Get events for a specific day from the pre-built index
+         * Returns empty array if no events or index not built
+         */
+        _getEventsForDay(date) {
+            if (!this._eventsByDay) return [];
+            const key = this._dateKey(date);
+            return this._eventsByDay.get(key) || [];
         }
 
         /**
@@ -863,8 +978,15 @@
                 }
             }
 
-            // Pull the current client-side set (after fetch)
-            const events = this.calendar.getEvents().filter(ev => this.eventOverlapsDay(ev, targetDate));
+            // OPTIMIZED: Use pre-built per-day index for O(1) lookup instead of filtering all events
+            // Fallback to filter if index isn't built yet (e.g., during initial render)
+            let events;
+            if (this._eventsByDay) {
+                events = this._getEventsForDay(targetDate).slice(); // Copy to avoid mutating index
+            } else {
+                // Fallback: scan all events (only during initial load before eventsSet fires)
+                events = this.calendar.getEvents().filter(ev => this.eventOverlapsDay(ev, targetDate));
+            }
 
             // Sort: all-day first, then by start time
             events.sort((a, b) => {
@@ -1826,10 +1948,169 @@
         }
 
         /**
+         * Build a cache key for localStorage event caching
+         */
+        _buildEventsCacheKey(startStr, endStr, calendarIds, statusFilter, searchFilter) {
+            // Normalize the key components
+            const parts = [
+                'cal-events-cache',
+                startStr.split('T')[0], // Date only
+                endStr.split('T')[0],
+                calendarIds || '',
+                statusFilter || '',
+                searchFilter || ''
+            ];
+            return parts.join(':');
+        }
+
+        /**
+         * Compute a stable signature/hash for an events array.
+         * Used to detect if cached events differ from fresh events.
+         * Uses id + start + end + title + backgroundColor for comparison.
+         */
+        _computeEventsSignature(events) {
+            if (!events || events.length === 0) return 'empty';
+
+            // Build a signature from key event properties
+            // Sort by id first for stability
+            const sorted = [...events].sort((a, b) => {
+                const aId = String(a.id || '');
+                const bId = String(b.id || '');
+                return aId.localeCompare(bId);
+            });
+
+            // Create signature string from essential properties
+            const parts = sorted.map(ev => {
+                const id = ev.id || '';
+                const start = ev.start || '';
+                const end = ev.end || '';
+                const title = ev.title || '';
+                const bg = ev.backgroundColor || '';
+                return `${id}|${start}|${end}|${title}|${bg}`;
+            });
+
+            // Simple hash: join and compute a numeric hash
+            const str = parts.join(';;');
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash; // Convert to 32-bit integer
+            }
+            return `sig:${events.length}:${hash}`;
+        }
+
+        /**
+         * Try to get cached events from localStorage
+         * Returns object with { events, signature } or null if no valid cache found
+         */
+        _getCachedEvents(cacheKey) {
+            try {
+                const cached = localStorage.getItem(cacheKey);
+                if (!cached) return null;
+
+                const { events, signature, timestamp } = JSON.parse(cached);
+
+                // Cache valid for 5 minutes (300000ms)
+                const maxAge = 5 * 60 * 1000;
+                if (Date.now() - timestamp > maxAge) {
+                    localStorage.removeItem(cacheKey);
+                    return null;
+                }
+
+                return { events, signature };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        /**
+         * Store events in localStorage cache with signature
+         */
+        _setCachedEvents(cacheKey, events, signature = null) {
+            try {
+                // Compute signature if not provided
+                const sig = signature || this._computeEventsSignature(events);
+
+                const cacheData = {
+                    events,
+                    signature: sig,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+
+                // Clean up old cache entries (keep only last 5 to limit storage use)
+                this._cleanupEventCache(cacheKey);
+            } catch (e) {
+                // Ignore storage errors (quota exceeded, etc.)
+                console.debug('[PERF] Cache write failed:', e.message);
+            }
+        }
+
+        /**
+         * Update only the timestamp on an existing cache entry (no re-render needed)
+         */
+        _touchCacheTimestamp(cacheKey) {
+            try {
+                const cached = localStorage.getItem(cacheKey);
+                if (!cached) return;
+
+                const data = JSON.parse(cached);
+                data.timestamp = Date.now();
+                localStorage.setItem(cacheKey, JSON.stringify(data));
+            } catch (e) {
+                // Ignore errors
+            }
+        }
+
+        /**
+         * Clean up old event cache entries
+         */
+        _cleanupEventCache(currentKey) {
+            try {
+                const cacheKeys = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('cal-events-cache:') && key !== currentKey) {
+                        cacheKeys.push(key);
+                    }
+                }
+
+                // Keep only the 4 most recent (plus current = 5 total)
+                if (cacheKeys.length > 4) {
+                    // Sort by timestamp (oldest first)
+                    cacheKeys.sort((a, b) => {
+                        try {
+                            const aData = JSON.parse(localStorage.getItem(a) || '{}');
+                            const bData = JSON.parse(localStorage.getItem(b) || '{}');
+                            return (aData.timestamp || 0) - (bData.timestamp || 0);
+                        } catch (e) {
+                            return 0;
+                        }
+                    });
+
+                    // Remove oldest entries
+                    const toRemove = cacheKeys.slice(0, cacheKeys.length - 4);
+                    toRemove.forEach(key => localStorage.removeItem(key));
+                }
+            } catch (e) {
+                // Ignore cleanup errors
+            }
+        }
+
+        /**
          * Fetch events from the server
          * Hardened to handle empty/non-JSON responses gracefully
+         * Includes Performance API instrumentation for timing analysis
+         * OPTIMIZED: Uses localStorage cache with stale-while-revalidate for instant page reload
          */
         fetchEvents(info, successCallback, failureCallback) {
+            // Performance instrumentation
+            const perfEnabled = typeof performance !== 'undefined' && performance.mark;
+            if (perfEnabled) {
+                performance.mark('cal-fetch-start');
+            }
+
             // If no calendars are selected, return empty events immediately (no network request)
             if (!this.selectedCalendars || this.selectedCalendars.size === 0) {
                 successCallback([]);
@@ -1839,8 +2120,6 @@
 
             // Hide the no-calendars overlay since we have calendars selected
             this.updateNoCalendarsOverlay(false);
-
-            this.showLoading();
 
             // Build params with selected calendars
             const params = new URLSearchParams({
@@ -1860,20 +2139,69 @@
                 params.append('search', this.currentFilters.search);
             }
 
+            // Build cache key
+            const cacheKey = this._buildEventsCacheKey(
+                info.startStr, info.endStr, calendarIds,
+                this.currentFilters.status, this.currentFilters.search
+            );
+
+            // Check for one-shot override from background revalidation (avoids double-fetch)
+            if (this._overrideEventsOnce && this._overrideEventsOnce[cacheKey]) {
+                const overrideEvents = this._overrideEventsOnce[cacheKey];
+                delete this._overrideEventsOnce[cacheKey];
+                if (perfEnabled) {
+                    console.debug(`[PERF] Calendar: ${overrideEvents.length} events from override (no network)`);
+                }
+                // Yield a frame before heavy render work
+                requestAnimationFrame(() => successCallback(overrideEvents));
+                return;
+            }
+
+            // STALE-WHILE-REVALIDATE: Check cache first
+            const cachedData = this._getCachedEvents(cacheKey);
+            if (cachedData && !this._forceRefresh) {
+                const { events: cachedEvents, signature: cachedSignature } = cachedData;
+                // Return cached data via rAF to yield a frame before heavy render work
+                // This prevents the render from being counted in DOMContentLoaded and improves perceived responsiveness
+                if (perfEnabled) {
+                    console.debug(`[PERF] Calendar: ${cachedEvents.length} events from cache (instant)`);
+                }
+                requestAnimationFrame(() => successCallback(cachedEvents));
+
+                // Still fetch in background to revalidate (but don't show spinner)
+                this._backgroundRefetch(info, cacheKey, cachedSignature, perfEnabled);
+                return;
+            }
+
+            // No cache or forced refresh - show loading and fetch
+            this.showLoading();
+
             // Use the correct API endpoint from calendarConfig
             const apiUrl = window.calendarConfig?.eventsUrl || '/api/job-calendar-data/';
 
-            // Add cache-busting parameter
-            params.append('_t', Date.now());
+            // NOTE: Cache-busting `_t` parameter removed for performance.
+            // Server-side caching with version-based invalidation ensures fresh data after mutations.
 
             const fullUrl = `${apiUrl}?${params}`;
+
+            // Abort any in-flight request before starting a new one
+            if (this.fetchAbortController) {
+                this.fetchAbortController.abort();
+            }
+            this.fetchAbortController = new AbortController();
 
             fetch(fullUrl, {
                 headers: {
                     'Accept': 'application/json'
-                }
+                },
+                signal: this.fetchAbortController.signal
             })
                 .then(async (response) => {
+                    // Mark when response headers arrive
+                    if (perfEnabled) {
+                        performance.mark('cal-response-received');
+                    }
+
                     // Read response as text first to handle empty/non-JSON safely
                     const text = await response.text();
                     const contentType = response.headers.get('content-type') || '';
@@ -1897,7 +2225,14 @@
 
                     // Try to parse JSON
                     try {
-                        return JSON.parse(text);
+                        if (perfEnabled) {
+                            performance.mark('cal-json-parse-start');
+                        }
+                        const data = JSON.parse(text);
+                        if (perfEnabled) {
+                            performance.mark('cal-json-parse-end');
+                        }
+                        return data;
                     } catch (parseError) {
                         const snippet = text.substring(0, 200);
                         console.error(`JobCalendar: JSON parse failed for ${fullUrl}`);
@@ -1909,20 +2244,178 @@
                 })
                 .then(data => {
                     if (data.status === 'success') {
-                        successCallback(data.events || []);
+                        const events = data.events || [];
+
+                        // Cache the events for future instant loads
+                        this._setCachedEvents(cacheKey, events);
+
+                        // Performance logging
+                        if (perfEnabled) {
+                            performance.mark('cal-data-ready');
+                            console.debug(`[PERF] Calendar: ${events.length} events received (network)`);
+                        }
+
+                        // OPTIMIZATION: Hide loading overlay BEFORE handing events to FullCalendar.
+                        // Then yield a frame via rAF so the browser can paint the hidden overlay
+                        // before FullCalendar starts its synchronous rendering work.
+                        this.hideLoading();
+
+                        requestAnimationFrame(() => {
+                            if (perfEnabled) {
+                                performance.mark('cal-callback-start');
+                            }
+
+                            successCallback(events);
+
+                            if (perfEnabled) {
+                                performance.mark('cal-callback-end');
+                                // Measure all phases
+                                try {
+                                    performance.measure('cal-network', 'cal-fetch-start', 'cal-response-received');
+                                    performance.measure('cal-json-parse', 'cal-json-parse-start', 'cal-json-parse-end');
+                                    performance.measure('cal-to-render', 'cal-data-ready', 'cal-callback-start');
+                                    performance.measure('cal-render', 'cal-callback-start', 'cal-callback-end');
+                                    performance.measure('cal-total', 'cal-fetch-start', 'cal-callback-end');
+
+                                    // Log measurements
+                                    const measures = performance.getEntriesByType('measure').filter(m => m.name.startsWith('cal-'));
+                                    measures.forEach(m => {
+                                        console.debug(`[PERF] ${m.name}: ${m.duration.toFixed(1)}ms`);
+                                    });
+
+                                    // Clear marks for next fetch
+                                    performance.clearMarks();
+                                    performance.clearMeasures();
+                                } catch (e) {
+                                    // Ignore measurement errors
+                                }
+                            }
+                        });
                     } else {
+                        this.hideLoading();
                         console.error('JobCalendar: API error', data.error);
                         failureCallback(data.error || 'Unknown API error');
                     }
                 })
                 .catch(error => {
+                    this.hideLoading();
+                    // Ignore abort errors (expected when navigation happens during fetch)
+                    if (error.name === 'AbortError') {
+                        console.debug('JobCalendar: Fetch aborted (superseded by newer request)');
+                        return;
+                    }
                     console.error('JobCalendar: Fetch failed', error);
                     // Return empty events so calendar doesn't break completely
                     successCallback([]);
-                })
-                .finally(() => {
-                    this.hideLoading();
                 });
+        }
+
+        /**
+         * Background refetch for stale-while-revalidate
+         * Fetches fresh data silently and updates calendar ONLY if data changed
+         * Uses signature comparison to avoid unnecessary re-renders
+         */
+        _backgroundRefetch(info, cacheKey, cachedSignature, perfEnabled) {
+            const apiUrl = window.calendarConfig?.eventsUrl || '/api/job-calendar-data/';
+
+            // Build params
+            const params = new URLSearchParams({
+                start: info.startStr,
+                end: info.endStr
+            });
+            const calendarIds = Array.from(this.selectedCalendars).join(',');
+            params.append('calendar', calendarIds);
+            if (this.currentFilters.status) params.append('status', this.currentFilters.status);
+            if (this.currentFilters.search) params.append('search', this.currentFilters.search);
+
+            const fullUrl = `${apiUrl}?${params}`;
+
+            // Use a separate AbortController for background fetch
+            const bgController = new AbortController();
+
+            fetch(fullUrl, {
+                headers: { 'Accept': 'application/json' },
+                signal: bgController.signal
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const freshEvents = data.events || [];
+                        const freshSignature = this._computeEventsSignature(freshEvents);
+
+                        if (perfEnabled) {
+                            console.debug(`[PERF] Background revalidation: ${freshEvents.length} events`);
+                        }
+
+                        // Compare signatures to detect if data actually changed
+                        if (freshSignature === cachedSignature) {
+                            // Data unchanged - just refresh the cache timestamp, NO re-render
+                            this._touchCacheTimestamp(cacheKey);
+                            if (perfEnabled) {
+                                console.debug(`[PERF] Background revalidation: data unchanged, skipping re-render`);
+                            }
+                            return;
+                        }
+
+                        // Data changed - update cache with fresh data and signature
+                        this._setCachedEvents(cacheKey, freshEvents, freshSignature);
+
+                        if (perfEnabled) {
+                            console.debug(`[PERF] Background revalidation: data CHANGED, triggering re-render`);
+                        }
+
+                        // Check if current view still matches this fetch
+                        // If user has navigated away, don't update
+                        if (this.calendar) {
+                            const currentView = this.calendar.view;
+                            if (currentView && currentView.activeStart && currentView.activeEnd) {
+                                const viewStart = currentView.activeStart.toISOString();
+                                const viewEnd = currentView.activeEnd.toISOString();
+
+                                // Only update if view hasn't changed
+                                if (viewStart.split('T')[0] === info.startStr.split('T')[0] &&
+                                    viewEnd.split('T')[0] === info.endStr.split('T')[0]) {
+                                    // Use one-shot override to avoid double-fetch
+                                    // Store fresh events in override buffer
+                                    if (!this._overrideEventsOnce) {
+                                        this._overrideEventsOnce = {};
+                                    }
+                                    this._overrideEventsOnce[cacheKey] = freshEvents;
+
+                                    // Trigger re-render (fetchEvents will use override, not network)
+                                    this.calendar.refetchEvents();
+                                }
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    // Silently ignore background fetch errors
+                    if (error.name !== 'AbortError') {
+                        console.debug('[PERF] Background revalidation failed:', error.message);
+                    }
+                });
+        }
+
+        /**
+         * Invalidate the events cache
+         * Call this after mutations (job create/update/delete)
+         */
+        invalidateEventsCache() {
+            try {
+                // Clear all event cache entries
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('cal-events-cache:')) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+                console.debug('[PERF] Events cache invalidated');
+            } catch (e) {
+                // Ignore errors
+            }
         }
 
         /**
@@ -1936,7 +2429,10 @@
             this.refetchDebounceTimer = setTimeout(() => {
                 this.refetchDebounceTimer = null;
                 if (this.calendar) {
+                    // Force fresh fetch, bypassing cache
+                    this._forceRefresh = true;
                     this.calendar.refetchEvents();
+                    this._forceRefresh = false;
                 }
             }, this.refetchDebounceMs);
         }
@@ -2299,9 +2795,11 @@
                 `;
             }
 
-            // Notes
-            if (props.notes) {
-                const truncatedNotes = props.notes.length > 100 ? props.notes.substring(0, 100) + '...' : props.notes;
+            // Notes preview (full notes available via detail fetch)
+            if (props.notes_preview || props.notes) {
+                // Use notes_preview if available (from optimized feed), fall back to notes for backwards compat
+                const notesText = props.notes_preview || props.notes || '';
+                const truncatedNotes = notesText.length > 100 ? notesText.substring(0, 100) + '...' : notesText;
                 content += `
                     <div style="display: flex; align-items: start;">
                         <svg style="width: 14px; height: 14px; margin-right: 8px; margin-top: 2px; flex-shrink: 0;" fill="currentColor" viewBox="0 0 20 20">
@@ -2469,6 +2967,12 @@
                 // Check if this is a call reminder event (job-related or standalone)
                 if (eventType === 'call_reminder' || eventType === 'standalone_call_reminder') {
                     this.showCallReminderPanel(info.event);
+                } else if (eventType === 'virtual_job') {
+                    // Virtual occurrence - materialize it first, then open
+                    this.materializeAndOpenJob(info.event);
+                } else if (eventType === 'virtual_call_reminder') {
+                    // Virtual call reminder - materialize the job first, then show reminder panel
+                    this.materializeAndShowCallReminder(info.event);
                 } else if (jobId && window.JobPanel) {
                     // Check if there are unsaved changes
                     const hasChanges = window.JobPanel.hasUnsavedChanges && window.JobPanel.hasUnsavedChanges();
@@ -2581,6 +3085,141 @@
                     window.JobPanel.updateMinimizeButton();
                 }
             }, 100);
+        }
+
+        /**
+         * Materialize a virtual occurrence and open the resulting job
+         * Virtual occurrences are generated on-the-fly for "forever" recurring series
+         */
+        async materializeAndOpenJob(event) {
+            const props = event.extendedProps || {};
+            const parentId = props.recurrence_parent_id;
+            const originalStart = props.recurrence_original_start;
+
+            if (!parentId || !originalStart) {
+                console.error('Missing parent_id or original_start for virtual job');
+                this.showError('Unable to open this occurrence. Please try again.');
+                return;
+            }
+
+            console.log('Materializing virtual occurrence:', parentId, originalStart);
+            this.showLoading();
+
+            try {
+                const response = await fetch('/api/recurrence/materialize/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.getCSRFToken(),
+                    },
+                    body: JSON.stringify({
+                        parent_id: parentId,
+                        original_start: originalStart,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to materialize occurrence');
+                }
+
+                const data = await response.json();
+                const jobId = data.job_id;
+
+                console.log('Materialized occurrence, job ID:', jobId, 'created:', data.created);
+
+                // Now open the real job
+                if (window.JobWorkspace) {
+                    window.JobWorkspace.openJob(jobId, {
+                        customerName: props.display_name || event.title || 'Job',
+                        trailerColor: props.trailer_color || '',
+                        calendarColor: props.calendar_color || '#3B82F6'
+                    });
+                } else if (window.JobPanel) {
+                    window.JobPanel.setTitle('Edit Job');
+                    window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                    if (window.JobPanel.setCurrentJobId) {
+                        window.JobPanel.setCurrentJobId(jobId);
+                    }
+                }
+
+                // Refetch events to update the calendar (virtual occurrence is now real)
+                if (data.created) {
+                    this.debouncedRefetchEvents();
+                }
+
+            } catch (error) {
+                console.error('Error materializing virtual occurrence:', error);
+                this.showError('Unable to open this occurrence. Please try again.');
+            } finally {
+                this.hideLoading();
+            }
+        }
+
+        /**
+         * Materialize a virtual call reminder occurrence and show the reminder panel
+         */
+        async materializeAndShowCallReminder(event) {
+            const props = event.extendedProps || {};
+            const parentId = props.recurrence_parent_id;
+            const originalStart = props.recurrence_original_start;
+
+            if (!parentId || !originalStart) {
+                console.error('Missing parent_id or original_start for virtual call reminder');
+                this.showError('Unable to open this reminder. Please try again.');
+                return;
+            }
+
+            console.log('Materializing virtual call reminder:', parentId, originalStart);
+            this.showLoading();
+
+            try {
+                const response = await fetch('/api/recurrence/materialize/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': this.getCSRFToken(),
+                    },
+                    body: JSON.stringify({
+                        parent_id: parentId,
+                        original_start: originalStart,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to materialize occurrence');
+                }
+
+                const data = await response.json();
+                const jobId = data.job_id;
+
+                console.log('Materialized for call reminder, job ID:', jobId);
+
+                // Update the event's extendedProps with the real job_id so showCallReminderPanel works
+                const updatedEvent = {
+                    ...event,
+                    extendedProps: {
+                        ...props,
+                        job_id: jobId,
+                        type: 'call_reminder',  // Change type to real call reminder
+                    }
+                };
+
+                // Show the call reminder panel for the materialized job
+                this.showCallReminderPanel(updatedEvent);
+
+                // Refetch events to update the calendar
+                if (data.created) {
+                    this.debouncedRefetchEvents();
+                }
+
+            } catch (error) {
+                console.error('Error materializing virtual call reminder:', error);
+                this.showError('Unable to open this reminder. Please try again.');
+            } finally {
+                this.hideLoading();
+            }
         }
 
         /**
@@ -2804,7 +3443,8 @@
                     </div>`;
             }
 
-            // Notes section
+            // Notes section (use notes_preview from feed, or notes if available from detail)
+            const notesValue = props.notes || props.notes_preview || '';
             html += `
                 <div style="margin-bottom: 8px;">
                     <label style="font-weight: 600; color: #374151; margin-bottom: 4px; display: block; font-size: 12px;">
@@ -2812,7 +3452,7 @@
                     </label>
                     <textarea id="reminder-notes" 
                               style="width: 100%; min-height: 60px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; font-size: 12px; resize: vertical;"
-                              placeholder="Add notes about this call reminder...">${props.notes || ''}</textarea>
+                              placeholder="Add notes about this call reminder...">${notesValue}</textarea>
                 </div>
                 </div>`;
 
@@ -3142,57 +3782,28 @@
 
         /**
          * Handle event mount for styling
+         * OPTIMIZED: Server already provides backgroundColor/borderColor in event data.
+         * We only add CSS classes here - no setProp() calls or per-event timers.
          */
         handleEventMount(info) {
-            const event = info.event;
-            const props = event.extendedProps;
+            const el = info.el;
+            if (!el) return;
 
-            // Force apply calendar colors if they exist
-            if (props?.calendar_color) {
-                const calendarColor = props.calendar_color;
-                const isCompleted = props.status === 'completed';
+            const props = info.event.extendedProps;
+            if (!props) return;
 
-                // Apply lighter shade for completed events
-                let finalColor = calendarColor;
-                if (isCompleted) {
-                    finalColor = this.lightenColor(calendarColor, 0.3);
-                }
+            // Apply completion styling via CSS class (styles defined in job_calendar.css)
+            // Check status === 'completed' OR the legacy is_completed flag
+            const isCompleted = props.status === 'completed' || props.is_completed ||
+                (props.completed && (props.type === 'call_reminder' || props.type === 'standalone_call_reminder'));
 
-                // Force set the colors
-                event.setProp('backgroundColor', finalColor);
-                event.setProp('borderColor', finalColor);
-
-                // Also set on the DOM element directly
-                if (info.el) {
-                    info.el.style.backgroundColor = finalColor;
-                    info.el.style.borderColor = finalColor;
-                }
-
-                // Use setTimeout to ensure colors are applied after FullCalendar finishes
-                setTimeout(() => {
-                    if (info.el) {
-                        info.el.style.backgroundColor = finalColor;
-                        info.el.style.borderColor = finalColor;
-                    }
-                }, 100);
+            if (isCompleted) {
+                el.classList.add('job-completed');
             }
 
-            // Apply completion styling (only to DOM element, not as event property)
-            if (props.is_completed || (props.completed && (props.type === 'call_reminder' || props.type === 'standalone_call_reminder'))) {
-                if (info.el) {
-                    info.el.style.textDecoration = 'line-through';
-                    info.el.style.textDecorationColor = 'white';
-                    info.el.style.color = 'white';
-                    info.el.style.opacity = '0.7';
-                }
-            }
-
-            // Apply canceled styling (only to DOM element, not as event property)
+            // Apply canceled styling via CSS class
             if (props.is_canceled) {
-                if (info.el) {
-                    info.el.style.textDecoration = 'line-through';
-                    info.el.style.opacity = '0.5';
-                }
+                el.classList.add('job-canceled');
             }
         }
 
@@ -3342,10 +3953,15 @@
 
         /**
          * Refresh calendar data
+         * Invalidates cache and forces a fresh fetch
          */
         refreshCalendar() {
             if (this.calendar) {
+                // Invalidate cache to ensure fresh data
+                this.invalidateEventsCache();
+                this._forceRefresh = true;
                 this.calendar.refetchEvents();
+                this._forceRefresh = false;
             }
         }
 

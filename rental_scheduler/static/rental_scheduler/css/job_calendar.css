@@ -32,15 +32,17 @@
 }
 
 
-/* Completion states */
+/* Completion states - applied via classList in handleEventMount */
 .job-completed {
-    text-decoration: line-through;
-    opacity: 0.7;
+    text-decoration: line-through !important;
+    text-decoration-color: white !important;
+    opacity: 0.7 !important;
 }
 
 .job-canceled {
-    text-decoration: line-through;
-    opacity: 0.5;
+    text-decoration: line-through !important;
+    text-decoration-color: white !important;
+    opacity: 0.5 !important;
 }
 
 /* Calendar filter styles */
@@ -268,5 +270,12 @@
     border-color: #047857 !important;
 }
 
+/* Week row height optimization - cells inherit height from rows */
+/* This allows JS to only set height on <tr> elements, reducing style writes */
+.fc-daygrid-body table tbody tr td {
+    height: inherit !important;
+    max-height: inherit !important;
+    overflow: hidden !important;
+}
 
 
