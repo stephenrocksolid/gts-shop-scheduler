@@ -2072,7 +2072,8 @@
     const serverGuardrails = window.calendarConfig?.guardrails || {};
     return {
       // UX warning thresholds (from server)
-      MAX_DAYS_IN_FUTURE: serverGuardrails.warnDaysInFuture || 365,
+      MAX_DAYS_IN_FUTURE: serverGuardrails.warnDaysInFuture || 1095,  // 3 years
+      MAX_DAYS_IN_PAST: serverGuardrails.warnDaysInPast || 30,
       MAX_JOB_SPAN_DAYS: serverGuardrails.warnJobSpanDays || 60,
       // Hard validation limits (from server)
       MIN_VALID_YEAR: serverGuardrails.minValidYear || 2000,
@@ -2147,11 +2148,24 @@
   window.migrateWarningKeyToJobId = migrateWarningKeyToJobId;
 
   /**
+   * Calculate calendar days between two dates (DST-safe, time-of-day-safe).
+   * Uses UTC midnight normalization to avoid off-by-one errors.
+   * Returns positive if date1 > date2, negative if date1 < date2.
+   */
+  function calendarDaysDiff(date1, date2) {
+    // Normalize both dates to UTC midnight
+    const utc1 = Date.UTC(date1.getFullYear(), date1.getMonth(), date1.getDate());
+    const utc2 = Date.UTC(date2.getFullYear(), date2.getMonth(), date2.getDate());
+    const msPerDay = 1000 * 60 * 60 * 24;
+    return Math.floor((utc1 - utc2) / msPerDay);
+  }
+
+  /**
    * Validate job date inputs before form submission
    * Returns true if validation passes (or user confirms), false to cancel submission
    * 
-   * The warning dialog only appears on the FIRST save attempt per job (per-browser),
-   * and only for start dates in the past or more than 3 years in the future.
+   * The warning dialog only appears on the FIRST save attempt per job (per-browser).
+   * Past-date warnings only apply to NEW jobs and only when significantly in the past.
    */
   function validateJobDates(form) {
     // Get fresh guardrails each call (in case config was loaded late)
@@ -2178,7 +2192,6 @@
     }
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
     // Check for absurd year values (these are hard errors, not warnings)
     const startYear = startDate.getFullYear();
@@ -2209,24 +2222,28 @@
 
     const warnings = [];
 
-    // Calculate date thresholds
-    const threeYearsFromToday = new Date(today);
-    threeYearsFromToday.setFullYear(today.getFullYear() + 3);
+    // Calculate calendar day differences (DST-safe)
+    const daysFromToday = calendarDaysDiff(startDate, today);  // negative if in past
 
-    const daysUntilStart = Math.floor((startDate - today) / (1000 * 60 * 60 * 24));
+    // Check if this is a new job (no job_id) - past-date warnings only apply to new jobs
+    const jobIdInput = form.querySelector('input[name="job_id"]');
+    const isNewJob = !jobIdInput || !jobIdInput.value;
 
-    // Check for start date in the past
-    if (startDate < today) {
-      const daysInPast = Math.abs(daysUntilStart);
-      warnings.push(`The start date is ${daysInPast} day${daysInPast !== 1 ? 's' : ''} in the past.`);
+    // Check for start date significantly in the past (only for new jobs)
+    if (isNewJob && daysFromToday < 0) {
+      const daysInPast = Math.abs(daysFromToday);
+      if (daysInPast > guardrails.MAX_DAYS_IN_PAST) {
+        warnings.push(`The start date is ${daysInPast} days in the past.`);
+      }
     }
-    // Check for start date more than 3 years in the future
-    else if (startDate > threeYearsFromToday) {
-      warnings.push(`The start date is ${daysUntilStart} days in the future (more than 3 years).`);
+
+    // Check for start date far in the future (applies to all jobs)
+    if (daysFromToday > guardrails.MAX_DAYS_IN_FUTURE) {
+      warnings.push(`The start date is ${daysFromToday} days in the future (more than ${Math.floor(guardrails.MAX_DAYS_IN_FUTURE / 365)} years).`);
     }
 
     // Check for very long job span
-    const spanDays = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+    const spanDays = calendarDaysDiff(endDate, startDate);
     if (spanDays > guardrails.MAX_JOB_SPAN_DAYS) {
       warnings.push(`This job spans ${spanDays} days (more than ${guardrails.MAX_JOB_SPAN_DAYS} days).`);
     }

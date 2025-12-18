@@ -9,6 +9,7 @@ from rental_scheduler.constants import (
     MAX_JOB_SPAN_DAYS,
     MAX_MULTI_DAY_EXPANSION_DAYS,
     WARN_DAYS_IN_FUTURE,
+    WARN_DAYS_IN_PAST,
     WARN_JOB_SPAN_DAYS,
     get_guardrails_for_frontend,
 )
@@ -42,6 +43,11 @@ class TestConstants:
         assert WARN_DAYS_IN_FUTURE == 1095
         assert isinstance(WARN_DAYS_IN_FUTURE, int)
     
+    def test_warn_days_in_past(self):
+        """WARN_DAYS_IN_PAST should be set for UX warnings (new jobs only)."""
+        assert WARN_DAYS_IN_PAST == 30
+        assert isinstance(WARN_DAYS_IN_PAST, int)
+    
     def test_warn_job_span_days(self):
         """WARN_JOB_SPAN_DAYS should be less than or equal to MAX_JOB_SPAN_DAYS."""
         assert WARN_JOB_SPAN_DAYS == 60
@@ -64,6 +70,7 @@ class TestGetGuardrailsForFrontend:
             'maxValidYear',
             'maxJobSpanDays',
             'warnDaysInFuture',
+            'warnDaysInPast',
             'warnJobSpanDays',
         }
         assert set(result.keys()) == expected_keys
@@ -75,6 +82,7 @@ class TestGetGuardrailsForFrontend:
         assert result['maxValidYear'] == MAX_VALID_YEAR
         assert result['maxJobSpanDays'] == MAX_JOB_SPAN_DAYS
         assert result['warnDaysInFuture'] == WARN_DAYS_IN_FUTURE
+        assert result['warnDaysInPast'] == WARN_DAYS_IN_PAST
         assert result['warnJobSpanDays'] == WARN_JOB_SPAN_DAYS
     
     def test_is_json_serializable(self):

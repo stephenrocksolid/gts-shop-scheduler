@@ -41,6 +41,9 @@ MAX_MULTI_DAY_EXPANSION_DAYS = 120
 WARN_DAYS_IN_FUTURE = 1095
 """Warn user if scheduling more than this many days (3 years) in the future."""
 
+WARN_DAYS_IN_PAST = 30
+"""Warn user if scheduling more than this many days in the past (new jobs only)."""
+
 WARN_JOB_SPAN_DAYS = 60
 """Warn user if job spans more than this many days."""
 
@@ -63,5 +66,6 @@ def get_guardrails_for_frontend():
         'maxJobSpanDays': MAX_JOB_SPAN_DAYS,
         # UX warning thresholds (for confirmation prompts)
         'warnDaysInFuture': WARN_DAYS_IN_FUTURE,
+        'warnDaysInPast': WARN_DAYS_IN_PAST,
         'warnJobSpanDays': WARN_JOB_SPAN_DAYS,
     }

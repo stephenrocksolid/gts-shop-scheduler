@@ -12,6 +12,7 @@ from rental_scheduler.constants import (
     MAX_VALID_YEAR,
     MAX_JOB_SPAN_DAYS,
     WARN_DAYS_IN_FUTURE,
+    WARN_DAYS_IN_PAST,
     WARN_JOB_SPAN_DAYS,
     get_guardrails_for_frontend,
 )
@@ -78,6 +79,7 @@ class TestCalendarTemplateGuardrails:
         assert guardrails['maxValidYear'] == MAX_VALID_YEAR
         assert guardrails['maxJobSpanDays'] == MAX_JOB_SPAN_DAYS
         assert guardrails['warnDaysInFuture'] == WARN_DAYS_IN_FUTURE
+        assert guardrails['warnDaysInPast'] == WARN_DAYS_IN_PAST
         assert guardrails['warnJobSpanDays'] == WARN_JOB_SPAN_DAYS
     
     def test_guardrails_matches_helper_function(self, api_client):
@@ -124,4 +126,41 @@ class TestCalendarTemplateOtherConfig:
         content = response.content.decode('utf-8')
         
         assert 'calendars' in content
+
+
+@pytest.mark.django_db
+class TestCalendarSearchPanelDropdown:
+    """Test the calendar search panel's calendar dropdown elements."""
+    
+    def test_search_calendar_dropdown_present(self, api_client):
+        """Search calendar dropdown container should be present."""
+        url = reverse('rental_scheduler:calendar')
+        response = api_client.get(url)
+        content = response.content.decode('utf-8')
+        
+        assert 'id="search-calendar-dropdown"' in content
+    
+    def test_search_calendar_all_checkbox_present(self, api_client):
+        """Search calendar 'All Calendars' select-all checkbox should be present."""
+        url = reverse('rental_scheduler:calendar')
+        response = api_client.get(url)
+        content = response.content.decode('utf-8')
+        
+        assert 'id="search-calendar-all-checkbox"' in content
+    
+    def test_search_calendar_dropdown_btn_present(self, api_client):
+        """Search calendar dropdown button should be present."""
+        url = reverse('rental_scheduler:calendar')
+        response = api_client.get(url)
+        content = response.content.decode('utf-8')
+        
+        assert 'id="search-calendar-dropdown-btn"' in content
+    
+    def test_search_calendar_selected_text_present(self, api_client):
+        """Search calendar selected text span should be present."""
+        url = reverse('rental_scheduler:calendar')
+        response = api_client.get(url)
+        content = response.content.decode('utf-8')
+        
+        assert 'id="search-calendar-selected-text"' in content
 
