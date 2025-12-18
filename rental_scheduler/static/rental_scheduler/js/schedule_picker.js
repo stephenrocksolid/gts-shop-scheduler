@@ -101,7 +101,7 @@
                 disableMobile: true, // Use flatpickr on mobile too for consistency
                 dateFormat: allDay ? 'Y-m-d' : 'Y-m-d\\TH:i',
                 enableTime: !allDay,
-                time_24hr: true,
+                time_24hr: false,
                 minuteIncrement: 15,
                 onClose: function (selectedDates, dateStr, instance) {
                     // Trigger change event for validation/listeners

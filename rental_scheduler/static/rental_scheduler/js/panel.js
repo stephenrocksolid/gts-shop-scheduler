@@ -33,6 +33,212 @@
   }
 
   // ==========================================================================
+  // HTML SANITIZATION FOR DRAFT RESTORE
+  // Trims whitespace from value attributes of numeric/date inputs to prevent
+  // browser parsing errors when restoring cached HTML from localStorage.
+  // ==========================================================================
+
+  /**
+   * Sanitize cached HTML before inserting into the DOM.
+   * Trims value attributes for input types that don't accept whitespace.
+   * @param {string} html - Raw HTML string (e.g., from localStorage draft)
+   * @returns {string} - Sanitized HTML string
+   */
+  function sanitizeDraftHtml(html) {
+    if (!html || typeof html !== 'string') return html;
+
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      // Input types that cannot have whitespace in their value attribute
+      const strictValueTypes = ['number', 'date', 'datetime-local', 'time', 'month', 'week'];
+      const selector = strictValueTypes.map(t => `input[type="${t}"]`).join(', ');
+
+      const inputs = doc.querySelectorAll(selector);
+      inputs.forEach(input => {
+        if (input.hasAttribute('value')) {
+          const rawValue = input.getAttribute('value');
+          const trimmed = rawValue.trim();
+          input.setAttribute('value', trimmed);
+        }
+      });
+
+      // Return the sanitized body innerHTML
+      return doc.body.innerHTML;
+    } catch (e) {
+      console.warn('sanitizeDraftHtml: Error parsing HTML, returning original', e);
+      return html;
+    }
+  }
+
+  /**
+   * Serialize panel body HTML for draft storage, preserving form state.
+   * Unlike innerHTML alone, this persists checkbox/radio checked state and select values
+   * by setting the corresponding HTML attributes to match runtime properties.
+   * @param {HTMLElement} panelBody - The panel body element to serialize
+   * @returns {string} - HTML string with form state preserved
+   */
+  function serializeDraftHtml(panelBody) {
+    if (!panelBody) return null;
+
+    try {
+      // Clone the panel body so we don't modify the live DOM
+      const clone = panelBody.cloneNode(true);
+
+      // Persist checkbox and radio checked state as attributes
+      clone.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(input => {
+        const original = panelBody.querySelector(`#${CSS.escape(input.id)}`) ||
+          panelBody.querySelector(`input[name="${CSS.escape(input.name)}"][type="${input.type}"]`);
+        if (original) {
+          if (original.checked) {
+            input.setAttribute('checked', 'checked');
+          } else {
+            input.removeAttribute('checked');
+          }
+        }
+      });
+
+      // Persist select element selected state
+      clone.querySelectorAll('select').forEach(select => {
+        const original = panelBody.querySelector(`#${CSS.escape(select.id)}`) ||
+          panelBody.querySelector(`select[name="${CSS.escape(select.name)}"]`);
+        if (original) {
+          // Clear all selected attributes first
+          select.querySelectorAll('option').forEach(opt => opt.removeAttribute('selected'));
+          // Set selected on the currently selected option(s)
+          Array.from(original.selectedOptions).forEach(origOpt => {
+            const cloneOpt = select.querySelector(`option[value="${CSS.escape(origOpt.value)}"]`);
+            if (cloneOpt) {
+              cloneOpt.setAttribute('selected', 'selected');
+            }
+          });
+        }
+      });
+
+      // Persist textarea values (innerHTML doesn't capture typed content)
+      clone.querySelectorAll('textarea').forEach(textarea => {
+        const original = panelBody.querySelector(`#${CSS.escape(textarea.id)}`) ||
+          panelBody.querySelector(`textarea[name="${CSS.escape(textarea.name)}"]`);
+        if (original) {
+          textarea.textContent = original.value;
+        }
+      });
+
+      // Persist text/number/date input values
+      clone.querySelectorAll('input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="email"], input[type="tel"]').forEach(input => {
+        const original = panelBody.querySelector(`#${CSS.escape(input.id)}`) ||
+          panelBody.querySelector(`input[name="${CSS.escape(input.name)}"]`);
+        if (original) {
+          input.setAttribute('value', original.value);
+        }
+      });
+
+      return clone.innerHTML;
+    } catch (e) {
+      console.warn('serializeDraftHtml: Error serializing, falling back to innerHTML', e);
+      return panelBody.innerHTML;
+    }
+  }
+
+  // ==========================================================================
+  // JOB FORM TOGGLE UI (Call Reminder + Recurrence)
+  // Centralized, idempotent handler for checkbox-driven expand/collapse sections.
+  // ==========================================================================
+
+  /**
+   * Sync visibility of toggle-controlled sections based on checkbox state.
+   * @param {HTMLElement} rootEl - The root element to scope queries to (e.g., panel body)
+   */
+  function syncJobFormToggles(rootEl) {
+    if (!rootEl) return;
+
+    // Call reminder toggle
+    const callReminderCheckbox = rootEl.querySelector('#call-reminder-enabled');
+    const callReminderOptions = rootEl.querySelector('#call-reminder-options');
+    if (callReminderCheckbox && callReminderOptions) {
+      if (callReminderCheckbox.checked) {
+        callReminderOptions.classList.remove('call-reminder-hidden');
+        callReminderOptions.classList.add('call-reminder-visible');
+      } else {
+        callReminderOptions.classList.remove('call-reminder-visible');
+        callReminderOptions.classList.add('call-reminder-hidden');
+      }
+    }
+
+    // Recurrence toggle
+    const recurrenceCheckbox = rootEl.querySelector('#recurrence-enabled');
+    const recurrenceOptions = rootEl.querySelector('#recurrence-options');
+    if (recurrenceCheckbox && recurrenceOptions) {
+      if (recurrenceCheckbox.checked) {
+        recurrenceOptions.classList.remove('recurrence-hidden');
+        recurrenceOptions.classList.add('recurrence-visible');
+      } else {
+        recurrenceOptions.classList.remove('recurrence-visible');
+        recurrenceOptions.classList.add('recurrence-hidden');
+      }
+    }
+  }
+
+  /**
+   * Initialize job form toggle UI with a single delegated change listener.
+   * Idempotent - safe to call multiple times on the same element.
+   * @param {HTMLElement} rootEl - The root element to scope to (e.g., panel body or form)
+   */
+  function initJobFormToggleUI(rootEl) {
+    if (!rootEl) return;
+
+    // Guard against double-binding using a data attribute
+    if (rootEl.dataset.toggleUiInit === '1') {
+      // Already initialized, just sync visibility in case checkbox state changed
+      syncJobFormToggles(rootEl);
+      return;
+    }
+    rootEl.dataset.toggleUiInit = '1';
+
+    // Attach a single delegated change listener for toggle checkboxes
+    rootEl.addEventListener('change', function (e) {
+      const target = e.target;
+      if (!target) return;
+
+      // Handle call reminder toggle
+      if (target.id === 'call-reminder-enabled' || target.name === 'has_call_reminder') {
+        const options = rootEl.querySelector('#call-reminder-options');
+        if (options) {
+          if (target.checked) {
+            options.classList.remove('call-reminder-hidden');
+            options.classList.add('call-reminder-visible');
+          } else {
+            options.classList.remove('call-reminder-visible');
+            options.classList.add('call-reminder-hidden');
+          }
+        }
+      }
+
+      // Handle recurrence toggle
+      if (target.id === 'recurrence-enabled' || target.name === 'recurrence_enabled') {
+        const options = rootEl.querySelector('#recurrence-options');
+        if (options) {
+          if (target.checked) {
+            options.classList.remove('recurrence-hidden');
+            options.classList.add('recurrence-visible');
+          } else {
+            options.classList.remove('recurrence-visible');
+            options.classList.add('recurrence-hidden');
+          }
+        }
+      }
+    });
+
+    // Sync initial state immediately
+    syncJobFormToggles(rootEl);
+  }
+
+  // Expose for use elsewhere
+  window.initJobFormToggleUI = initJobFormToggleUI;
+  window.syncJobFormToggles = syncJobFormToggles;
+
+  // ==========================================================================
   // FRIENDLY DATE PICKER ENHANCEMENT
   // Wraps flatpickr to show user-friendly format (Dec 22, 2026) while
   // keeping ISO values for form submission. Supports flexible typed input.
@@ -192,7 +398,10 @@
     };
 
     // Merge with base config
-    return Object.assign({}, baseConfig, {
+    // Force 12-hour time picker (AM/PM) when time is enabled
+    const timeConfig = enableTime ? { time_24hr: false } : {};
+
+    return Object.assign({}, baseConfig, timeConfig, {
       altInput: true,
       altFormat: altFormat,
       allowInput: true,
@@ -317,17 +526,31 @@
     wrapFlatpickr();
   }
 
-  // Initialize panel date pickers after HTMX swaps
+  // Initialize panel components after HTMX swaps
   document.body.addEventListener('htmx:afterSwap', function (event) {
     // Check if swap happened inside the panel
     const panel = document.getElementById('job-panel');
     if (panel && panel.contains(event.target)) {
-      setTimeout(initPanelDatePickers, 100);
+      setTimeout(() => {
+        initPanelDatePickers();
+        // Initialize toggle UI (call reminder, recurrence)
+        const panelBody = document.querySelector('#job-panel .panel-body');
+        if (panelBody) {
+          initJobFormToggleUI(panelBody);
+        }
+      }, 100);
     }
   });
 
   document.body.addEventListener('htmx:load', function (event) {
-    setTimeout(initPanelDatePickers, 100);
+    setTimeout(() => {
+      initPanelDatePickers();
+      // Initialize toggle UI (call reminder, recurrence)
+      const panelBody = document.querySelector('#job-panel .panel-body');
+      if (panelBody) {
+        initJobFormToggleUI(panelBody);
+      }
+    }, 100);
   });
 
   // Vanilla JS fallback implementation
@@ -515,9 +738,9 @@
             continue;
           }
 
-          // Skip flatpickr alt display inputs (they have .flatpickr-input class but no name attr)
-          // The real value is stored in the hidden original input, not the display input
-          if (input.classList.contains('flatpickr-input') && !input.name) {
+          // Skip inputs without a name attribute - they don't submit and are UI-only
+          // (e.g., flatpickr alt display inputs, cloned header selects, etc.)
+          if (!input.name) {
             continue;
           }
 
@@ -552,8 +775,8 @@
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
         inputs.forEach(input => {
-          // Skip flatpickr alt display inputs (no name, display-only)
-          if (input.classList.contains('flatpickr-input') && !input.name) {
+          // Skip inputs without a name attribute - they don't submit and are UI-only
+          if (!input.name) {
             return;
           }
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
@@ -569,8 +792,8 @@
 
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         inputs.forEach(input => {
-          // Skip flatpickr alt display inputs (no name, display-only)
-          if (input.classList.contains('flatpickr-input') && !input.name) {
+          // Skip inputs without a name attribute - they don't submit and are UI-only
+          if (!input.name) {
             return;
           }
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
@@ -970,7 +1193,8 @@
             });
 
             // Capture current panel HTML for potential unsaved state restoration
-            const currentHtml = panelBody ? panelBody.innerHTML : null;
+            // Use serializeDraftHtml to preserve checkbox/select state
+            const currentHtml = panelBody ? serializeDraftHtml(panelBody) : null;
 
             // Check for missing required fields FIRST
             const missingFields = this.getRequiredMissing(form);
@@ -1231,7 +1455,8 @@
             });
 
             // Capture current panel HTML for potential unsaved state restoration
-            const currentHtml = panelBody ? panelBody.innerHTML : null;
+            // Use serializeDraftHtml to preserve checkbox/select state
+            const currentHtml = panelBody ? serializeDraftHtml(panelBody) : null;
 
             // Check for missing required fields
             const missingFields = self.getRequiredMissing(form);
@@ -1370,11 +1595,40 @@
     showContent: (html) => {
       const target = document.querySelector('#job-panel .panel-body');
       if (!target) return;
-      target.innerHTML = html;
+
+      // Sanitize the HTML to fix any invalid value attributes (e.g., from old cached drafts)
+      const sanitizedHtml = sanitizeDraftHtml(html);
+      target.innerHTML = sanitizedHtml;
+
+      // Re-run HTMX processing so hx-* attributes work on restored content
+      if (typeof htmx !== 'undefined') {
+        htmx.process(target);
+      }
+
       executeOperation(() => {
         panelInstance.open();
         panelInstance.trackFormChanges();
       });
+
+      // Run targeted initializers instead of generic htmx:load dispatch
+      // This avoids re-init storms and checkbox state fights
+      setTimeout(() => {
+        // Initialize toggle UI (call reminder, recurrence) - idempotent
+        initJobFormToggleUI(target);
+
+        // Initialize date pickers
+        initPanelDatePickers();
+
+        // Initialize phone masks if available
+        if (window.PhoneMask && window.PhoneMask.init) {
+          window.PhoneMask.init();
+        }
+
+        // Initialize schedule picker if available
+        if (window.initSchedulePicker) {
+          window.initSchedulePicker();
+        }
+      }, 50);
     },
     trackFormChanges: () => {
       executeOperation(() => panelInstance.trackFormChanges());
@@ -1455,9 +1709,9 @@
             continue;
           }
 
-          // Skip flatpickr alt display inputs (they have .flatpickr-input class but no name attr)
-          // The real value is stored in the hidden original input, not the display input
-          if (input.classList.contains('flatpickr-input') && !input.name) {
+          // Skip inputs without a name attribute - they don't submit and are UI-only
+          // (e.g., flatpickr alt display inputs, cloned header selects, etc.)
+          if (!input.name) {
             continue;
           }
 
@@ -1488,8 +1742,8 @@
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
         inputs.forEach(input => {
-          // Skip flatpickr alt display inputs (no name, display-only)
-          if (input.classList.contains('flatpickr-input') && !input.name) {
+          // Skip inputs without a name attribute - they don't submit and are UI-only
+          if (!input.name) {
             return;
           }
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
@@ -1504,8 +1758,8 @@
 
         const inputs = panelBody.querySelectorAll('input, select, textarea');
         inputs.forEach(input => {
-          // Skip flatpickr alt display inputs (no name, display-only)
-          if (input.classList.contains('flatpickr-input') && !input.name) {
+          // Skip inputs without a name attribute - they don't submit and are UI-only
+          if (!input.name) {
             return;
           }
           if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
