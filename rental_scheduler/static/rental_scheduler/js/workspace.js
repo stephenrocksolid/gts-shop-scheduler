@@ -675,12 +675,72 @@
 
         /**
          * Show tooltip for workspace tab by fetching job details
+         * For drafts, builds tooltip from local workspace data instead of fetching from API
          */
         async showWorkspaceTabTooltip(jobId, tabElement) {
             try {
+                // Check if this is a draft - drafts are client-side only and have no server record
+                if (this.isDraftId(jobId)) {
+                    const draft = this.openJobs.get(jobId);
+                    if (!draft) return;
+
+                    // Build tooltip from local draft data
+                    let businessName = draft.customerName || 'New Job';
+                    let startDt = null;
+                    let endDt = null;
+
+                    // Try to parse additional fields from unsavedHtml if available
+                    if (draft.unsavedHtml) {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(draft.unsavedHtml, 'text/html');
+
+                        const businessInput = doc.querySelector('input[name="business_name"]');
+                        if (businessInput && businessInput.value) {
+                            businessName = businessInput.value;
+                        }
+
+                        const startInput = doc.querySelector('input[name="start_dt"]');
+                        if (startInput && startInput.value) {
+                            startDt = new Date(startInput.value);
+                        }
+
+                        const endInput = doc.querySelector('input[name="end_dt"]');
+                        if (endInput && endInput.value) {
+                            endDt = new Date(endInput.value);
+                        }
+                    }
+
+                    const fakeEvent = {
+                        title: businessName,
+                        start: startDt,
+                        end: endDt,
+                        allDay: false,
+                        extendedProps: {
+                            calendar_name: '',
+                            business_name: businessName,
+                            contact_name: '',
+                            phone: '',
+                            trailer_details: '',
+                            trailer_color: draft.trailerColor || '',
+                            trailer_serial: '',
+                            repair_notes: '',
+                            notes: '',
+                            status: 'Draft (unsaved)',
+                            is_recurring_parent: false,
+                            is_multi_day: false
+                        }
+                    };
+
+                    if (window.jobCalendar) {
+                        window.jobCalendar.showEventTooltip(fakeEvent, tabElement);
+                    }
+                    return;
+                }
+
+                // For real jobs, fetch from API
                 const response = await fetch(`/api/jobs/${jobId}/detail/`);
                 if (!response.ok) {
-                    console.error('Failed to fetch job details');
+                    console.error(`Failed to fetch job details for job ${jobId}`);
                     return;
                 }
 
