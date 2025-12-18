@@ -190,3 +190,121 @@ def test_job_list_all_default_sort_is_upcoming_then_past(api_client, calendar):
     assert [j.business_name for j in jobs] == ["FUTURE_2", "FUTURE_20", "PAST_1", "PAST_10"]
 
 
+@pytest.mark.django_db
+def test_job_list_search_punctuation_insensitive(api_client, calendar):
+    """Search should match regardless of punctuation and spacing differences."""
+    url = reverse("rental_scheduler:job_list")
+    now = timezone.now()
+
+    # Create a job with punctuated name
+    job = Job.objects.create(
+        calendar=calendar,
+        business_name="Mt.Hope Fence",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=1),
+        all_day=False,
+        status="uncompleted",
+    )
+
+    # All these variations should find the job
+    search_variations = [
+        "Mt. Hope",      # With period and space
+        "Mt.Hope",       # With period, no space
+        "Mt Hope",       # No period, with space
+        "MTHOPE",        # No punctuation, uppercase
+        "mthope",        # No punctuation, lowercase
+        "mt hope fence", # Multiple words
+    ]
+
+    for query in search_variations:
+        response = api_client.get(url, {"search": query})
+        assert response.status_code == 200, f"Failed for query: {query}"
+        jobs = list(response.context["jobs"])
+        assert job in jobs, f"Job not found for query: '{query}'"
+
+
+@pytest.mark.django_db
+def test_job_list_search_strict_and_matching(api_client, calendar):
+    """When all search terms match, should use strict AND (no widening)."""
+    url = reverse("rental_scheduler:job_list")
+    now = timezone.now()
+
+    job = Job.objects.create(
+        calendar=calendar,
+        business_name="Mt.Hope Fence Company",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=1),
+        all_day=False,
+        status="uncompleted",
+    )
+
+    # This should match strictly (all words present)
+    response = api_client.get(url, {"search": "Hope Fence"})
+    assert response.status_code == 200
+
+    jobs = list(response.context["jobs"])
+    assert job in jobs
+    assert response.context.get("search_widened") is False
+
+
+@pytest.mark.django_db
+def test_job_list_search_fallback_to_or_when_no_strict_match(api_client, calendar):
+    """When strict AND returns nothing, should fall back to OR matching."""
+    url = reverse("rental_scheduler:job_list")
+    now = timezone.now()
+
+    # Create jobs that each match only one word
+    job_hope = Job.objects.create(
+        calendar=calendar,
+        business_name="Hope Industries",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=1),
+        all_day=False,
+        status="uncompleted",
+    )
+    job_smith = Job.objects.create(
+        calendar=calendar,
+        business_name="Smith Corporation",
+        start_dt=now + timedelta(days=2),
+        end_dt=now + timedelta(days=2, hours=1),
+        all_day=False,
+        status="uncompleted",
+    )
+
+    # Search for "Hope Smith" - no single job matches both, so should fall back to OR
+    response = api_client.get(url, {"search": "Hope Smith"})
+    assert response.status_code == 200
+
+    jobs = list(response.context["jobs"])
+    # Both jobs should be returned via OR fallback
+    assert job_hope in jobs
+    assert job_smith in jobs
+    # The search_widened flag should be True
+    assert response.context.get("search_widened") is True
+
+
+@pytest.mark.django_db
+def test_job_list_search_single_token_no_fallback(api_client, calendar):
+    """Single token search should not trigger fallback (nothing to broaden to)."""
+    url = reverse("rental_scheduler:job_list")
+    now = timezone.now()
+
+    Job.objects.create(
+        calendar=calendar,
+        business_name="Acme Corp",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=1),
+        all_day=False,
+        status="uncompleted",
+    )
+
+    # Search for a term that won't match anything
+    response = api_client.get(url, {"search": "nonexistent"})
+    assert response.status_code == 200
+
+    jobs = list(response.context["jobs"])
+    assert len(jobs) == 0
+    # No widening for single term
+    assert response.context.get("search_widened") is False
+
+

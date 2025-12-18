@@ -50,6 +50,172 @@ DATETIME_LOCAL_FMT = "%Y-%m-%dT%H:%M"
 # HTML5 date-only format (used when All Day is checked)
 DATE_ONLY_FMT = "%Y-%m-%d"
 
+
+def _tokenize_search_query(query: str) -> list[str]:
+    """
+    Extract alphanumeric tokens from a search query for punctuation-insensitive matching.
+    
+    - Splits on any non-alphanumeric character
+    - Lowercases all tokens
+    - Filters out single-letter tokens (too noisy)
+    - For digit-only tokens, keeps only if length >= 3 (phone fragment)
+    
+    Example: "Mt. Hope" -> ["mt", "hope"]
+             "Mt.Hope"  -> ["mt", "hope"]
+             "MTHOPE"   -> ["mthope"]
+    """
+    # Split on non-alphanumeric characters
+    raw_tokens = re.split(r'[^a-zA-Z0-9]+', query.lower())
+    
+    tokens = []
+    for tok in raw_tokens:
+        if not tok:
+            continue
+        # Filter out single-letter tokens
+        if len(tok) == 1:
+            continue
+        # For digit-only tokens, require at least 3 digits
+        if tok.isdigit() and len(tok) < 3:
+            continue
+        tokens.append(tok)
+    
+    return tokens
+
+
+def _build_normalized_search_annotation():
+    """
+    Build a Django annotation that concatenates and normalizes searchable fields.
+    
+    Returns an expression that:
+    - Concatenates all searchable text fields with a separator
+    - Lowercases the result
+    - Removes common punctuation and spaces for comparison
+    
+    This allows "Mt. Hope" to match "Mt.Hope" or "MTHOPE".
+    """
+    from django.db.models.functions import Coalesce, Concat, Lower, Replace
+    
+    # Helper to wrap field with Coalesce to handle nulls and cast to TextField
+    def field_expr(field_name):
+        return Coalesce(
+            models.F(field_name),
+            models.Value(''),
+            output_field=models.TextField()
+        )
+    
+    # Concatenate all searchable fields with a separator
+    concat_expr = Concat(
+        models.Value('|', output_field=models.TextField()),
+        field_expr('business_name'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('contact_name'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('phone'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('address_line1'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('address_line2'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('city'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('state'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('trailer_color'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('trailer_serial'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('trailer_details'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('notes'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('repair_notes'),
+        models.Value('|', output_field=models.TextField()),
+        output_field=models.TextField(),
+    )
+    
+    # Lowercase
+    lower_expr = Lower(concat_expr, output_field=models.TextField())
+    
+    # Remove common punctuation and spaces for normalized comparison
+    # Chain replacements: . , - ( ) ' " / \ space
+    normalized = Replace(lower_expr, models.Value('.'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(','), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('-'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('('), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(')'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value("'"), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('"'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('/'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('\\'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(' '), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('+'), models.Value(''), output_field=models.TextField())
+    
+    return normalized
+
+
+def _build_workorder_normalized_search_annotation():
+    """
+    Build a Django annotation for WorkOrder search that concatenates and normalizes 
+    searchable fields from both WorkOrder and related Job.
+    
+    Similar to _build_normalized_search_annotation but for WorkOrder model.
+    """
+    from django.db.models.functions import Coalesce, Concat, Lower, Replace
+    
+    # Helper to wrap field with Coalesce to handle nulls and cast to TextField
+    def field_expr(field_name):
+        return Coalesce(
+            models.F(field_name),
+            models.Value(''),
+            output_field=models.TextField()
+        )
+    
+    # Concatenate WorkOrder and related Job fields with a separator
+    concat_expr = Concat(
+        models.Value('|', output_field=models.TextField()),
+        field_expr('wo_number'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('notes'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__business_name'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__contact_name'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__phone'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__address_line1'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__city'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__trailer_color'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__trailer_serial'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__trailer_details'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__repair_notes'),
+        models.Value('|', output_field=models.TextField()),
+        output_field=models.TextField(),
+    )
+    
+    # Lowercase
+    lower_expr = Lower(concat_expr, output_field=models.TextField())
+    
+    # Remove common punctuation and spaces for normalized comparison
+    normalized = Replace(lower_expr, models.Value('.'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(','), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('-'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('('), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(')'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value("'"), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('"'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('/'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('\\'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(' '), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('+'), models.Value(''), output_field=models.TextField())
+    
+    return normalized
+
 class HomeView(TemplateView):
     template_name = 'rental_scheduler/home.html'
     
@@ -194,55 +360,43 @@ class JobListView(ListView):
             two_years_from_now = now + timedelta(days=730)  # 2 years = 730 days
             queryset = queryset.filter(start_dt__gte=now, start_dt__lte=two_years_from_now)
         
-        # Unified search across multiple fields with word-based matching
+        # Unified search across multiple fields with punctuation-insensitive matching
+        # and smart fallback (strict AND first, then broaden to OR if no results)
         search = self.request.GET.get('search', '').strip()
+        self._search_widened = False  # Track if we had to broaden the search
+        
         if search:
-            # Split search query into individual words
-            search_words = search.split()
+            # Tokenize search query (punctuation-insensitive)
+            tokens = _tokenize_search_query(search)
             
-            # For each word, create a Q object that searches across all fields
-            for word in search_words:
-                # Check if word contains digits (phone number search)
-                word_digits = ''.join(filter(str.isdigit, word))
-
-                word_query = models.Q(business_name__icontains=word) | \
-                             models.Q(contact_name__icontains=word) | \
-                             models.Q(phone__icontains=word) | \
-                             models.Q(address_line1__icontains=word) | \
-                             models.Q(address_line2__icontains=word) | \
-                             models.Q(city__icontains=word) | \
-                             models.Q(state__icontains=word) | \
-                             models.Q(trailer_color__icontains=word) | \
-                             models.Q(trailer_serial__icontains=word) | \
-                             models.Q(trailer_details__icontains=word) | \
-                             models.Q(notes__icontains=word) | \
-                             models.Q(repair_notes__icontains=word)
-
-                # If word contains digits, also search phone field with digits only.
-                # This allows searching for "6208887050" to match "(620) 888-7050".
-                if word_digits and len(word_digits) >= 3:
-                    from django.db.models.functions import Replace
-
-                    queryset_with_stripped = queryset.annotate(
-                        phone_digits=Replace(
-                            Replace(
-                                Replace(
-                                    Replace(
-                                        Replace('phone', models.Value('('), models.Value('')),
-                                        models.Value(')'), models.Value('')
-                                    ),
-                                    models.Value(' '), models.Value('')
-                                ),
-                                models.Value('-'), models.Value('')
-                            ),
-                            models.Value('+'), models.Value('')
-                        )
-                    )
-                    word_query = word_query | models.Q(phone_digits__icontains=word_digits)
-                    queryset = queryset_with_stripped
+            if tokens:
+                # Annotate with normalized search blob for punctuation-insensitive comparison
+                queryset = queryset.annotate(
+                    _search_blob=_build_normalized_search_annotation()
+                )
                 
-                # Chain with AND logic - all words must match
-                queryset = queryset.filter(word_query)
+                # Build strict AND filter (all tokens must be present)
+                strict_filter = models.Q()
+                for token in tokens:
+                    strict_filter &= models.Q(_search_blob__icontains=token)
+                
+                # Try strict AND filter first
+                strict_queryset = queryset.filter(strict_filter)
+                
+                # Check if strict filter returns any results
+                if strict_queryset.exists():
+                    queryset = strict_queryset
+                elif len(tokens) > 1:
+                    # Fall back to OR filter (any token matches)
+                    broad_filter = models.Q()
+                    for token in tokens:
+                        broad_filter |= models.Q(_search_blob__icontains=token)
+                    
+                    queryset = queryset.filter(broad_filter)
+                    self._search_widened = True
+                else:
+                    # Single token with no matches - keep the strict (empty) result
+                    queryset = strict_queryset
         
         # Sorting
         allowed_sort_fields = {
@@ -332,6 +486,9 @@ class JobListView(ListView):
         context['date_filter'] = self.request.GET.get('date_filter', 'all')
         context['start_date'] = self.request.GET.get('start_date', '')
         context['end_date'] = self.request.GET.get('end_date', '')
+        
+        # Add search widened flag (True if fallback to OR matching was used)
+        context['search_widened'] = getattr(self, '_search_widened', False)
         
         return context
 
@@ -1780,22 +1937,43 @@ class WorkOrderListView(ListView):
         if calendar_id:
             queryset = queryset.filter(job__calendar_id=calendar_id)
         
-        # Search across multiple fields
-        search = self.request.GET.get('search')
+        # Unified search across multiple fields with punctuation-insensitive matching
+        # and smart fallback (strict AND first, then broaden to OR if no results)
+        search = self.request.GET.get('search', '').strip()
+        self._search_widened = False  # Track if we had to broaden the search
+        
         if search:
-            queryset = queryset.filter(
-                models.Q(wo_number__icontains=search) |
-                models.Q(job__business_name__icontains=search) |
-                models.Q(job__contact_name__icontains=search) |
-                models.Q(job__phone__icontains=search) |
-                models.Q(job__address_line1__icontains=search) |
-                models.Q(job__city__icontains=search) |
-                models.Q(job__trailer_color__icontains=search) |
-                models.Q(job__trailer_serial__icontains=search) |
-                models.Q(job__trailer_details__icontains=search) |
-                models.Q(job__repair_notes__icontains=search) |
-                models.Q(notes__icontains=search)
-            )
+            # Tokenize search query (punctuation-insensitive)
+            tokens = _tokenize_search_query(search)
+            
+            if tokens:
+                # Annotate with normalized search blob for punctuation-insensitive comparison
+                queryset = queryset.annotate(
+                    _search_blob=_build_workorder_normalized_search_annotation()
+                )
+                
+                # Build strict AND filter (all tokens must be present)
+                strict_filter = models.Q()
+                for token in tokens:
+                    strict_filter &= models.Q(_search_blob__icontains=token)
+                
+                # Try strict AND filter first
+                strict_queryset = queryset.filter(strict_filter)
+                
+                # Check if strict filter returns any results
+                if strict_queryset.exists():
+                    queryset = strict_queryset
+                elif len(tokens) > 1:
+                    # Fall back to OR filter (any token matches)
+                    broad_filter = models.Q()
+                    for token in tokens:
+                        broad_filter |= models.Q(_search_blob__icontains=token)
+                    
+                    queryset = queryset.filter(broad_filter)
+                    self._search_widened = True
+                else:
+                    # Single token with no matches - keep the strict (empty) result
+                    queryset = strict_queryset
         
         # Sorting
         sort_by = self.request.GET.get('sort', '-wo_date')
@@ -1839,6 +2017,9 @@ class WorkOrderListView(ListView):
             'status': self.request.GET.get('status', ''),
             'calendar': self.request.GET.get('calendar', ''),
         }
+        
+        # Add search widened flag (True if fallback to OR matching was used)
+        context['search_widened'] = getattr(self, '_search_widened', False)
         
         return context
 
