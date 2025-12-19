@@ -3541,6 +3541,7 @@
                         Notes
                     </label>
                     <textarea id="reminder-notes" 
+                              data-testid="call-reminder-notes"
                               style="width: 100%; min-height: 60px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; font-size: 12px; resize: vertical;"
                               placeholder="Add notes about this call reminder...">${notesValue}</textarea>
                 </div>
@@ -3553,18 +3554,21 @@
                 // Standalone reminder buttons
                 html += `
                     <button onclick="jobCalendar.saveStandaloneReminderNotes(${reminderId})" 
+                            data-testid="call-reminder-save"
                             style="flex: 1; padding: 6px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#2563eb'" 
                             onmouseout="this.style.backgroundColor='#3b82f6'">
                         💾 Save & Close
                     </button>
                     <button onclick="jobCalendar.markStandaloneReminderComplete(${reminderId})" 
+                            data-testid="call-reminder-complete"
                             style="flex: 1; padding: 6px 12px; background-color: #10b981; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#059669'" 
                             onmouseout="this.style.backgroundColor='#10b981'">
                         ✓ Complete
                     </button>
                     <button onclick="jobCalendar.deleteStandaloneReminder(${reminderId})" 
+                            data-testid="call-reminder-delete"
                             style="padding: 6px 12px; background-color: #ef4444; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#dc2626'" 
                             onmouseout="this.style.backgroundColor='#ef4444'">
@@ -3574,18 +3578,21 @@
                 // Job-related reminder buttons
                 html += `
                     <button onclick="jobCalendar.saveJobReminderNotes(${jobId})" 
+                            data-testid="call-reminder-save"
                             style="flex: 1; padding: 6px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#2563eb'" 
                             onmouseout="this.style.backgroundColor='#3b82f6'">
                         💾 Save & Close
                     </button>
                     <button onclick="jobCalendar.markCallReminderComplete(${jobId})" 
+                            data-testid="call-reminder-complete"
                             style="flex: 1; padding: 6px 12px; background-color: #10b981; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#059669'" 
                             onmouseout="this.style.backgroundColor='#10b981'">
                         ✓ Mark Complete
                     </button>
                     <button onclick="jobCalendar.openJobFromReminder(${jobId})" 
+                            data-testid="call-reminder-view-job"
                             style="flex: 1; padding: 6px 12px; background-color: #6b7280; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer;"
                             onmouseover="this.style.backgroundColor='#4b5563'" 
                             onmouseout="this.style.backgroundColor='#6b7280'">
@@ -3894,6 +3901,25 @@
             // Apply canceled styling via CSS class
             if (props.is_canceled) {
                 el.classList.add('job-canceled');
+            }
+
+            // Add data attributes for E2E test selectors (non-functional)
+            if (props.type) {
+                el.setAttribute('data-gts-event-type', props.type);
+            }
+            if (props.job_id) {
+                el.setAttribute('data-gts-job-id', props.job_id);
+            }
+            if (props.reminder_id) {
+                el.setAttribute('data-gts-reminder-id', props.reminder_id);
+            }
+            if (props.recurrence_parent_id) {
+                el.setAttribute('data-gts-recurrence-parent-id', props.recurrence_parent_id);
+                // Also add the original start date for identifying specific occurrences
+                const originalStartISO = props.recurrence_original_start;
+                if (originalStartISO) {
+                    el.setAttribute('data-gts-recurrence-original-start', originalStartISO.substring(0, 10));
+                }
             }
         }
 

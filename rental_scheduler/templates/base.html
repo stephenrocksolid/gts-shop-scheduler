@@ -133,6 +133,9 @@
         <!-- Shared Date Input Utilities (friendly date formats) -->
         <script src="{% static 'rental_scheduler/js/date_inputs.js' %}"></script>
 
+        <!-- GTS Init Helpers (idempotent initialization for HTMX pages) -->
+        <script src="{% static 'rental_scheduler/js/gts_init.js' %}"></script>
+
         <script>
         // Global toast utility (vanilla JS)
         window.showToast = function(message, type = 'info', duration = 5000) {
@@ -246,6 +249,10 @@
         <!-- Job Panel -->
 {% include "rental_scheduler/includes/panel.html" %}
         <script src="{% static 'rental_scheduler/js/panel.js' %}"></script>
+        <script src="{% static 'rental_scheduler/js/entrypoints/panel_shell.js' %}"></script>
+
+        <!-- Job Form Partial Handlers (must load globally - panel opens on any page) -->
+        <script src="{% static 'rental_scheduler/js/entrypoints/job_form_partial.js' %}"></script>
 
         <!-- Job Workspace Bar -->
 {% include "rental_scheduler/includes/workspace_bar.html" %}

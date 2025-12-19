@@ -12,6 +12,23 @@ def pytest_configure():
     pass
 
 
+@pytest.fixture(autouse=True)
+def use_simple_staticfiles_storage(settings):
+    """Use simple staticfiles storage for all tests to avoid needing collectstatic.
+    
+    This overrides the ManifestStaticFilesStorage configured in gts_django.settings
+    so that tests can render templates without requiring collectstatic to be run first.
+    """
+    settings.STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+
 @pytest.fixture
 def api_client():
     """Return a Django test client."""

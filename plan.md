@@ -1,177 +1,138 @@
-## Context
+## Status / is this expected?
 
-Goal: **port only the valuable changes** from the archived WIP branch `origin/wip/steph-pre-sync-2025-12-16` (tip commit `834babd`) onto the now-updated `master`, without rebasing/merging huge rewritten UI files.
+No — these failures are not “expected progress” from Phase 1 in the sense of new product logic being broken.
+They’re a **test-environment/staticfiles configuration issue** that prevents templates from rendering at all.
 
-Working branch: `port/wip-2025-12-16` (tracks `origin/port/wip-2025-12-16`).
+When the base template can’t render, anything that requests a page that extends `base.html` fails (calendar page, job list, job partials, etc.).
+That’s why you’re seeing a large cascade of failures with the *same* exception.
 
-Guiding principles:
-- Keep the WIP branch immutable (time capsule / rollback point)
-- Port in small, reviewable slices (one “intent” per commit)
-- Re-implement intent on top of today’s architecture instead of copying entire large files
-- Don’t rewrite historical migrations; express schema/data intent as *new* migrations when needed
+---
 
-## Phase 0 (baseline) — status
+## What is failing (symptom)
 
-- ✅ Created/checked out `port/wip-2025-12-16` from updated `master` (currently `17bd7f2`)
-- ⏳ Baseline “green” verification (tests) should be re-run on this branch if not already captured
+**Exception**: `ValueError: Missing staticfiles manifest entry for 'rental_scheduler/img/favicon-32x32.png'`
 
-## Phase 1 (inventory) — results
+**Where it happens**:
+- `rental_scheduler/templates/base.html` references multiple favicon/static assets via `{% static %}`.
+- The *first* one in the file is:
+  - `rental_scheduler/img/favicon-32x32.png`
 
-### 1) What the WIP branch contains
+**Why it cascades**:
+- Many tests exercise endpoints that render templates extending `base.html`.
+- Template rendering fails before the view can return a response, so tests that “just load the page” all fail.
 
-- WIP head commit: `834babd` (“WIP: snapshot local changes before syncing with origin/master”)
-- Common ancestor with updated master (merge-base): `35b4b55` (“Last updates”)
-- The WIP branch is **exactly 1 commit** on top of the merge-base.
+---
 
-This matters because a naive `master..wip` diff includes lots of unrelated churn caused by master moving forward after `35b4b55`. The items below are the *WIP-only* changes we should evaluate for porting.
+## Root cause (why Django is throwing this)
 
-### 2) WIP-only changed files (35b4b55..834babd)
+### Root cause A — `ManifestStaticFilesStorage` is enabled during tests
+In `gts_django/settings.py` you have:
 
-**Docs deleted (likely not valuable to re-apply):**
-- `BUG_FIX_SUMMARY.md`
-- `JSON_EXPORT_IMPORT_GUIDE.md`
-- `JSON_EXPORT_IMPORT_IMPLEMENTATION_SUMMARY.md`
-- `SERVER_FIX_CALL_REMINDERS.md`
+- `STORAGES["staticfiles"]["BACKEND"] = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"`
 
-**Whitespace/no-op changes (ignore):**
-- `rental_scheduler/management/commands/fix_call_reminder_dates.py` (trailing newlines only)
-- `rental_scheduler/migrations/0029_fix_call_reminder_dates.py` (trailing newlines only)
-- `rental_scheduler/migrations/0030_add_callreminder_model.py` (trailing newlines only)
-- `rental_scheduler/migrations/0034_alter_job_quote_to_charfield.py` (trailing newlines only)
-- `rental_scheduler/migrations/0035_alter_job_quote_add_default.py` (trailing newlines only)
-- `rental_scheduler/templates/rental_scheduler/jobs/job_import_json.html` (trailing newlines only)
+`ManifestStaticFilesStorage` **requires** that `collectstatic` has been run so it can read `staticfiles.json` and map:
 
-**Already integrated upstream (no port needed):**
-- `rental_scheduler/templates/rental_scheduler/jobs/_job_form_partial.html`: correct datetime formatting (`Y-m-d\\TH:i`) for non-all-day edits is already present on updated master.
-- `rental_scheduler/templates/rental_scheduler/calendar.html`: search input padding fix is already present (inline `padding-left: 36px;`).
+- `rental_scheduler/img/favicon-32x32.png` → `rental_scheduler/img/favicon-32x32.<hash>.png`
 
-**Meaningful changes (candidate “must keep”):**
-- `rental_scheduler/utils/recurrence.py`
-  - Monthly recurrence should preserve the same weekday occurrence (e.g., “3rd Friday” stays “3rd Friday”)
-  - Yearly recurrence should preserve the same ISO week + weekday
-  - Recurring instances should copy call reminder flags and create `CallReminder` rows for each instance
-- `rental_scheduler/models.py`
-  - Add `daily` + `weekly` to `REPEAT_CHOICES` (aligns with existing migration choices)
-  - Make `create_recurrence_rule()` accept `until_date` as date/datetime/ISO string and store a date-only value
-- `rental_scheduler/views.py`
-  - Add `date_filter=two_years` to `JobListView`
-  - Make job search match phone numbers by **digits** (so searching `6208887050` matches `(620) 888-7050`)
-  - Improve sorting robustness (handle `-field` and set default sort for the 2-year filter)
-  - Validate/parses recurrence inputs in `job_create_submit` (interval/count/until date)
-- `rental_scheduler/static/rental_scheduler/js/job_calendar.js` + `rental_scheduler/templates/rental_scheduler/calendar.html`
-  - Add a “Today sidebar” toggle button with persisted state
-  - Add “Events within 2 years” option in calendar search
-  - Add “Close Search” button
-  - Add delayed tooltips on search-result rows (same UX as calendar event tooltips)
-- `rental_scheduler/static/rental_scheduler/js/workspace.js`
-  - Add delayed tooltips on workspace tabs by fetching job details and reusing `jobCalendar.showEventTooltip()`
+During `pytest`, **`collectstatic` is not run**, so there is no manifest mapping available.
+When `{% static %}` calls `staticfiles_storage.url(...)`, Django tries to look up the hashed name in the manifest and raises:
 
-**Probably don’t port as-is:**
-- `rental_scheduler/templates/rental_scheduler/partials/job_row.html`: WIP added many `data-*` attributes, but references old/removed fields (`job.business`, `job.contact`, `job.trailer`). If we want row tooltips, we should implement them by fetching `/api/jobs/<id>/detail/` (or adapt attributes to current model).
+- `Missing staticfiles manifest entry for ...`
 
-### 3) Phase 1 “must keep” candidates (shortlist)
+### Root cause B — only one test module opts out of manifest storage
+There is already a module-level fixture in:
 
-1. **Recurrence correctness**: monthly/yearly patterns should stay aligned to “Nth weekday” and ISO-week rules.
-2. **Call reminders for recurring instances**: recurring generation should propagate reminder settings and create per-instance `CallReminder` rows.
-3. **Calendar search “within 2 years”**: add UI option + backend filter support.
-4. **Phone digit search**: searching digits should match formatted phone numbers.
-5. **Recurrence validation in form submit**: prevent bad interval/count/until input and avoid passing raw strings into model methods.
-6. **Today sidebar toggle**: make Today column hide/show, persisted in `localStorage`.
-7. **Tooltips**: optional but nice—job row hover tooltip + workspace tab hover tooltip.
+- `rental_scheduler/tests/test_partials.py`
 
-## Concrete port plan (Phase 2+) — recommended commit order
+…that switches tests to `StaticFilesStorage` specifically “to avoid needing collectstatic”.
+But that fixture only applies to that single test module.
+All other template-rendering tests still use the project default (`ManifestStaticFilesStorage`) and crash.
 
-Each item below should be a **separate commit** on `port/wip-2025-12-16` with a message like: `Port: <intent> (from 834babd)`.
+### Root cause C — the base template touches static very early
+Even though the favicon images *do* exist in:
 
-### Commit A — Models: recurrence rule parsing + repeat choices
+- `rental_scheduler/static/rental_scheduler/img/`
 
-Files:
-- `rental_scheduler/models.py`
+…with `ManifestStaticFilesStorage`, existence in app static dirs is not enough — **the manifest mapping must exist**.
+Because the favicon is the first `{% static %}` call in the `<head>`, template rendering fails immediately.
 
-Changes:
-- Add `('daily', 'Daily')` and `('weekly', 'Weekly')` to `REPEAT_CHOICES` (align with migration `0023_*` choices).
-- Update `create_recurrence_rule(..., until_date=...)` to accept:
-  - `date`
-  - `datetime`
-  - ISO-8601 string (e.g., `YYYY-MM-DD` or full datetime)
-  and store `recurrence_rule['until_date']` as a **date-only `YYYY-MM-DD` string**.
+---
 
-Tests:
-- Add a small unit test that `create_recurrence_rule(until_date="2026-01-15")` succeeds and stores `"2026-01-15"`.
+## “Root cause of each failing test” (grouped)
 
-### Commit B — Recurrence engine: monthly/yearly correctness + call reminders for instances
+All 41 failures you pasted are the same underlying defect, just triggered from different pages/tests:
 
-Files:
-- `rental_scheduler/utils/recurrence.py`
+- **`rental_scheduler/tests/test_calendar_template.py`**: calendar page render extends `base.html` → fails on favicon static lookup.
+- **`rental_scheduler/tests/test_date_filter_ui.py`**: calendar/job list pages extend `base.html` → same failure.
+- **`rental_scheduler/tests/test_job_list_view_filters.py`**: job list pages extend `base.html` → same failure.
+- **`rental_scheduler/tests/test_recurrence_generation.py`**: partials/pages still extend `base.html` (or render templates that include it) → same failure.
 
-Changes:
-- Monthly: preserve “Nth weekday” (e.g., 3rd Friday → 3rd Friday next month).
-- Yearly: preserve ISO week + weekday in the target year.
-- When generating instances:
-  - copy `has_call_reminder` and `call_reminder_weeks_prior`
-  - reset `call_reminder_completed=False`
-  - create a `CallReminder` row for each saved instance (using `get_call_reminder_sunday`)
+So the correct fix is **one change** in how staticfiles storage is configured for tests (or one change to run `collectstatic` during tests).
 
-Tests:
-- Monthly Nth-weekday test (e.g., known 3rd-Friday date → next month’s 3rd Friday).
-- Call reminder propagation test: generating instances with call reminders creates corresponding `CallReminder` rows.
+---
 
-### Commit C — Views: validate recurring inputs on `job_create_submit`
+## Fix plan (actionable, step-by-step)
 
-Files:
-- `rental_scheduler/views.py`
+### Recommended approach (fast + keeps tests focused): use simple staticfiles storage in tests
 
-Changes:
-- Validate `recurrence_interval` and `recurrence_count` are integers, `>= 1`, and `count <= 500`.
-- Parse `recurrence_until` from `YYYY-MM-DD` into a `date` (show a friendly message on parse failure).
+**Goal**: tests should not require a build/collect step to render templates; they should validate HTML structure/behavior.
 
-### Commit D — Job list + calendar search: two-year filter + phone digit search + sorting robustness
+1. **Add a global autouse pytest fixture** in repo-root `conftest.py` that overrides `settings.STORAGES["staticfiles"]` to use `django.contrib.staticfiles.storage.StaticFilesStorage`.
+   - This mirrors what you already do in `rental_scheduler/tests/test_partials.py`, but applies to the entire test suite.
+2. **Remove or simplify the module-level fixture** in `rental_scheduler/tests/test_partials.py`.
+   - Keep it only if you want to be explicit in that module; otherwise it becomes redundant and can drift.
+3. **Run a single previously-failing test** to confirm the stacktrace is gone:
 
-Files:
-- `rental_scheduler/views.py`
+   - `python -m pytest rental_scheduler/tests/test_calendar_template.py::TestCalendarTemplateGuardrails::test_calendar_page_loads -q`
 
-Changes:
-- Add `date_filter == 'two_years'` support in `JobListView` (now → now + 730 days).
-- Implement phone digit search by annotating a `phone_digits` field and matching `icontains` against the digit-only input.
-- Sorting: accept sort keys with leading `-`, and default to ascending for the `two_years` view unless explicitly overridden.
+4. **Run full suite**:
 
-### Commit E — Calendar UI: two-year option + close search + Today sidebar toggle + search-row tooltips
+   - `python -m pytest`
 
-Files:
-- `rental_scheduler/templates/rental_scheduler/calendar.html`
-- `rental_scheduler/static/rental_scheduler/js/job_calendar.js`
+5. **If new failures appear after templates can render**, triage them next (they’ll now be “real” functional regressions rather than template boot failures).
 
-Changes:
-- Add “Events within 2 years” radio option in the calendar search panel.
-- Add “Close Search” button (calls existing `toggleSearchPanel()`).
-- Add Today sidebar toggle button (persisted in `localStorage`) and hide/show `#todaySidebar`.
-- Add delayed hover tooltips for search-result job rows.
-  - Recommended implementation: fetch `/api/jobs/<id>/detail/` (row already has `data-job-id`) to avoid stuffing large notes into `data-*` attributes.
+**Why this is recommended right now**:
+- It unblocks the test suite immediately.
+- It matches the existing intent in `test_partials.py` (“avoid needing collectstatic”).
+- It prevents front-end build/asset pipeline details from making unit/integration tests brittle.
 
-Optional:
-- Extend `job_detail_api` to include `calendar_name` so tooltips can show it.
+---
 
-### Commit F — Workspace UI: tab hover tooltip
+### Alternative approach (production-like): run `collectstatic` during tests
 
-Files:
-- `rental_scheduler/static/rental_scheduler/js/workspace.js`
+**Goal**: keep `ManifestStaticFilesStorage` in tests so tests fail if any template references a missing static asset.
 
-Changes:
-- Add 500ms delayed hover tooltip for workspace tabs by fetching `/api/jobs/<id>/detail/` and calling `jobCalendar.showEventTooltip()`.
+1. Keep `ManifestStaticFilesStorage` enabled.
+2. In test setup (e.g. `pytest_configure` in root `conftest.py`), run:
 
-## Validation checklist (after each commit + at the end)
+   - `python manage.py collectstatic --noinput`
 
-- Run targeted tests for the touched area (then full suite at the end).
-- Manual smoke:
-  - calendar loads, Today sidebar toggle persists across refresh
-  - calendar search “within 2 years” returns results
-  - searching digits finds formatted phone numbers
-  - creating a recurring job with a call reminder produces instance call reminders
-  - recurrence “until date” does not crash and validates properly
+3. Ensure `STATIC_ROOT` points to a test-only temp folder so the repo working tree isn’t polluted.
+4. Run pytest.
 
-## Merge path
+**Tradeoffs**:
+- Slower tests.
+- More moving parts (permissions, temp dirs, any static build steps, etc.).
+- Can be worth it later as a dedicated CI job, but it’s usually overkill for most unit/integration tests.
 
-- Open PR: `port/wip-2025-12-16` → `master`
-- PR description should include:
-  - list of ported intents (Commits A–F)
-  - note that `origin/wip/steph-pre-sync-2025-12-16` remains untouched as archival reference
+---
+
+### Optional hardening (recommended soon): make static storage environment-aware
+
+Right now `DEBUG` is hardcoded `True`, and `ManifestStaticFilesStorage` is always enabled.
+That’s brittle (dev pages can break unless you always run collectstatic).
+
+1. Make `DEBUG` driven by env (`DEBUG=1/0`).
+2. Choose the staticfiles backend based on env:
+   - Dev/test: `StaticFilesStorage`
+   - Production: `ManifestStaticFilesStorage` (or WhiteNoise’s compressed manifest storage)
+3. Update deployment docs/scripts to always run `collectstatic` in production builds.
+
+---
+
+## Validation checklist (definition of done)
+
+- [ ] `python -m pytest` runs without any `Missing staticfiles manifest entry` errors.
+- [ ] `base.html` renders in tests (calendar page returns 200).
+- [ ] No test relies on `collectstatic` unless explicitly intended.
+- [ ] If keeping manifest in prod: deploy pipeline runs `collectstatic --noinput` and serves `STATIC_ROOT`.

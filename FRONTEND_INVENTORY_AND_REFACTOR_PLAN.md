@@ -419,16 +419,157 @@ Definition of Done:
 
 ---
 
-### Phase 1 — Extract inline JS out of templates (no behavior changes)
+#### Manual Smoke Checklist (Phase 0)
+
+Use this checklist before any significant refactor to verify core UX flows still work. Run against a local dev server (`python manage.py runserver`).
+
+##### 1. Calendar Load
+- [ ] Navigate to `/` (calendar page)
+- [ ] **Expected**: 4-week month view is visible, no blocking JS errors in console
+- [ ] **Expected**: FullCalendar toolbar with navigation buttons is visible
+- [ ] **Expected**: Events (if any) render without errors
+
+##### 2. Search Panel
+- [ ] Click the search toggle button (magnifying glass or search icon in toolbar)
+- [ ] **Expected**: Search panel slides open (top area, ~50vh)
+- [ ] Reload the page
+- [ ] **Expected**: Search panel state persists (open if it was open)
+- [ ] Type a search query and press Enter
+- [ ] **Expected**: Results appear in the panel (or "no results" message)
+- [ ] Click a result row
+- [ ] **Expected**: Job opens in the floating job panel
+
+##### 3. Today Sidebar
+- [ ] Click the Today sidebar toggle (if closed)
+- [ ] **Expected**: Sidebar slides open on the right side
+- [ ] Drag the resize handle to change sidebar width
+- [ ] **Expected**: Width changes and is persisted after reload
+- [ ] Click an item in the Today list
+- [ ] **Expected**: Corresponding job opens in the job panel
+- [ ] Toggle sidebar closed, then reload
+- [ ] **Expected**: Sidebar stays closed (state persisted)
+
+##### 4. Job Panel (Floating Editor)
+- [ ] Click the "Add Job" button in the calendar toolbar
+- [ ] **Expected**: Floating job panel opens with a new job form
+- [ ] Drag the panel title bar
+- [ ] **Expected**: Panel moves with the cursor
+- [ ] Drag the panel resize handles (corners/edges)
+- [ ] **Expected**: Panel resizes; dimensions persist after reload
+- [ ] Click outside the panel (on the calendar background)
+- [ ] **Expected**: Panel closes (if no unsaved changes)
+
+##### 5. Workspace Tabs
+- [ ] Open a job in the panel (from calendar event or search)
+- [ ] Click the minimize button (↓ icon in panel header)
+- [ ] **Expected**: Job panel closes; a tab appears in the workspace bar at the bottom
+- [ ] Open another job (click different calendar event)
+- [ ] Minimize that job too
+- [ ] **Expected**: Two tabs visible in workspace bar
+- [ ] Click the first tab
+- [ ] **Expected**: First job reopens in the panel
+- [ ] Close a tab (X button on tab)
+- [ ] **Expected**: Tab disappears; if it was the active job, panel closes
+
+##### 6. Drafts (Unsaved Changes Persistence)
+- [ ] Click "Add Job" to create a new job
+- [ ] Fill in **only** `contact_name` (leave required fields like `business_name` empty)
+- [ ] Click the minimize button
+- [ ] **Expected**: A tab appears with an "unsaved dot" indicator
+- [ ] Reload the page
+- [ ] **Expected**: Draft tab persists in the workspace bar
+- [ ] Click the draft tab
+- [ ] **Expected**: Panel opens with the previously entered `contact_name` restored
+
+##### 7. Printing (Save-then-Print)
+- [ ] Open an existing job in the panel
+- [ ] Click one of the print buttons (Work Order, Customer WO, or Invoice)
+- [ ] **Expected**: Job is saved (if needed), then print dialog/preview appears
+- [ ] Cancel the print dialog
+- [ ] **Expected**: No errors; calendar remains functional
+
+##### 8. Recurring Virtual Occurrence (Materialize)
+- [ ] Create a job with recurrence enabled (weekly, end mode "never")
+- [ ] Save the job and close the panel
+- [ ] Navigate to a future date where a virtual occurrence should appear
+- [ ] **Expected**: Virtual occurrence event is visible (may have distinct styling)
+- [ ] Click the virtual occurrence
+- [ ] **Expected**: Loading indicator appears briefly
+- [ ] **Expected**: Job panel opens with the materialized job (now a real job with its own ID)
+- [ ] Close the panel and verify the event is now a regular job event
+
+##### 9. Call Reminders (Standalone)
+- [ ] Double-click a **Sunday** cell on the calendar
+- [ ] **Expected**: Call reminder creation form opens (not job form)
+- [ ] Fill in short notes and click "Create Call Reminder"
+- [ ] **Expected**: Reminder event appears on the calendar for that date
+- [ ] Click the reminder event
+- [ ] **Expected**: Call reminder panel opens with notes textarea and action buttons
+- [ ] Edit the notes and click "Save & Close"
+- [ ] Click the reminder event again
+- [ ] **Expected**: Updated notes are visible
+- [ ] Click "Complete" button
+- [ ] **Expected**: Reminder marked complete (may show checkmark or styling change)
+- [ ] Click "Delete" button (if available) and confirm
+- [ ] **Expected**: Reminder event disappears from calendar
+
+---
+
+### Phase 1 — Extract inline JS out of templates (no behavior changes) ✅ COMPLETED
+
 **Goal**: make code movable and testable.
 
-- Move from templates into dedicated static files:
-  - `calendar.html` inline behaviors (sidebar resize, scroll prevention, search form submission)
-  - `_job_form_partial.html` inline behaviors (calendar select cloning, printing, required validation)
-  - `job_list.html` inline behaviors (dropdown + keyboard navigation)
+**Status**: ✅ **COMPLETED** (2025-12-18)
+
+**What was done**:
+
+1. **Created `gts_init.js`** - Idempotent initialization helpers
+   - `GTS.initOnce(key, fn)` - Run once globally
+   - `GTS.markElInitialized(el, key)` / `GTS.isElInitialized(el, key)` - Element-level guards
+   - `GTS.onDomReady(fn)`, `GTS.onHtmxLoad(fn)`, `GTS.onHtmxAfterSwap(fn)` - DOM/HTMX hooks
+   - `GTS.getCookie()`, `GTS.showToast()` - Convenience wrappers
+
+2. **Created `entrypoints/calendar_page.js`** - Extracted from `calendar.html`
+   - Sidebar resize with localStorage persistence
+   - Scroll prevention and wheel routing
+   - Search panel behaviors (dropdown, form submit, keyboard navigation, row click)
+   - Popover repositioning
+
+3. **Created `entrypoints/jobs_list_page.js`** - Extracted from `job_list.html`
+   - Calendar dropdown with selection label
+   - Date filter radios with custom range visibility
+   - localStorage persistence (`job-list-filters`)
+   - Search navigation (Enter submits once, then cycles highlights)
+   - Event-delegated row click/hover handlers
+
+4. **Created `entrypoints/job_form_partial.js`** - Extracted from `_job_form_partial.html`
+   - After-request orchestration (replaced inline `hx-on::after-request`)
+   - Required-field validation interceptor
+   - Print flow (save-then-print + iframe)
+   - Status update / delete actions via event delegation
+   - Recurrence end-mode toggle
+
+5. **Created `entrypoints/panel_shell.js`** - Extracted from `includes/panel.html`
+   - Panel resize handles (right, bottom, corner)
+   - Persistence to localStorage (`gts-panel-width`, `gts-panel-height`)
+   - HTMX refresh binding
+
+**Template changes**:
+- `calendar.html`: Keeps only `window.calendarConfig = {...}` inline
+- `job_list.html`: Has only tiny config object (`window.jobListConfig`)
+- `_job_form_partial.html`: Uses `data-gts-job-form="1"` marker, minimal inline init
+- `includes/panel.html`: No inline JS
+
+**Files created**:
+- `rental_scheduler/static/rental_scheduler/js/gts_init.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/calendar_page.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/jobs_list_page.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/panel_shell.js`
 
 Definition of Done:
-- Template scripts are tiny (mostly `window.calendarConfig = ...` only).
+- ✅ Template scripts are tiny (mostly `window.calendarConfig = ...` only).
+- ✅ No duplicate handlers after repeated open/close/swap actions (idempotent init).
 
 ---
 

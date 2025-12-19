@@ -11,17 +11,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 
-@pytest.fixture(autouse=True)
-def use_simple_staticfiles_storage(settings):
-    """Use simple staticfiles storage to avoid needing collectstatic."""
-    settings.STORAGES = {
-        "default": {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
-        },
-        "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-        },
-    }
+# Note: StaticFilesStorage override is now handled globally in root conftest.py
 
 
 @pytest.mark.django_db
