@@ -234,14 +234,10 @@ Because panel + workspace are global, *every page* shares state and side-effects
   - `window.JobPanel.currentDraftId`
   - `window.JobPanel.isSwitchingJobs` (used by job form validation to skip “human submit” checks)
 
-**Known drift / cleanup targets (panel)**
-- `panel.js` contains both a **vanilla implementation** and an **Alpine-compatible mode** (it checks for `typeof Alpine !== 'undefined'`).
-  - Alpine attributes exist in some templates (`x-data=...`) but Alpine is not loaded in `base.html`.
-  - Decide whether Alpine is actually part of the app. If not, remove the Alpine branch.
-- Panel resize is implemented twice:
-  - Inline script in `includes/panel.html` stores `gts-panel-width/height`
-  - Panel state in `panel.js` stores `jobPanelState`
-  - Consolidate into one source of truth.
+**Known drift / cleanup targets (panel)** ✅ RESOLVED IN PHASE 4
+- ~~`panel.js` contains both a **vanilla implementation** and an **Alpine-compatible mode**~~ → Alpine code removed; vanilla-only implementation.
+- ~~Alpine attributes exist in some templates (`x-data=...`)~~ → All Alpine directives removed from templates.
+- ~~Panel resize is implemented twice~~ → Consolidated into `panel.js`; legacy keys (`gts-panel-width/height`) are migrated to `jobPanelState` on first load.
 
 ---
 
@@ -663,19 +659,48 @@ Definition of Done:
 
 ---
 
-### Phase 4 — Panel cleanup (choose one implementation)
+### Phase 4 — Panel cleanup (choose one implementation) ✅ COMPLETED
 **Goal**: one panel implementation, one state store.
 
-- Decide whether Alpine is truly supported. If not:
-  - remove Alpine compatibility paths from `panel.js`
-  - remove leftover `x-data` usage or load Alpine intentionally
-- Consolidate panel persistence:
-  - pick **one**: `jobPanelState` OR `gts-panel-width/height` (prefer a single structured key)
-  - move resize logic into `panel.js` (not in template)
+**Status**: ✅ **COMPLETED** (2025-12-19)
+
+**What was done**:
+
+1. **Made `jobPanelState` the single source of truth for panel persistence**
+   - Updated `save()` to capture `w/h` from `#job-panel.offsetWidth/offsetHeight`
+   - Updated `load()` to migrate legacy `gts-panel-width/height` keys on first load
+   - After migration, legacy keys are removed to avoid drift
+   - Added `applyPanelDimensions()` helper to apply saved dimensions on init
+
+2. **Moved resize + refresh binding into `panel.js`**
+   - Ported resize logic (right, bottom, corner handles) from `panel_shell.js`
+   - Ported HTMX refresh binding from `panel_shell.js`
+   - Removed `panel_shell.js` load from `base.html`
+   - Deleted `rental_scheduler/static/rental_scheduler/js/entrypoints/panel_shell.js`
+   - Updated `includes/panel.html` comment to reference `panel.js`
+
+3. **Removed Alpine compatibility code from `panel.js`**
+   - Removed `isAlpineMode` variable
+   - Simplified `initPanel()` to use vanilla JS directly (no Alpine detection)
+   - Deleted the entire `window.jobPanel = function jobPanel() {...}` Alpine component factory (~400 lines)
+
+4. **Removed leftover Alpine directives from templates**
+   - `workorder_detail.html`: Replaced Alpine dropdown (`x-data`, `x-show`, `@click`) with vanilla JS click-toggle + click-away handler
+   - `components/modal.html`: Deleted unused file (no includes found in codebase)
+
+**Files modified**:
+- `rental_scheduler/static/rental_scheduler/js/panel.js` (major refactor)
+- `rental_scheduler/templates/base.html` (removed `panel_shell.js` load)
+- `rental_scheduler/templates/rental_scheduler/includes/panel.html` (updated comment)
+- `rental_scheduler/templates/rental_scheduler/workorders/workorder_detail.html` (replaced Alpine with vanilla JS)
+
+**Files deleted**:
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/panel_shell.js`
+- `rental_scheduler/templates/rental_scheduler/components/modal.html`
 
 Definition of Done:
-- One codepath for panel behavior.
-- One place to change panel persistence.
+- ✅ One codepath for panel behavior (vanilla JS only).
+- ✅ One place to change panel persistence (`jobPanelState` key only).
 
 ---
 
@@ -741,9 +766,9 @@ Keep `panel.js` + `workspace.js` facades initially, then shrink them to wrappers
 - `cal-events-cache:*` (per-view cached event payloads)
 
 ### Panel
-- `jobPanelState`
-- `gts-panel-width`
-- `gts-panel-height`
+- `jobPanelState` (canonical store for x, y, w, h, docked, title, isOpen)
+- ~~`gts-panel-width`~~ (deprecated: migrated to `jobPanelState.w` in Phase 4)
+- ~~`gts-panel-height`~~ (deprecated: migrated to `jobPanelState.h` in Phase 4)
 - `gts-job-initial-save-attempted:*`
 
 ### Workspace

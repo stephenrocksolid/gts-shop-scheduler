@@ -12,13 +12,12 @@
         <div class="flex justify-between items-center mb-6">
             <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
             <div class="flex space-x-3">
-                <div class="relative" x-data="{ open: false }">
-                    <button @click="open = !open" 
-                            class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 print:hidden">
+                <div class="relative print-options-dropdown">
+                    <button type="button"
+                            class="print-options-toggle bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 print:hidden">
                         Print Options ▼
                     </button>
-                    <div x-show="open" @click.away="open = false" 
-                         class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50">
+                    <div class="print-options-menu hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50">
                         <a href="{% url 'rental_scheduler:workorder_print' work_order.pk %}" 
                            class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                             Print Internal Copy
@@ -384,6 +383,33 @@ function calculateLineTotal() {
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     new WorkOrderManager();
+    
+    // Print Options dropdown (vanilla JS replacement for Alpine)
+    const dropdown = document.querySelector('.print-options-dropdown');
+    const toggle = dropdown ? dropdown.querySelector('.print-options-toggle') : null;
+    const menu = dropdown ? dropdown.querySelector('.print-options-menu') : null;
+    
+    if (toggle && menu) {
+        // Toggle menu on button click
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.classList.toggle('hidden');
+        });
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!dropdown.contains(e.target)) {
+                menu.classList.add('hidden');
+            }
+        });
+        
+        // Close menu on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                menu.classList.add('hidden');
+            }
+        });
+    }
 });
 </script>
 {% endblock %}

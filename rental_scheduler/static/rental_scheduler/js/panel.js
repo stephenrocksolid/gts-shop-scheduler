@@ -12,7 +12,6 @@
 
   // Initialize global API immediately
   let panelInstance = null;
-  let isAlpineMode = false;
 
   // Queue for operations before panel is ready
   let operationQueue = [];
@@ -1487,11 +1486,145 @@
       },
 
       init() {
+        // Apply saved dimensions to panel element
+        applyPanelDimensions(panelEl, this.w, this.h);
         this.updatePosition();
         this.updateVisibility();
         this.setupDragging();
         this.setupButtons();
         this.setupOutsideClick();
+        this.setupResize();
+        this.setupRefreshBinding();
+      },
+
+      // ========================================================================
+      // PANEL RESIZE (moved from panel_shell.js)
+      // ========================================================================
+      setupResize() {
+        const handleRight = document.getElementById('panel-resize-handle-right');
+        const handleBottom = document.getElementById('panel-resize-handle-bottom');
+        const handleCorner = document.getElementById('panel-resize-handle-corner');
+
+        if (!handleRight || !handleBottom || !handleCorner) return;
+
+        let isResizing = false;
+        let resizeDirection = '';
+        let startX = 0;
+        let startY = 0;
+        let startWidth = 0;
+        let startHeight = 0;
+        const self = this;
+
+        const startResize = (e, direction) => {
+          isResizing = true;
+          resizeDirection = direction;
+          startX = e.clientX;
+          startY = e.clientY;
+          startWidth = panelEl.offsetWidth;
+          startHeight = panelEl.offsetHeight;
+
+          if (direction === 'right' || direction === 'corner') {
+            handleRight.classList.add('active');
+          }
+          if (direction === 'bottom' || direction === 'corner') {
+            handleBottom.classList.add('active');
+          }
+
+          document.body.style.cursor = direction === 'right' ? 'ew-resize' :
+            direction === 'bottom' ? 'ns-resize' : 'nwse-resize';
+          document.body.style.userSelect = 'none';
+          e.preventDefault();
+          e.stopPropagation();
+        };
+
+        const doResize = (e) => {
+          if (!isResizing) return;
+
+          const maxW = window.innerWidth * MAX_PANEL_WIDTH_RATIO;
+          const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+
+          if (resizeDirection === 'right' || resizeDirection === 'corner') {
+            const deltaX = e.clientX - startX;
+            let newWidth = startWidth + deltaX;
+            newWidth = clamp(newWidth, MIN_PANEL_WIDTH, maxW);
+            panelEl.style.width = newWidth + 'px';
+            self.w = newWidth;
+          }
+
+          if (resizeDirection === 'bottom' || resizeDirection === 'corner') {
+            const deltaY = e.clientY - startY;
+            let newHeight = startHeight + deltaY;
+            newHeight = clamp(newHeight, MIN_PANEL_HEIGHT, maxH);
+            panelEl.style.height = newHeight + 'px';
+            self.h = newHeight;
+          }
+        };
+
+        const endResize = () => {
+          if (isResizing) {
+            isResizing = false;
+            handleRight.classList.remove('active');
+            handleBottom.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+
+            // Constrain panel to viewport after resize
+            self.constrainToViewport();
+
+            // Update stored dimensions
+            self.w = panelEl.offsetWidth;
+            self.h = panelEl.offsetHeight;
+
+            // Save state (this now captures w/h from DOM)
+            save(self);
+          }
+        };
+
+        // Right edge resize
+        handleRight.addEventListener('mousedown', (e) => startResize(e, 'right'));
+
+        // Bottom edge resize
+        handleBottom.addEventListener('mousedown', (e) => startResize(e, 'bottom'));
+
+        // Corner resize (both directions)
+        handleCorner.addEventListener('mousedown', (e) => startResize(e, 'corner'));
+
+        // Document-level listeners for resize
+        document.addEventListener('mousemove', doResize);
+        document.addEventListener('mouseup', endResize);
+
+        // Observe when panel becomes visible and constrain it
+        const observer = new MutationObserver((mutations) => {
+          mutations.forEach((mutation) => {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+              if (!panelEl.classList.contains('hidden')) {
+                setTimeout(() => self.constrainToViewport(), 10);
+              }
+            }
+          });
+        });
+        observer.observe(panelEl, { attributes: true });
+      },
+
+      // ========================================================================
+      // HTMX REFRESH BINDING (moved from panel_shell.js)
+      // ========================================================================
+      setupRefreshBinding() {
+        // Bind refresh event to panel body for HTMX reload trigger
+        document.addEventListener('htmx:load', function() {
+          document.querySelectorAll('#job-panel .panel-body').forEach(function(el) {
+            // Guard against double-binding
+            if (el.dataset.refreshBound === '1') return;
+            el.dataset.refreshBound = '1';
+
+            el.addEventListener('refresh', function() {
+              const hxGet = el.getAttribute('hx-get');
+              if (hxGet && typeof htmx !== 'undefined') {
+                htmx.ajax('GET', hxGet, { target: el });
+              }
+            });
+          });
+        });
       }
     };
 
@@ -1609,410 +1742,6 @@
     },
     // Track draft ID for new unsaved jobs (used for draft promotion)
     currentDraftId: null
-  };
-
-  window.jobPanel = function jobPanel() {
-    return {
-      isOpen: false,
-      title: 'Job',
-      x: 80, y: 80, w: 520, h: null,
-      docked: false,
-      dragging: false, sx: 0, sy: 0,
-      currentJobId: null, // Track current job for workspace integration
-      get panelStyle() {
-        if (this.docked) {
-          return `top:80px; right:16px; left:auto; transform:none;`;
-        }
-        return `top:0; left:0; transform: translate(${this.x}px, ${this.y}px);`;
-      },
-      open() { this.isOpen = true; this.updateMinimizeButton(); save(this); },
-      close(skipUnsavedCheck) {
-        // Check for unsaved changes before closing (unless explicitly skipped)
-        if (!skipUnsavedCheck && this.hasUnsavedChanges()) {
-          if (!confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
-            return; // User cancelled, don't close
-          }
-        }
-
-        this.isOpen = false;
-        this.currentJobId = null; // Clear current job ID when closing
-        this.updateMinimizeButton(); // Hide minimize button
-        save(this);
-      },
-      setTitle(t) { this.title = t || 'Job'; save(this); },
-      setCurrentJobId(jobId) {
-        this.currentJobId = normalizeJobId(jobId);
-        this.updateMinimizeButton();
-      },
-      updateMinimizeButton() {
-        const minimizeBtn = document.getElementById('panel-workspace-minimize-btn');
-        if (!minimizeBtn) return;
-
-        // Always show minimize button when panel is open
-        if (this.isOpen) {
-          minimizeBtn.style.display = 'inline-flex';
-        } else {
-          minimizeBtn.style.display = 'none';
-        }
-      },
-      toggleDock() { this.docked = !this.docked; save(this); },
-      hasUnsavedChanges() {
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) return false;
-
-        // Check for any form inputs that have been modified
-        const inputs = panelBody.querySelectorAll('input, select, textarea');
-        for (const input of inputs) {
-          // Skip hidden inputs and buttons
-          if (input.type === 'hidden' || input.type === 'submit' || input.type === 'button') {
-            continue;
-          }
-
-          // Skip inputs without a name attribute - they don't submit and are UI-only
-          // (e.g., flatpickr alt display inputs, cloned header selects, etc.)
-          if (!input.name) {
-            continue;
-          }
-
-          // Check if the current value differs from the original value
-          if (input.hasAttribute('data-original-value')) {
-            const originalValue = input.getAttribute('data-original-value');
-            const currentValue = input.value;
-            if (originalValue !== currentValue) {
-              return true;
-            }
-          } else if (input.value !== '') {
-            // If no original value stored but input has a value, it might be a change
-            // This is a fallback for inputs that weren't tracked from the start
-            return true;
-          }
-        }
-
-        return false;
-      },
-      trackFormChanges() {
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) {
-          console.log('trackFormChanges: No panel body found');
-          return;
-        }
-
-        // Store original values for all form inputs
-        const inputs = panelBody.querySelectorAll('input, select, textarea');
-        console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
-        inputs.forEach(input => {
-          // Skip inputs without a name attribute - they don't submit and are UI-only
-          if (!input.name) {
-            return;
-          }
-          if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
-            input.setAttribute('data-original-value', input.value);
-          }
-        });
-      },
-      clearUnsavedChanges() {
-        // Reset tracking by updating all original values to current values
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) return;
-
-        const inputs = panelBody.querySelectorAll('input, select, textarea');
-        inputs.forEach(input => {
-          // Skip inputs without a name attribute - they don't submit and are UI-only
-          if (!input.name) {
-            return;
-          }
-          if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
-            input.setAttribute('data-original-value', input.value);
-          }
-        });
-      },
-      /**
-       * Check which required fields are missing from the form (Alpine version).
-       * Required fields: business_name, start_dt, end_dt, calendar
-       * @param {HTMLFormElement} form - The form element
-       * @returns {string[]} - Array of missing field names (empty if all present)
-       */
-      getRequiredMissing(form) {
-        if (!form) return ['form'];
-        const missing = [];
-
-        // Business name - required and must not be whitespace-only
-        const businessName = form.querySelector('input[name="business_name"]');
-        if (!businessName || !businessName.value.trim()) {
-          missing.push('business_name');
-        }
-
-        // Start date - required
-        const startDt = form.querySelector('input[name="start_dt"]');
-        if (!startDt || !startDt.value.trim()) {
-          missing.push('start_dt');
-        }
-
-        // End date - required
-        const endDt = form.querySelector('input[name="end_dt"]');
-        if (!endDt || !endDt.value.trim()) {
-          missing.push('end_dt');
-        }
-
-        // Calendar - required (select element)
-        const calendar = form.querySelector('select[name="calendar"]');
-        if (!calendar || !calendar.value) {
-          missing.push('calendar');
-        }
-
-        return missing;
-      },
-      /**
-       * Check if any required fields are missing (Alpine version).
-       * @param {HTMLFormElement} form - The form element
-       * @returns {boolean} - True if any required fields are missing
-       */
-      hasRequiredMissing(form) {
-        return this.getRequiredMissing(form).length > 0;
-      },
-      /**
-       * Save the form without causing page navigation (Alpine version).
-       * Uses HTMX if the form has hx-post, otherwise uses fetch().
-       * Handles draft promotion automatically on successful save.
-       * @param {Object|Function} optionsOrCallback - Options object or callback function
-       * @param {Function} callback - Called with result object: { successful, jobId, responseHtml, status, reason }
-       */
-      saveForm(optionsOrCallback, callback) {
-        // Handle backwards compatibility: saveForm(callback) vs saveForm(options, callback)
-        let options = { mode: 'autosave' };
-        if (typeof optionsOrCallback === 'function') {
-          callback = optionsOrCallback;
-        } else if (optionsOrCallback && typeof optionsOrCallback === 'object') {
-          options = { ...options, ...optionsOrCallback };
-        }
-
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) {
-          console.warn('Panel body not found');
-          if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null });
-          return;
-        }
-
-        const form = panelBody.querySelector('form');
-        if (!form) {
-          console.warn('Form not found in panel');
-          if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null });
-          return;
-        }
-
-        const self = this;
-        const mode = options.mode || 'autosave';
-
-        // Check for missing required fields
-        const missingFields = this.getRequiredMissing(form);
-        const hasMissing = missingFields.length > 0;
-
-        if (mode === 'manual') {
-          // Manual save mode: run HTML5 validation and show messages
-          if (hasMissing) {
-            // Trigger HTML5 validation display
-            if (!form.reportValidity()) {
-              GTS.toast.warning('Please fill in all required fields before saving.');
-              if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
-              return;
-            }
-          }
-        } else {
-          // Autosave mode: don't show validation popups, just return unsuccessful
-          if (hasMissing) {
-            console.log('Alpine saveForm autosave skipped: missing required fields', missingFields);
-            if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
-            return;
-          }
-        }
-
-        /**
-         * Handle draft promotion after successful save
-         */
-        const handleDraftPromotion = (jobId) => {
-          if (jobId && window.JobPanel.currentDraftId && window.JobWorkspace && window.JobWorkspace.promoteDraft) {
-            const draftId = window.JobPanel.currentDraftId;
-            window.JobWorkspace.promoteDraft(draftId, jobId, {});
-            window.JobPanel.currentDraftId = null;
-            console.log('Alpine: Promoted draft', draftId, 'to job', jobId);
-          }
-        };
-
-        // Check if form has HTMX attributes (hx-post, hx-put, etc.)
-        const hasHtmxPost = form.hasAttribute('hx-post') || form.hasAttribute('hx-put') ||
-          form.hasAttribute('hx-patch') || form.hasAttribute('hx-delete');
-
-        if (typeof htmx !== 'undefined' && hasHtmxPost) {
-          // Use HTMX submission - it won't navigate because the form has hx-* attrs
-          const afterRequestHandler = (event) => {
-            const xhr = event.detail.xhr;
-            const successful = event.detail.successful;
-            const status = xhr ? xhr.status : null;
-            const responseHtml = xhr ? xhr.responseText : null;
-            let jobId = null;
-
-            if (successful) {
-              // Clear unsaved changes tracking
-              self.clearUnsavedChanges();
-
-              // Capture job ID from HX-Trigger header
-              if (xhr) {
-                const triggerHeader = xhr.getResponseHeader('HX-Trigger');
-                if (triggerHeader) {
-                  try {
-                    const triggerData = JSON.parse(triggerHeader);
-                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
-                      jobId = normalizeJobId(triggerData.jobSaved.jobId);
-                      self.currentJobId = jobId;
-                      console.log('Captured job ID from trigger:', jobId);
-                    }
-                  } catch (e) {
-                    console.warn('Could not parse trigger data:', e);
-                  }
-                }
-              }
-
-              // Fallback: try to get from DOM
-              if (!jobId) {
-                const jobIdInput = form.querySelector('input[name="job_id"]');
-                if (jobIdInput && jobIdInput.value) {
-                  jobId = normalizeJobId(jobIdInput.value);
-                  self.currentJobId = jobId;
-                  console.log('Captured job ID from DOM fallback:', jobId);
-                }
-              }
-
-              // Handle draft promotion
-              handleDraftPromotion(jobId);
-
-              // Migrate warning key from temp to job ID
-              if (jobId && window.migrateWarningKeyToJobId) {
-                window.migrateWarningKeyToJobId(form, jobId);
-              }
-            } else {
-              console.error('Form submission failed with status:', status);
-            }
-
-            form.removeEventListener('htmx:afterRequest', afterRequestHandler);
-            if (callback) callback({ successful, jobId, responseHtml, status });
-          };
-
-          form.addEventListener('htmx:afterRequest', afterRequestHandler);
-          htmx.trigger(form, 'submit');
-
-        } else {
-          // Use fetch() to avoid navigation - never call form.submit()
-          const formData = new FormData(form);
-          const actionUrl = form.getAttribute('hx-post') || form.getAttribute('action') || window.location.href;
-          fetch(actionUrl, {
-            method: 'POST',
-            body: formData,
-            headers: window.GTS && window.GTS.csrf
-              ? GTS.csrf.headers({ 'X-Requested-With': 'XMLHttpRequest' }, { root: form })
-              : { 'X-Requested-With': 'XMLHttpRequest' }
-          })
-            .then(response => {
-              return response.text().then(html => ({
-                successful: response.ok,
-                status: response.status,
-                responseHtml: html,
-                headers: response.headers
-              }));
-            })
-            .then(result => {
-              let jobId = null;
-
-              if (result.successful) {
-                self.clearUnsavedChanges();
-
-                // Try to parse HX-Trigger from response headers
-                const triggerHeader = result.headers.get('HX-Trigger');
-                if (triggerHeader) {
-                  try {
-                    const triggerData = JSON.parse(triggerHeader);
-                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
-                      jobId = normalizeJobId(triggerData.jobSaved.jobId);
-                      self.currentJobId = jobId;
-                      console.log('Captured job ID from fetch trigger:', jobId);
-                    }
-                  } catch (e) {
-                    console.warn('Could not parse trigger data:', e);
-                  }
-                }
-
-                // Fallback: try to extract job_id from response HTML
-                if (!jobId && result.responseHtml) {
-                  const match = result.responseHtml.match(/name="job_id"\s+value="(\d+)"/);
-                  if (match) {
-                    jobId = normalizeJobId(match[1]);
-                    self.currentJobId = jobId;
-                    console.log('Captured job ID from response HTML:', jobId);
-                  }
-                }
-
-                // Handle draft promotion
-                handleDraftPromotion(jobId);
-
-                // Migrate warning key from temp to job ID
-                if (jobId && window.migrateWarningKeyToJobId) {
-                  window.migrateWarningKeyToJobId(form, jobId);
-                }
-              } else {
-                console.error('Form submission failed with status:', result.status);
-              }
-
-              if (callback) callback({
-                successful: result.successful,
-                jobId,
-                responseHtml: result.responseHtml,
-                status: result.status
-              });
-            })
-            .catch(error => {
-              console.error('Fetch error:', error);
-              if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null });
-            });
-        }
-      },
-      startDrag(e) {
-        if (this.docked) return;
-        const p = e.touches?.[0] ?? e;
-        this.dragging = true;
-        this.sx = p.clientX - this.x;
-        this.sy = p.clientY - this.y;
-        window.addEventListener('mousemove', this._move);
-        window.addEventListener('mouseup', this._stop);
-        window.addEventListener('touchmove', this._move, { passive: false });
-        window.addEventListener('touchend', this._stop);
-      },
-      _move: null,
-      _stop: null,
-      init() {
-        const self = this;
-        panelInstance = this; // Store reference for global API
-        const st = load() || {};
-        Object.assign(this, st);
-        this._move = function (ev) {
-          if (!self.dragging) return;
-          const p = ev.touches?.[0] ?? ev;
-          const maxX = window.innerWidth - 200; // keep header on-screen
-          const maxY = window.innerHeight - 48;
-          self.x = clamp(p.clientX - self.sx, 8, maxX);
-          self.y = clamp(p.clientY - self.sy, 8, maxY);
-          ev.preventDefault();
-        };
-        this._stop = function () {
-          self.dragging = false;
-          window.removeEventListener('mousemove', self._move);
-          window.removeEventListener('mouseup', self._stop);
-          window.removeEventListener('touchmove', self._move);
-          window.removeEventListener('touchend', self._stop);
-          save(self);
-        };
-        // Execute any queued operations now that panel is ready
-        flushQueue();
-      }
-    };
   };
 
   // ==========================================================================
@@ -2243,19 +1972,117 @@
     }
   });
 
+  // ==========================================================================
+  // PANEL STATE PERSISTENCE
+  // jobPanelState is the single source of truth for panel state
+  // Legacy keys (gts-panel-width, gts-panel-height) are migrated on first load
+  // ==========================================================================
+
+  const LEGACY_WIDTH_KEY = 'gts-panel-width';
+  const LEGACY_HEIGHT_KEY = 'gts-panel-height';
+  const MIN_PANEL_WIDTH = 200;
+  const MAX_PANEL_WIDTH_RATIO = 0.95;
+  const MIN_PANEL_HEIGHT = 100;
+  const MAX_PANEL_HEIGHT_RATIO = 0.99;
+
   function save(vm) {
-    const st = { x: vm.x, y: vm.y, w: vm.w, h: vm.h, docked: vm.docked, title: vm.title, isOpen: vm.isOpen };
+    // Capture current panel dimensions from DOM (ensures state matches reality)
+    const panelEl = document.getElementById('job-panel');
+    const currentW = panelEl ? panelEl.offsetWidth : vm.w;
+    const currentH = panelEl ? panelEl.offsetHeight : vm.h;
+
+    const st = {
+      x: vm.x,
+      y: vm.y,
+      w: currentW || vm.w,
+      h: currentH || vm.h,
+      docked: vm.docked,
+      title: vm.title,
+      isOpen: vm.isOpen
+    };
     if (window.GTS && window.GTS.storage) {
       GTS.storage.setJson(STORAGE_KEY, st);
     } else {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); } catch (e) { }
     }
   }
+
   function load() {
+    let st = null;
     if (window.GTS && window.GTS.storage) {
-      return GTS.storage.getJson(STORAGE_KEY, null);
+      st = GTS.storage.getJson(STORAGE_KEY, null);
+    } else {
+      try { st = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { st = null; }
     }
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { return null; }
+
+    // Migrate legacy width/height keys if w/h are missing or invalid
+    if (st) {
+      let needsMigration = false;
+      const maxW = window.innerWidth * MAX_PANEL_WIDTH_RATIO;
+      const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+
+      // Check and migrate width
+      if (!st.w || typeof st.w !== 'number' || st.w < MIN_PANEL_WIDTH) {
+        const legacyWidth = window.GTS && window.GTS.storage
+          ? GTS.storage.getRaw(LEGACY_WIDTH_KEY)
+          : localStorage.getItem(LEGACY_WIDTH_KEY);
+        if (legacyWidth) {
+          const parsed = parseInt(legacyWidth, 10);
+          if (!isNaN(parsed) && parsed >= MIN_PANEL_WIDTH) {
+            st.w = clamp(parsed, MIN_PANEL_WIDTH, maxW);
+            needsMigration = true;
+          }
+        }
+      }
+
+      // Check and migrate height
+      if (!st.h || typeof st.h !== 'number' || st.h < MIN_PANEL_HEIGHT) {
+        const legacyHeight = window.GTS && window.GTS.storage
+          ? GTS.storage.getRaw(LEGACY_HEIGHT_KEY)
+          : localStorage.getItem(LEGACY_HEIGHT_KEY);
+        if (legacyHeight) {
+          const parsed = parseInt(legacyHeight, 10);
+          if (!isNaN(parsed) && parsed >= MIN_PANEL_HEIGHT) {
+            st.h = clamp(parsed, MIN_PANEL_HEIGHT, maxH);
+            needsMigration = true;
+          }
+        }
+      }
+
+      // If we migrated, save the updated state and remove legacy keys
+      if (needsMigration) {
+        if (window.GTS && window.GTS.storage) {
+          GTS.storage.setJson(STORAGE_KEY, st);
+          GTS.storage.remove(LEGACY_WIDTH_KEY);
+          GTS.storage.remove(LEGACY_HEIGHT_KEY);
+        } else {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+            localStorage.removeItem(LEGACY_WIDTH_KEY);
+            localStorage.removeItem(LEGACY_HEIGHT_KEY);
+          } catch (e) { }
+        }
+        console.log('[Panel] Migrated legacy panel dimensions to jobPanelState');
+      }
+    }
+
+    return st;
+  }
+
+  /**
+   * Apply saved panel dimensions to the DOM element
+   */
+  function applyPanelDimensions(panelEl, w, h) {
+    if (!panelEl) return;
+    const maxW = window.innerWidth * MAX_PANEL_WIDTH_RATIO;
+    const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+
+    if (w && typeof w === 'number' && w >= MIN_PANEL_WIDTH) {
+      panelEl.style.width = clamp(w, MIN_PANEL_WIDTH, maxW) + 'px';
+    }
+    if (h && typeof h === 'number' && h >= MIN_PANEL_HEIGHT) {
+      panelEl.style.height = clamp(h, MIN_PANEL_HEIGHT, maxH) + 'px';
+    }
   }
 
   // Initialize panel when DOM is ready
@@ -2267,28 +2094,11 @@
   }
 
   function initPanel() {
-    // Wait a bit for Alpine to potentially load
-    setTimeout(() => {
-      const hasAlpine = typeof Alpine !== 'undefined' && Alpine !== null && typeof Alpine.start === 'function';
-      if (hasAlpine) {
-        isAlpineMode = true;
-        // Alpine will call init() on the component
-        // Wait a bit more for Alpine to initialize the component
-        setTimeout(() => {
-          if (!panelInstance) {
-            panelInstance = createVanillaPanel();
-            if (panelInstance) {
-              flushQueue();
-            }
-          }
-        }, 500);
-      } else {
-        isAlpineMode = false;
-        panelInstance = createVanillaPanel();
-        if (panelInstance) {
-          flushQueue();
-        }
-      }
-    }, 100);
+    // Initialize the vanilla JS panel implementation
+    // Note: Alpine support was removed in Phase 4 cleanup
+    panelInstance = createVanillaPanel();
+    if (panelInstance) {
+      flushQueue();
+    }
   }
 })();
