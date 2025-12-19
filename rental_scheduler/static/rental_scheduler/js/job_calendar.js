@@ -425,7 +425,13 @@
                 }
 
                 const isSunday = date.getDay() === 0;
-                const dateStr = date.toISOString().split('T')[0];
+                // IMPORTANT: avoid toISOString() here (UTC) which can shift the date by ±1 day
+                // depending on local timezone. We need the *local* YYYY-MM-DD to match the
+                // FullCalendar day cell `data-date` attribute and server expectations.
+                const yyyy = date.getFullYear();
+                const mm = String(date.getMonth() + 1).padStart(2, '0');
+                const dd = String(date.getDate()).padStart(2, '0');
+                const dateStr = `${yyyy}-${mm}-${dd}`;
 
                 const loadForm = () => {
                     // Close any open day popovers before loading the form
@@ -3840,13 +3846,18 @@
                         this.clickTimer = null;
                     }
 
-                    // Record handled double click to prevent duplicate handling from dblclick listener
-                    const dateMs = info.date.getTime();
+                    // Record handled double click to prevent duplicate handling from dblclick listener.
+                    // IMPORTANT: FullCalendar's info.date can include a timezone-offset time component,
+                    // which can make date.getDay() incorrect for "all-day" clicks. Use dateStr (YYYY-MM-DD)
+                    // when available to construct a local midnight date.
+                    const dateStr = (info.dateStr || '').substring(0, 10);
+                    const dateForForm = dateStr ? new Date(dateStr + 'T00:00:00') : info.date;
+                    const dateMs = dateForForm.getTime();
                     this.lastOpenedDateByDoubleClick = dateMs;
                     this.lastOpenedDateTimestamp = currentTime;
 
                     // Open the appropriate form
-                    this.openCreateFormForDate(info.date);
+                    this.openCreateFormForDate(dateForForm);
 
                     // Reset tracking
                     this.lastClickDate = null;
@@ -4159,43 +4170,28 @@
         }
 
         /**
-         * Show toast notification
+         * Show toast notification.
+         * Delegates to GTS.toast (shared/toast.js).
          */
         showToast(message, type = 'info') {
-            // Create toast element
-            const toast = document.createElement('div');
-            toast.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white ${type === 'success' ? 'bg-green-600' :
-                type === 'error' ? 'bg-red-600' : 'bg-blue-600'
-                }`;
-            toast.textContent = message;
-
-            document.body.appendChild(toast);
-
-            // Remove after 3 seconds
-            setTimeout(() => {
-                if (document.body.contains(toast)) {
-                    document.body.removeChild(toast);
-                }
-            }, 3000);
+            if (window.GTS && window.GTS.toast) {
+                GTS.toast.show(message, type);
+            } else if (window.showToast) {
+                window.showToast(message, type);
+            } else {
+                console.log('[Toast ' + type + ']:', message);
+            }
         }
 
         /**
-         * Get CSRF token from cookies
+         * Get CSRF token for API requests.
+         * Delegates to GTS.csrf.getToken() (shared/csrf.js).
+         * @returns {string} CSRF token
          */
         getCSRFToken() {
-            const name = 'csrftoken';
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
-            }
-            return cookieValue;
+            return window.GTS && window.GTS.csrf
+                ? GTS.csrf.getToken()
+                : (window.getCookie ? window.getCookie('csrftoken') : '');
         }
 
         /**
@@ -4220,9 +4216,9 @@
          */
         showError(message) {
             console.error('JobCalendar Error:', message);
-            // Use the global toast system if available, otherwise use the local toast method
-            if (window.layout && window.layout.showToast) {
-                window.layout.showToast(message, 'error');
+            // Use the shared toast system
+            if (window.GTS && window.GTS.toast) {
+                GTS.toast.error(message);
             } else {
                 this.showToast(message, 'error');
             }
@@ -4230,39 +4226,13 @@
 
 
         /**
-         * Get CSRF token for API requests
-         * @returns {string} CSRF token
-         */
-        getCSRFToken() {
-            // Use global getCookie function if available, otherwise fallback to local implementation
-            if (typeof window.getCookie === 'function') {
-                return window.getCookie('csrftoken');
-            }
-
-            // Fallback implementation
-            const name = 'csrftoken';
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
-            }
-            return cookieValue;
-        }
-
-        /**
          * Show success message
          * @param {string} message - Success message
          */
         showSuccess(message) {
-            // Use the global toast system if available, otherwise use the local toast method
-            if (window.layout && window.layout.showToast) {
-                window.layout.showToast(message, 'success');
+            // Use the shared toast system
+            if (window.GTS && window.GTS.toast) {
+                GTS.toast.success(message);
             } else {
                 this.showToast(message, 'success');
             }

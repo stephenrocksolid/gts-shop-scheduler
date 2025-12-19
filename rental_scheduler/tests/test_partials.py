@@ -144,12 +144,8 @@ class TestCallReminderCreatePartial:
 @pytest.mark.django_db
 class TestJobDetailPartial:
     """Test the job_detail_partial view.
-    
-    NOTE: The template _job_detail_partial.html does not exist yet.
-    These tests document the expected behavior once the template is created.
     """
     
-    @pytest.mark.skip(reason="Template _job_detail_partial.html does not exist yet")
     def test_job_detail_renders(self, api_client, job):
         """GET /jobs/<pk>/partial/ should return 200."""
         url = reverse('rental_scheduler:job_detail_partial', args=[job.id])
@@ -197,12 +193,6 @@ class TestJobCreateSubmitValidation:
         assert response.status_code == 200
         assert Job.objects.count() == initial_count + 1
     
-    # NOTE: The following tests are skipped due to a pytest-django caching issue where
-    # the form field's required=True setting is not picked up when running through the view.
-    # The same validation is tested in test_job_form_validation.py::TestJobFormRequiredFields
-    # which passes correctly, proving the form validation works.
-    
-    @pytest.mark.skip(reason="Form validation works (see test_job_form_validation.py) but pytest-django caching causes view test to fail")
     def test_missing_business_name_returns_400(self, api_client, calendar):
         """POST without business_name should return 400 and not create job."""
         from rental_scheduler.models import Job
@@ -218,7 +208,6 @@ class TestJobCreateSubmitValidation:
         assert Job.objects.count() == initial_count
         assert 'business_name' in response.content.decode('utf-8').lower() or 'required' in response.content.decode('utf-8').lower()
     
-    @pytest.mark.skip(reason="Form validation works (see test_job_form_validation.py) but pytest-django caching causes view test to fail")
     def test_empty_business_name_returns_400(self, api_client, calendar):
         """POST with empty business_name should return 400 and not create job."""
         from rental_scheduler.models import Job
@@ -233,7 +222,6 @@ class TestJobCreateSubmitValidation:
         assert response.status_code == 400
         assert Job.objects.count() == initial_count
     
-    @pytest.mark.skip(reason="Form validation works (see test_job_form_validation.py) but pytest-django caching causes view test to fail")
     def test_whitespace_only_business_name_returns_400(self, api_client, calendar):
         """POST with whitespace-only business_name should return 400 and not create job."""
         from rental_scheduler.models import Job

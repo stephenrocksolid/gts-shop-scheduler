@@ -44,7 +44,7 @@
             const MAX_WIDTH = 1200;
 
             // Load saved width
-            const savedWidth = localStorage.getItem(STORAGE_KEY);
+            const savedWidth = GTS.storage.getRaw(STORAGE_KEY);
             if (savedWidth) {
                 sidebar.style.width = savedWidth + 'px';
             }
@@ -85,7 +85,7 @@
                     document.body.style.userSelect = '';
 
                     // Save width to localStorage
-                    localStorage.setItem(STORAGE_KEY, sidebar.offsetWidth);
+                    GTS.storage.setRaw(STORAGE_KEY, sidebar.offsetWidth);
 
                     // Trigger calendar resize event so it adjusts
                     if (window.jobCalendar && window.jobCalendar.calendar) {

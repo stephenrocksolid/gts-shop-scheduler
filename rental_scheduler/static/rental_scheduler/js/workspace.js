@@ -18,39 +18,6 @@
         return jobId != null ? String(jobId) : null;
     }
 
-    /**
-     * Sanitize cached HTML before storing.
-     * Trims value attributes for input types that don't accept whitespace.
-     * @param {string} html - Raw HTML string
-     * @returns {string} - Sanitized HTML string
-     */
-    function sanitizeDraftHtml(html) {
-        if (!html || typeof html !== 'string') return html;
-
-        try {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-
-            // Input types that cannot have whitespace in their value attribute
-            const strictValueTypes = ['number', 'date', 'datetime-local', 'time', 'month', 'week'];
-            const selector = strictValueTypes.map(t => `input[type="${t}"]`).join(', ');
-
-            const inputs = doc.querySelectorAll(selector);
-            inputs.forEach(input => {
-                if (input.hasAttribute('value')) {
-                    const rawValue = input.getAttribute('value');
-                    const trimmed = rawValue.trim();
-                    input.setAttribute('value', trimmed);
-                }
-            });
-
-            return doc.body.innerHTML;
-        } catch (e) {
-            console.warn('sanitizeDraftHtml: Error parsing HTML, returning original', e);
-            return html;
-        }
-    }
-
     class JobWorkspace {
         constructor() {
             this.openJobs = new Map(); // jobId -> jobData
@@ -108,9 +75,7 @@
 
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
-                if (window.showToast) {
-                    window.showToast(`Maximum ${MAX_TABS} jobs can be open at once`, 'warning');
-                }
+                GTS.toast.warning(`Maximum ${MAX_TABS} jobs can be open at once`);
                 return;
             }
 
@@ -159,9 +124,7 @@
 
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
-                if (window.showToast) {
-                    window.showToast(`Maximum ${MAX_TABS} jobs can be open at once`, 'warning');
-                }
+                GTS.toast.warning(`Maximum ${MAX_TABS} jobs can be open at once`);
                 return;
             }
 
@@ -408,7 +371,7 @@
             job.unsaved = true;
             // Sanitize and cap HTML size to avoid localStorage overflow (100KB max)
             if (html && html.length <= 100000) {
-                job.unsavedHtml = sanitizeDraftHtml(html);
+                job.unsavedHtml = GTS.htmlState.sanitizeDraftHtml(html);
             } else if (html) {
                 console.warn('JobWorkspace: unsavedHtml too large, not storing');
                 job.unsavedHtml = null;
@@ -475,9 +438,7 @@
         createDraft(data) {
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
-                if (window.showToast) {
-                    window.showToast(`Maximum ${MAX_TABS} jobs can be open at once`, 'warning');
-                }
+                GTS.toast.warning(`Maximum ${MAX_TABS} jobs can be open at once`);
                 return null;
             }
 
@@ -494,7 +455,7 @@
                 timestamp: Date.now(),
                 isDraft: true,
                 unsaved: true,
-                unsavedHtml: data.html ? sanitizeDraftHtml(data.html) : null
+                unsavedHtml: data.html ? GTS.htmlState.sanitizeDraftHtml(data.html) : null
             });
 
             this.saveToStorage();
@@ -990,38 +951,61 @@
          * Note: unsavedHtml is size-limited to prevent localStorage overflow
          */
         saveToStorage() {
-            try {
-                // Create a copy of jobs with size-limited unsavedHtml
-                const jobsToSave = Array.from(this.openJobs.entries()).map(([key, job]) => {
-                    const jobCopy = { ...job };
-                    // Cap unsavedHtml at 100KB per job to prevent localStorage overflow
-                    if (jobCopy.unsavedHtml && jobCopy.unsavedHtml.length > 100000) {
-                        jobCopy.unsavedHtml = null; // Don't save if too large
-                    }
-                    return [key, jobCopy];
-                });
+            // Create a copy of jobs with size-limited unsavedHtml
+            const jobsToSave = Array.from(this.openJobs.entries()).map(([key, job]) => {
+                const jobCopy = { ...job };
+                // Cap unsavedHtml at 100KB per job to prevent localStorage overflow
+                if (jobCopy.unsavedHtml && jobCopy.unsavedHtml.length > 100000) {
+                    jobCopy.unsavedHtml = null; // Don't save if too large
+                }
+                return [key, jobCopy];
+            });
 
-                const state = {
-                    jobs: jobsToSave,
-                    activeJobId: this.activeJobId
-                };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-            } catch (error) {
-                console.warn('JobWorkspace: Error saving to localStorage', error);
-                // If quota exceeded, try saving without unsavedHtml
-                try {
+            const state = {
+                jobs: jobsToSave,
+                activeJobId: this.activeJobId
+            };
+
+            // Use GTS.storage if available
+            if (window.GTS && window.GTS.storage) {
+                const ok = GTS.storage.setJson(STORAGE_KEY, state);
+                if (!ok) {
+                    console.warn('JobWorkspace: Error saving to localStorage (likely quota exceeded), retrying without HTML');
+                    // If quota exceeded, try saving without unsavedHtml
                     const jobsWithoutHtml = Array.from(this.openJobs.entries()).map(([key, job]) => {
                         const jobCopy = { ...job };
-                        jobCopy.unsavedHtml = null; // Remove large content
+                        jobCopy.unsavedHtml = null;
                         return [key, jobCopy];
                     });
-                    const state = {
+                    const reducedState = {
                         jobs: jobsWithoutHtml,
                         activeJobId: this.activeJobId
                     };
+                    const ok2 = GTS.storage.setJson(STORAGE_KEY, reducedState);
+                    if (!ok2) {
+                        console.error('JobWorkspace: Could not save even without HTML');
+                    }
+                }
+            } else {
+                try {
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-                } catch (e2) {
-                    console.error('JobWorkspace: Could not save even without HTML', e2);
+                } catch (error) {
+                    console.warn('JobWorkspace: Error saving to localStorage', error);
+                    // If quota exceeded, try saving without unsavedHtml
+                    try {
+                        const jobsWithoutHtml = Array.from(this.openJobs.entries()).map(([key, job]) => {
+                            const jobCopy = { ...job };
+                            jobCopy.unsavedHtml = null;
+                            return [key, jobCopy];
+                        });
+                        const reducedState = {
+                            jobs: jobsWithoutHtml,
+                            activeJobId: this.activeJobId
+                        };
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(reducedState));
+                    } catch (e2) {
+                        console.error('JobWorkspace: Could not save even without HTML', e2);
+                    }
                 }
             }
         }
@@ -1030,41 +1014,47 @@
          * Load workspace state from localStorage
          */
         loadFromStorage() {
-            try {
-                const saved = localStorage.getItem(STORAGE_KEY);
-                if (!saved) return;
+            let state = null;
 
-                const state = JSON.parse(saved);
-
-                // Restore jobs with normalized IDs
-                if (state.jobs && Array.isArray(state.jobs)) {
-                    this.openJobs = new Map();
-                    state.jobs.forEach(([key, value]) => {
-                        const normalizedKey = normalizeJobId(key);
-                        if (normalizedKey) {
-                            value.jobId = normalizedKey; // Also normalize the stored jobId
-                            // Ensure backwards compatibility for new fields
-                            value.unsaved = value.unsaved || false;
-                            value.unsavedHtml = value.unsavedHtml || null;
-                            value.isDraft = value.isDraft || false;
-                            this.openJobs.set(normalizedKey, value);
-                        }
-                    });
+            // Use GTS.storage if available
+            if (window.GTS && window.GTS.storage) {
+                state = GTS.storage.getJson(STORAGE_KEY, null);
+            } else {
+                try {
+                    const saved = localStorage.getItem(STORAGE_KEY);
+                    if (saved) {
+                        state = JSON.parse(saved);
+                    }
+                } catch (error) {
+                    console.warn('JobWorkspace: Error loading from localStorage', error);
                 }
-
-                // Restore active job (but don't open panel yet - wait for user action)
-                this.activeJobId = null; // Don't auto-open on page load
-
-                // Mark all as minimized on page load
-                this.openJobs.forEach(job => {
-                    job.isMinimized = true;
-                });
-
-            } catch (error) {
-                console.warn('JobWorkspace: Error loading from localStorage', error);
-                this.openJobs.clear();
-                this.activeJobId = null;
             }
+
+            if (!state) return;
+
+            // Restore jobs with normalized IDs
+            if (state.jobs && Array.isArray(state.jobs)) {
+                this.openJobs = new Map();
+                state.jobs.forEach(([key, value]) => {
+                    const normalizedKey = normalizeJobId(key);
+                    if (normalizedKey) {
+                        value.jobId = normalizedKey; // Also normalize the stored jobId
+                        // Ensure backwards compatibility for new fields
+                        value.unsaved = value.unsaved || false;
+                        value.unsavedHtml = value.unsavedHtml || null;
+                        value.isDraft = value.isDraft || false;
+                        this.openJobs.set(normalizedKey, value);
+                    }
+                });
+            }
+
+            // Restore active job (but don't open panel yet - wait for user action)
+            this.activeJobId = null; // Don't auto-open on page load
+
+            // Mark all as minimized on page load
+            this.openJobs.forEach(job => {
+                job.isMinimized = true;
+            });
         }
 
         /**
@@ -1073,7 +1063,11 @@
         clear() {
             this.openJobs.clear();
             this.activeJobId = null;
-            localStorage.removeItem(STORAGE_KEY);
+            if (window.GTS && window.GTS.storage) {
+                GTS.storage.remove(STORAGE_KEY);
+            } else {
+                localStorage.removeItem(STORAGE_KEY);
+            }
             this.render();
         }
     }

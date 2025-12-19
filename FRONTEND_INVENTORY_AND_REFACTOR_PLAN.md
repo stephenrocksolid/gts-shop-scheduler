@@ -573,8 +573,63 @@ Definition of Done:
 
 ---
 
-### Phase 2 — Create a shared “frontend library” module folder
+### Phase 2 — Create a shared "frontend library" module folder ✅ COMPLETED
 **Goal**: stop duplicating helpers.
+
+**Status**: ✅ **COMPLETED** (2025-12-18)
+
+**What was done**:
+
+1. **Created shared module folder**: `rental_scheduler/static/rental_scheduler/js/shared/`
+
+2. **Created `shared/csrf.js`** - Single CSRF token getter
+   - `GTS.csrf.getToken(options?)` - Consistent precedence: meta tag → form hidden input → cookie
+   - `GTS.csrf.headers(extraHeaders?, options?)` - Build headers with CSRF token
+   - `GTS.getCookie(name)` - Back-compat alias
+
+3. **Created `shared/toast.js`** - Toast notification wrapper
+   - `GTS.toast.show(message, type, duration)` - Wraps window.showToast
+   - `GTS.toast.success/error/warning/info(message, duration?)` - Convenience methods
+   - `GTS.showToast(...)` - Back-compat alias
+
+4. **Created `shared/storage.js`** - Safe localStorage helpers
+   - `GTS.storage.getRaw/setRaw/remove(key)` - Raw string access
+   - `GTS.storage.getJson/setJson(key, value)` - JSON with try/catch
+   - `GTS.storage.getBool/setBool(key, value)` - Boolean helpers
+
+5. **Created `shared/dom.js`** - DOM utilities
+   - `GTS.dom.on(el, event, selector?, handler, options?)` - Direct/delegated binding
+   - `GTS.dom.closest(el, selector)` - Polyfill-safe closest
+   - `GTS.dom.stop(e)` - preventDefault + stopPropagation
+   - `GTS.dom.qs/qsa(selector, root?)` - Query shortcuts
+
+6. **Created `shared/html_state.js`** - Draft HTML serialization
+   - `GTS.htmlState.sanitizeDraftHtml(html)` - Trims whitespace in strict input values
+   - `GTS.htmlState.serializeDraftHtml(rootEl)` - Preserves checkbox/select/textarea state
+
+**Migrations completed**:
+- `panel.js`: Removed local sanitizeDraftHtml/serializeDraftHtml → delegates to GTS.htmlState
+- `workspace.js`: Removed local sanitizeDraftHtml → delegates to GTS.htmlState
+- `job_calendar.js`: Removed duplicate getCSRFToken methods → uses GTS.csrf.getToken
+- `job_calendar.js`: Updated showError/showSuccess/showToast → uses GTS.toast
+- `panel.js`: Updated all window.showToast calls → uses GTS.toast.*
+- `workspace.js`: Updated all window.showToast calls → uses GTS.toast.warning
+- `panel.js`: Updated CSRF token usage in saveForm fetch → uses GTS.csrf.headers
+- `job_form_partial.js`: Updated CSRF usage → uses GTS.csrf.headers/getToken
+- `panel.js`: Updated save/load + warning key functions → uses GTS.storage
+- `workspace.js`: Updated saveToStorage/loadFromStorage/clear → uses GTS.storage
+- `panel_shell.js`: Updated localStorage calls → uses GTS.storage.getRaw/setRaw
+- `calendar_page.js`: Updated localStorage calls → uses GTS.storage.getRaw/setRaw
+- `jobs_list_page.js`: Updated localStorage calls → uses GTS.storage.getJson/setJson
+- `base.html`: Updated htmx:configRequest → uses GTS.csrf.getToken with fallback
+- `gts_init.js`: Removed duplicate getCookie/showToast (now in shared modules)
+
+**Files created**:
+- `rental_scheduler/static/rental_scheduler/js/shared/csrf.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/toast.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/storage.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/dom.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/html_state.js`
 
 Create shared modules (even without a bundler, we can do plain JS files loaded in order):
 - `shared/csrf.js` (single CSRF getter)
@@ -584,8 +639,8 @@ Create shared modules (even without a bundler, we can do plain JS files loaded i
 - `shared/html_state.js` (serialize/sanitize draft HTML)
 
 Definition of Done:
-- Panel + workspace use the same serialize/sanitize code.
-- Calendar/panel/workspace use the same CSRF/toast helpers.
+- ✅ Panel + workspace use the same serialize/sanitize code.
+- ✅ Calendar/panel/workspace use the same CSRF/toast helpers.
 
 ---
 

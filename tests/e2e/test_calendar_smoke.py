@@ -265,11 +265,14 @@ class TestDraftWorkspaceFlow:
 
         # Find a weekday cell and double-click to open job panel
         weekday_date = self._find_weekday_cell(page)
-        if not weekday_date:
-            pytest.skip("No weekday cell found in calendar view")
+        assert weekday_date, "No weekday cell found in calendar view"
 
-        day_cell = page.locator(f'.fc-daygrid-day[data-date="{weekday_date}"]')
-        day_cell.dblclick()
+        # Double-click the day number to avoid accidentally targeting an event element.
+        day_number = page.locator(f'.fc-daygrid-day[data-date="{weekday_date}"] .fc-daygrid-day-number')
+        if day_number.count() > 0:
+            day_number.dblclick()
+        else:
+            page.locator(f'.fc-daygrid-day[data-date="{weekday_date}"]').dblclick()
 
         # Wait for job panel to appear
         page.wait_for_selector("#job-panel", timeout=5000)
@@ -528,8 +531,7 @@ class TestVirtualRecurrenceMaterialization:
         # Submit using direct fetch (more reliable than button click with HTMX)
         result = self._submit_job_form_via_fetch(page)
 
-        if not result.get("jobId"):
-            pytest.skip(f"Could not create test job: {result}")
+        assert result.get("jobId"), f"Could not create test job: {result}"
 
         parent_job_id = result["jobId"]
 
@@ -586,7 +588,9 @@ class TestStandaloneCallReminderCRUD:
         """
         page.goto(f"{server_url}/")
         page.wait_for_selector("#calendar", timeout=10000)
-        page.wait_for_timeout(1000)
+        # Wait for panel/calendar JS to be ready (reduces flakiness from race conditions)
+        page.wait_for_function("() => window.JobPanel && typeof window.JobPanel.load === 'function'")
+        page.wait_for_function("() => window.jobCalendar && window.jobCalendar.calendar")
 
         # Find a Sunday cell to double-click (Sundays create call reminders)
         sunday_cell = page.evaluate("""
@@ -605,96 +609,107 @@ class TestStandaloneCallReminderCRUD:
             }
         """)
 
-        if not sunday_cell:
-            pytest.skip("No Sunday cell found in current calendar view")
+        assert sunday_cell, "No Sunday cell found in current calendar view"
 
-        # Double-click the Sunday cell to open call reminder form
-        sunday_cell_locator = page.locator(f'.fc-daygrid-day[data-date="{sunday_cell}"]')
-        sunday_cell_locator.dblclick()
+        reminder_id = None
+        try:
+            # Double-click the Sunday cell to open call reminder form
+            # Double-click the day number to avoid accidentally targeting an event element.
+            day_number = page.locator(f'.fc-daygrid-day[data-date="{sunday_cell}"] .fc-daygrid-day-number')
+            if day_number.count() > 0:
+                day_number.dblclick()
+            else:
+                page.locator(f'.fc-daygrid-day[data-date="{sunday_cell}"]').dblclick()
 
-        # Wait for the job panel to open (call reminder form is shown in the panel)
-        page.wait_for_selector("#job-panel", timeout=5000)
-        page.wait_for_timeout(1000)
+            # Wait for the panel + call reminder creation form to render
+            page.wait_for_selector("#job-panel", timeout=10000)
+            page.wait_for_selector("#call-reminder-form", timeout=10000)
 
-        # Check if we got the call reminder creation form
-        call_reminder_form = page.locator("#call-reminder-form")
+            call_reminder_form = page.locator("#call-reminder-form")
+            expect(call_reminder_form).to_be_visible()
 
-        if call_reminder_form.count() == 0:
-            # Maybe it opened a job form instead - check for call reminder specific elements
-            pytest.skip("Call reminder form not found - Sunday double-click may have opened job form")
-
-        unique_notes = f"E2E Test Reminder {page.evaluate('Date.now()')}"
-
-        # Fill in notes if there's a notes field
-        notes_input = page.locator("#call-reminder-form textarea, #call-reminder-form input[name='notes']")
-        if notes_input.count() > 0:
-            notes_input.fill(unique_notes)
-
-        # Select a calendar if required
-        calendar_select = page.locator("#call-reminder-form select[name='calendar']")
-        if calendar_select.count() > 0:
-            # Get options and select first non-empty one
-            options = page.evaluate("""
-                () => {
-                    const select = document.querySelector('#call-reminder-form select[name="calendar"]');
-                    if (!select) return [];
-                    return Array.from(select.options).filter(o => o.value).map(o => o.value);
-                }
+            # Ensure the reminder date matches the cell we clicked (defensive against timezone/date shifting).
+            # Note: flatpickr may hide the original input (type="hidden"), so don't try to `.fill()` it.
+            current_reminder_date = page.evaluate("""
+                () => document.querySelector('#call-reminder-form input[name="reminder_date"]')?.value || null
             """)
-            if options:
+            assert current_reminder_date, "Call reminder form missing reminder_date value"
+            if current_reminder_date != sunday_cell:
+                page.evaluate(
+                    """
+                    (value) => {
+                        const input = document.querySelector('#call-reminder-form input[name="reminder_date"]');
+                        if (!input) return;
+                        input.value = value;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    """,
+                    sunday_cell,
+                )
+
+            unique_notes = f"E2E Test Reminder {page.evaluate('Date.now()')}"
+
+            # Fill in notes if there's a notes field
+            notes_input = page.locator("#call-reminder-form textarea, #call-reminder-form input[name='notes']")
+            if notes_input.count() > 0:
+                notes_input.fill(unique_notes)
+
+            # Select a calendar if required
+            calendar_select = page.locator("#call-reminder-form select[name='calendar']")
+            if calendar_select.count() > 0:
+                # Get options and select first non-empty one
+                options = page.evaluate("""
+                    () => {
+                        const select = document.querySelector('#call-reminder-form select[name="calendar"]');
+                        if (!select) return [];
+                        return Array.from(select.options).filter(o => o.value).map(o => o.value);
+                    }
+                """)
+                assert options, "No calendar options available for call reminder form"
                 calendar_select.select_option(options[0])
 
-        # Submit the form via HTMX trigger (which works for call reminder form)
-        submit_btn = page.locator("#call-reminder-form button[type='submit']")
-        if submit_btn.count() > 0:
-            submit_btn.click()
-            page.wait_for_timeout(3000)
+            # Submit the form via HTMX and capture the JSON response
+            submit_btn = page.locator("#call-reminder-form button[type='submit']")
+            expect(submit_btn).to_be_visible()
 
-        # Wait for calendar refresh
-        page.wait_for_timeout(1000)
+            with page.expect_response(lambda r: "/call-reminders/create/" in r.url and r.request.method == "POST") as resp_info:
+                submit_btn.click()
 
-        # Look for standalone call reminder events on the calendar
-        standalone_reminders = page.locator('[data-gts-event-type="standalone_call_reminder"]')
+            create_resp = resp_info.value
+            payload = create_resp.json()
+            assert payload.get("success") is True, f"Call reminder create failed: {payload}"
+            reminder_id = payload.get("reminder_id")
+            assert reminder_id, f"Missing reminder_id in response: {payload}"
 
-        # We should have at least one standalone reminder (might be from our creation or existing data)
-        # The test passes if we can find such events exist and have the correct data attributes
-        if standalone_reminders.count() > 0:
-            # Verify the data attributes are present
-            first_reminder = standalone_reminders.first
-            event_type = first_reminder.get_attribute("data-gts-event-type")
-            assert event_type == "standalone_call_reminder", "Event should have correct type"
+            # Wait for calendar to render the created reminder
+            page.wait_for_selector(
+                f'[data-gts-event-type="standalone_call_reminder"][data-gts-reminder-id="{reminder_id}"]',
+                timeout=15000,
+            )
 
-            reminder_id = first_reminder.get_attribute("data-gts-reminder-id")
+            # Click and validate the panel hooks
+            created_reminder = page.locator(
+                f'[data-gts-event-type="standalone_call_reminder"][data-gts-reminder-id="{reminder_id}"]'
+            ).first
+            created_reminder.click()
+            page.wait_for_timeout(500)
+
+            notes_textarea = page.locator('[data-testid="call-reminder-notes"]')
+            expect(notes_textarea).to_be_visible()
+
+            save_btn = page.locator('[data-testid="call-reminder-save"]')
+            complete_btn = page.locator('[data-testid="call-reminder-complete"]')
+            delete_btn = page.locator('[data-testid="call-reminder-delete"]')
+
+            has_actions = (
+                save_btn.count() > 0 or
+                complete_btn.count() > 0 or
+                delete_btn.count() > 0
+            )
+            assert has_actions, "Call reminder panel should have action buttons with data-testid"
+        finally:
+            # Cleanup: don't leave reminders behind in a developer DB
             if reminder_id:
-                # Try to click and interact with the reminder
-                first_reminder.click()
-                page.wait_for_timeout(1000)
-
-                # Check for the notes textarea with our data-testid
-                notes_textarea = page.locator('[data-testid="call-reminder-notes"]')
-                if notes_textarea.count() > 0:
-                    # The panel opened successfully with our test hooks
-                    expect(notes_textarea).to_be_visible()
-
-                    # Also check for action buttons
-                    save_btn = page.locator('[data-testid="call-reminder-save"]')
-                    complete_btn = page.locator('[data-testid="call-reminder-complete"]')
-                    delete_btn = page.locator('[data-testid="call-reminder-delete"]')
-
-                    # At least one action button should be visible
-                    has_actions = (
-                        save_btn.count() > 0 or
-                        complete_btn.count() > 0 or
-                        delete_btn.count() > 0
-                    )
-                    assert has_actions, "Call reminder panel should have action buttons with data-testid"
-
-                # Close the panel
-                close_btn = page.locator("#job-panel .btn-close")
-                if close_btn.count() > 0:
-                    close_btn.click()
-        else:
-            # No standalone reminders found - this might be okay if the form didn't submit
-            # or if this calendar doesn't show Sunday reminders
-            pytest.skip("No standalone call reminder events found on calendar")
+                self._delete_reminder_via_api(page, reminder_id)
 

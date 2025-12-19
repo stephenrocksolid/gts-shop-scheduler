@@ -111,15 +111,14 @@
             }),
             dateFilter: (document.querySelector('.date-filter-radio:checked') || {}).value || 'all'
         };
-        localStorage.setItem('job-list-filters', JSON.stringify(filters));
+        GTS.storage.setJson('job-list-filters', filters);
     }
 
     function initLocalStoragePersistence() {
-        const saved = localStorage.getItem('job-list-filters');
-        if (!saved) return;
+        const filters = GTS.storage.getJson('job-list-filters', null);
+        if (!filters) return;
 
         try {
-            const filters = JSON.parse(saved);
 
             // Only apply saved filters if no filters are currently set via URL
             const urlParams = new URLSearchParams(window.location.search);

@@ -136,6 +136,13 @@
         <!-- GTS Init Helpers (idempotent initialization for HTMX pages) -->
         <script src="{% static 'rental_scheduler/js/gts_init.js' %}"></script>
 
+        <!-- GTS Shared Library (load order matters: csrf, toast, storage, dom, html_state) -->
+        <script src="{% static 'rental_scheduler/js/shared/csrf.js' %}"></script>
+        <script src="{% static 'rental_scheduler/js/shared/toast.js' %}"></script>
+        <script src="{% static 'rental_scheduler/js/shared/storage.js' %}"></script>
+        <script src="{% static 'rental_scheduler/js/shared/dom.js' %}"></script>
+        <script src="{% static 'rental_scheduler/js/shared/html_state.js' %}"></script>
+
         <script>
         // Global toast utility (vanilla JS)
         window.showToast = function(message, type = 'info', duration = 5000) {
@@ -208,7 +215,8 @@
             });
             
             document.body.addEventListener('htmx:configRequest', function (evt) {
-                const token = window.getCookie('csrftoken');
+                // Use shared CSRF module (falls back to getCookie if needed)
+                const token = window.GTS && window.GTS.csrf ? GTS.csrf.getToken() : window.getCookie('csrftoken');
                 if (token) evt.detail.headers['X-CSRFToken'] = token;
             });
             

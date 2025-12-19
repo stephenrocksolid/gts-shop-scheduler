@@ -167,37 +167,9 @@
         document.body.addEventListener('htmx:afterRequest', handler);
     };
 
-    /**
-     * Get CSRF token from cookie.
-     * Falls back to window.getCookie if available.
-     * 
-     * @param {string} name - Cookie name (default: 'csrftoken')
-     * @returns {string|undefined}
-     */
-    GTS.getCookie = function(name) {
-        name = name || 'csrftoken';
-        if (window.getCookie) {
-            return window.getCookie(name);
-        }
-        const value = '; ' + document.cookie;
-        const parts = value.split('; ' + name + '=');
-        if (parts.length === 2) return parts.pop().split(';').shift();
-    };
-
-    /**
-     * Show a toast notification.
-     * Falls back to window.showToast if available.
-     * 
-     * @param {string} message - Message to display
-     * @param {string} type - Toast type: 'success', 'error', 'warning', 'info'
-     * @param {number} duration - Duration in ms (default: 5000)
-     */
-    GTS.showToast = function(message, type, duration) {
-        if (window.showToast) {
-            window.showToast(message, type, duration);
-        } else {
-            console.log('[Toast ' + (type || 'info') + ']:', message);
-        }
-    };
+    // =========================================================================
+    // CSRF and Toast helpers are now provided by shared/csrf.js and shared/toast.js
+    // They define GTS.getCookie, GTS.csrf.*, GTS.showToast, and GTS.toast.*
+    // =========================================================================
 
 })();

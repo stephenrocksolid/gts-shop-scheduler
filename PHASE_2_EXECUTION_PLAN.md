@@ -21,51 +21,61 @@ Stop duplicating common frontend helpers by creating a small shared “frontend 
   - Keep globals used elsewhere (`window.JobPanel`, `window.JobWorkspace`, `window.jobCalendar`, `window.calendarConfig`, `window.showToast`, `window.getCookie`).
 - **Out of scope** (explicit): Phase 3+ refactors (no internal `job_calendar.js` module split, no panel persistence consolidation, no URL cleanup, no endpoint changes).
 
+### Phase 2 status (implementation audit)
+As of **2025-12-19** (static code audit only; see Validation plan below):
+
+- **Definition of done**: likely met (pending runtime validation)
+- **2A (shared load order)**: complete
+- **2B (html_state)**: complete
+- **2C (csrf)**: complete (calendar delegates via a wrapper method)
+- **2D (toast)**: complete (calendar no longer has a custom toast renderer)
+- **2E (storage)**: complete (workspace quota fallback preserved)
+- **2F (dom helpers)**: implemented; adoption is optional/partial
+
 ---
 
 ## 0) Audit notes (ground truth from current code)
 
-### Duplicated helpers (current sources)
+### Unified helper sources (post-Phase-2 snapshot)
 
 #### Toast
-- **Global toast UI**: `rental_scheduler/templates/base.html` defines `window.showToast(message, type, duration)`.
-- **Wrapper**: `rental_scheduler/static/rental_scheduler/js/gts_init.js` defines `GTS.showToast(...)` (falls back to `window.showToast`).
-- **Local toast implementation**: `rental_scheduler/static/rental_scheduler/js/job_calendar.js` implements its own `showToast()` DOM renderer and routes through it from `showError()` / `showSuccess()`.
-- **Direct calls**:
-  - `rental_scheduler/static/rental_scheduler/js/panel.js` calls `window.showToast(...)`.
-  - `rental_scheduler/static/rental_scheduler/js/workspace.js` calls `window.showToast(...)`.
-  - `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js` calls `GTS.showToast(...)`.
+- **Toast UI renderer**: `rental_scheduler/templates/base.html` defines `window.showToast(message, type, duration)`.
+- **Shared wrapper API**: `rental_scheduler/static/rental_scheduler/js/shared/toast.js`
+  - `GTS.toast.*`
+  - `GTS.showToast = GTS.toast.show` (back-compat)
+- **Consumers**:
+  - `panel.js`, `workspace.js` use `GTS.toast.*`
+  - `job_calendar.js` routes toast calls through `GTS.toast.*` (wrapper method remains as a thin delegate)
+  - `entrypoints/job_form_partial.js` uses `GTS.showToast(...)` (alias)
 
 #### CSRF
 - **Base template**: `rental_scheduler/templates/base.html`
   - `<meta name="csrf-token" content="{{ csrf_token }}">`
   - `window.getCookie(name)`
-  - HTMX `htmx:configRequest` handler uses `window.getCookie('csrftoken')`
-- **Wrapper**: `rental_scheduler/static/rental_scheduler/js/gts_init.js` defines `GTS.getCookie(...)` (falls back to `window.getCookie`).
-- **Config utility**: `rental_scheduler/static/rental_scheduler/js/config.js` implements `RentalConfig.getCSRFToken()` + `getApiHeaders()` (not consistently used by calendar/panel code).
-- **Panel**: `rental_scheduler/static/rental_scheduler/js/panel.js` manually composes CSRF token in two fetch save paths.
-- **Calendar**: `rental_scheduler/static/rental_scheduler/js/job_calendar.js`
-  - POST fetches use `'X-CSRFToken': this.getCSRFToken()`
-  - class has **duplicate** `getCSRFToken()` methods (last one wins; first is dead)
-- **Job form partial entrypoint**: `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js`
-  - print fallback uses `input[name=csrfmiddlewaretoken]`
-  - status update/delete uses `GTS.getCookie('csrftoken')`
+  - HTMX `htmx:configRequest` handler uses `GTS.csrf.getToken()` (with fallback)
+- **Shared CSRF module**: `rental_scheduler/static/rental_scheduler/js/shared/csrf.js`
+  - `GTS.csrf.getToken({ root? })`
+  - `GTS.csrf.headers(extraHeaders, { root? })`
+  - `GTS.getCookie(name)` (back-compat alias)
+- **Config utility**: `rental_scheduler/static/rental_scheduler/js/config.js` still implements `RentalConfig.getCSRFToken()` + `getApiHeaders()` (optional future delegation).
+- **Consumers**:
+  - `panel.js` uses `GTS.csrf.headers(..., { root: form })` for fetch paths.
+  - `entrypoints/job_form_partial.js` uses `GTS.csrf.getToken/headers`.
+  - `job_calendar.js` delegates `getCSRFToken()` to `GTS.csrf.getToken()` (wrapper method remains; duplicate methods removed).
 
 #### Draft HTML state (serialize/sanitize)
-- `rental_scheduler/static/rental_scheduler/js/panel.js`
-  - `sanitizeDraftHtml(html)`
-  - `serializeDraftHtml(panelBody)`
-  - call sites include `serializeDraftHtml(...)` around `~L1257`, `~L1519` and `sanitizeDraftHtml(...)` around `~L1667`
-- `rental_scheduler/static/rental_scheduler/js/workspace.js`
-  - duplicated `sanitizeDraftHtml(html)`
-  - call sites around `~L411`, `~L497`
+- **Canonical implementation**: `rental_scheduler/static/rental_scheduler/js/shared/html_state.js` (`GTS.htmlState.*`)
+- **Consumers**:
+  - `panel.js` uses `GTS.htmlState.serializeDraftHtml(...)` and `GTS.htmlState.sanitizeDraftHtml(...)`.
+  - `workspace.js` uses `GTS.htmlState.sanitizeDraftHtml(...)`.
 
 #### Storage
-Direct `localStorage.*` usage exists across:
-- `job_calendar.js`, `panel.js`, `workspace.js`
-- entrypoints: `calendar_page.js`, `jobs_list_page.js`, `panel_shell.js`
-
-(Phase 2 must not rename keys; it may standardize access patterns.)
+- **Canonical implementation**: `rental_scheduler/static/rental_scheduler/js/shared/storage.js` (`GTS.storage.*`)
+- **Consumers migrated (Phase 2 scope)**:
+  - `panel.js` uses `GTS.storage.getJson/setJson` for `jobPanelState`
+  - `workspace.js` uses `GTS.storage.getJson/setJson/remove` for `gts-job-workspace` (**includes quota-exceeded fallback retry without HTML**)
+  - entrypoints: `calendar_page.js`, `jobs_list_page.js`, `panel_shell.js`
+- Direct `localStorage.*` usage still exists in `job_calendar.js` for calendar-only keys (out of Phase 2 scope; Phase 4+ can standardize further).
 
 ---
 
@@ -119,7 +129,7 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 - **`GTS.storage.setRaw(key, value) -> void`**
 - **`GTS.storage.remove(key) -> void`**
 - **`GTS.storage.getJson(key, fallback=null)`** (try/catch)
-- **`GTS.storage.setJson(key, value)`** (try/catch)
+- **`GTS.storage.setJson(key, value) -> boolean`** (try/catch; returns false if storage fails)
 - **`GTS.storage.getBool(key, fallback=false)`**
 - **`GTS.storage.setBool(key, value)`**
 - Optional future-proofing (keep keys unchanged for Phase 2):
@@ -143,6 +153,8 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 
 ### 2A) Create `shared/` folder + wire global load order
 
+**Status**: complete
+
 **Files**
 - **Add** `rental_scheduler/static/rental_scheduler/js/shared/` (directory)
 - **Update** `rental_scheduler/templates/base.html`
@@ -159,6 +171,8 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 ---
 
 ### 2B) `shared/html_state.js` + migrate panel/workspace
+
+**Status**: complete
 
 **Files**
 - **Add** `rental_scheduler/static/rental_scheduler/js/shared/html_state.js`
@@ -188,6 +202,8 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 ---
 
 ### 2C) `shared/csrf.js` + migrate calendar/panel/workspace CSRF usage
+
+**Status**: complete (calendar delegates via wrapper)
 
 **Files**
 - **Add** `rental_scheduler/static/rental_scheduler/js/shared/csrf.js`
@@ -235,6 +251,8 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 
 ### 2D) `shared/toast.js` + migrate calendar/panel/workspace toast usage
 
+**Status**: complete (no calendar custom renderer remains)
+
 **Files**
 - **Add** `rental_scheduler/static/rental_scheduler/js/shared/toast.js`
 - **Update** `rental_scheduler/static/rental_scheduler/js/gts_init.js` *(remove duplicate toast helper once shared module exists)*
@@ -274,6 +292,8 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 
 ### 2E) `shared/storage.js` + migrate the “big 3” storage behaviors
 
+**Status**: complete (workspace quota fallback preserved)
+
 **Files**
 - **Add** `rental_scheduler/static/rental_scheduler/js/shared/storage.js`
 - **Update** `rental_scheduler/static/rental_scheduler/js/panel.js`
@@ -306,6 +326,8 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 
 ### 2F) `shared/dom.js` + opportunistic adoption
 
+**Status**: implemented; adoption optional/partial
+
 **Files**
 - **Add** `rental_scheduler/static/rental_scheduler/js/shared/dom.js`
 - **Update** selected entrypoints as needed (no functional changes)
@@ -324,6 +346,7 @@ Implement helpers under `window.GTS` (keep existing global style consistent with
 
 ### Automated
 - Playwright smoke test: `tests/e2e/test_calendar_smoke.py`.
+  - Note: this environment currently lacks `pytest`, so automated validation was not run here.
 
 ### Manual regression checklist (high value)
 - Calendar:

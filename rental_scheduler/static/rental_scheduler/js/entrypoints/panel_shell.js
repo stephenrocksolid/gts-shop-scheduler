@@ -59,8 +59,8 @@
             const MAX_HEIGHT = window.innerHeight * 0.99;
 
             // Load saved dimensions
-            const savedWidth = localStorage.getItem(STORAGE_KEY_WIDTH);
-            const savedHeight = localStorage.getItem(STORAGE_KEY_HEIGHT);
+            const savedWidth = GTS.storage.getRaw(STORAGE_KEY_WIDTH);
+            const savedHeight = GTS.storage.getRaw(STORAGE_KEY_HEIGHT);
             if (savedWidth) {
                 panel.style.width = savedWidth + 'px';
             }
@@ -143,8 +143,8 @@
                     constrainPanelToViewport();
 
                     // Save dimensions to localStorage
-                    localStorage.setItem(STORAGE_KEY_WIDTH, panel.offsetWidth);
-                    localStorage.setItem(STORAGE_KEY_HEIGHT, panel.offsetHeight);
+                    GTS.storage.setRaw(STORAGE_KEY_WIDTH, panel.offsetWidth);
+                    GTS.storage.setRaw(STORAGE_KEY_HEIGHT, panel.offsetHeight);
                 }
             });
 

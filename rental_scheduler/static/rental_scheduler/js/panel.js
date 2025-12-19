@@ -34,114 +34,8 @@
 
   // ==========================================================================
   // HTML SANITIZATION FOR DRAFT RESTORE
-  // Trims whitespace from value attributes of numeric/date inputs to prevent
-  // browser parsing errors when restoring cached HTML from localStorage.
+  // Now delegated to GTS.htmlState (shared/html_state.js)
   // ==========================================================================
-
-  /**
-   * Sanitize cached HTML before inserting into the DOM.
-   * Trims value attributes for input types that don't accept whitespace.
-   * @param {string} html - Raw HTML string (e.g., from localStorage draft)
-   * @returns {string} - Sanitized HTML string
-   */
-  function sanitizeDraftHtml(html) {
-    if (!html || typeof html !== 'string') return html;
-
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-
-      // Input types that cannot have whitespace in their value attribute
-      const strictValueTypes = ['number', 'date', 'datetime-local', 'time', 'month', 'week'];
-      const selector = strictValueTypes.map(t => `input[type="${t}"]`).join(', ');
-
-      const inputs = doc.querySelectorAll(selector);
-      inputs.forEach(input => {
-        if (input.hasAttribute('value')) {
-          const rawValue = input.getAttribute('value');
-          const trimmed = rawValue.trim();
-          input.setAttribute('value', trimmed);
-        }
-      });
-
-      // Return the sanitized body innerHTML
-      return doc.body.innerHTML;
-    } catch (e) {
-      console.warn('sanitizeDraftHtml: Error parsing HTML, returning original', e);
-      return html;
-    }
-  }
-
-  /**
-   * Serialize panel body HTML for draft storage, preserving form state.
-   * Unlike innerHTML alone, this persists checkbox/radio checked state and select values
-   * by setting the corresponding HTML attributes to match runtime properties.
-   * 
-   * Uses parallel NodeList iteration (by index) to avoid invalid selectors when
-   * elements have empty IDs or names.
-   * 
-   * @param {HTMLElement} panelBody - The panel body element to serialize
-   * @returns {string} - HTML string with form state preserved
-   */
-  function serializeDraftHtml(panelBody) {
-    if (!panelBody) return null;
-
-    try {
-      // Clone the panel body so we don't modify the live DOM
-      const clone = panelBody.cloneNode(true);
-
-      // Persist checkbox and radio checked state as attributes using parallel iteration
-      const origCheckboxes = panelBody.querySelectorAll('input[type="checkbox"], input[type="radio"]');
-      const cloneCheckboxes = clone.querySelectorAll('input[type="checkbox"], input[type="radio"]');
-      for (let i = 0; i < origCheckboxes.length && i < cloneCheckboxes.length; i++) {
-        if (origCheckboxes[i].checked) {
-          cloneCheckboxes[i].setAttribute('checked', 'checked');
-        } else {
-          cloneCheckboxes[i].removeAttribute('checked');
-        }
-      }
-
-      // Persist select element selected state using parallel iteration
-      const origSelects = panelBody.querySelectorAll('select');
-      const cloneSelects = clone.querySelectorAll('select');
-      for (let i = 0; i < origSelects.length && i < cloneSelects.length; i++) {
-        const origSelect = origSelects[i];
-        const cloneSelect = cloneSelects[i];
-        // Clear all selected attributes first
-        cloneSelect.querySelectorAll('option').forEach(opt => opt.removeAttribute('selected'));
-        // Set selected on the currently selected option(s) by matching value
-        Array.from(origSelect.selectedOptions).forEach(origOpt => {
-          const cloneOpts = cloneSelect.querySelectorAll('option');
-          for (let j = 0; j < cloneOpts.length; j++) {
-            if (cloneOpts[j].value === origOpt.value) {
-              cloneOpts[j].setAttribute('selected', 'selected');
-              break;
-            }
-          }
-        });
-      }
-
-      // Persist textarea values using parallel iteration (innerHTML doesn't capture typed content)
-      const origTextareas = panelBody.querySelectorAll('textarea');
-      const cloneTextareas = clone.querySelectorAll('textarea');
-      for (let i = 0; i < origTextareas.length && i < cloneTextareas.length; i++) {
-        cloneTextareas[i].textContent = origTextareas[i].value;
-      }
-
-      // Persist text/number/date input values using parallel iteration
-      const inputSelector = 'input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="email"], input[type="tel"], input[type="hidden"]';
-      const origInputs = panelBody.querySelectorAll(inputSelector);
-      const cloneInputs = clone.querySelectorAll(inputSelector);
-      for (let i = 0; i < origInputs.length && i < cloneInputs.length; i++) {
-        cloneInputs[i].setAttribute('value', origInputs[i].value);
-      }
-
-      return clone.innerHTML;
-    } catch (e) {
-      console.warn('serializeDraftHtml: Error serializing, falling back to innerHTML', e);
-      return panelBody.innerHTML;
-    }
-  }
 
   // ==========================================================================
   // JOB FORM TOGGLE UI (Call Reminder + Recurrence)
@@ -1011,9 +905,7 @@
           if (hasMissing) {
             // Trigger HTML5 validation display
             if (!form.reportValidity()) {
-              if (window.showToast) {
-                window.showToast('Please fill in all required fields before saving.', 'warning');
-              }
+              GTS.toast.warning('Please fill in all required fields before saving.');
               if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
               return;
             }
@@ -1105,17 +997,12 @@
           // Use fetch() to avoid navigation - never call form.submit()
           const formData = new FormData(form);
           const actionUrl = form.getAttribute('hx-post') || form.getAttribute('action') || window.location.href;
-          const csrfToken = window.getCookie ? window.getCookie('csrftoken') :
-            document.querySelector('meta[name="csrf-token"]')?.content ||
-            form.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
-
           fetch(actionUrl, {
             method: 'POST',
             body: formData,
-            headers: {
-              'X-CSRFToken': csrfToken || '',
-              'X-Requested-With': 'XMLHttpRequest'
-            }
+            headers: window.GTS && window.GTS.csrf
+              ? GTS.csrf.headers({ 'X-Requested-With': 'XMLHttpRequest' }, { root: form })
+              : { 'X-Requested-With': 'XMLHttpRequest' }
           })
             .then(response => {
               return response.text().then(html => ({
@@ -1254,7 +1141,7 @@
 
             // Capture current panel HTML for potential unsaved state restoration
             // Use serializeDraftHtml to preserve checkbox/select state
-            const currentHtml = panelBody ? serializeDraftHtml(panelBody) : null;
+            const currentHtml = panelBody ? GTS.htmlState.serializeDraftHtml(panelBody) : null;
 
             // Check for missing required fields FIRST
             const missingFields = this.getRequiredMissing(form);
@@ -1311,7 +1198,7 @@
                     if (window.JobWorkspace.markUnsaved) {
                       window.JobWorkspace.markUnsaved(jobId, result.responseHtml || currentHtml);
                     }
-                    window.showToast('Failed to save changes. Reopen the job to fix.', 'warning');
+                    GTS.toast.warning('Failed to save changes. Reopen the job to fix.');
                   }
                 });
               }
@@ -1353,9 +1240,9 @@
                     });
                     // Store draft ID so we can promote it later on successful save
                     window.JobPanel.currentDraftId = draftId;
-                    window.showToast('Job not saved yet. Reopen to fix errors.', 'warning');
+                    GTS.toast.warning('Job not saved yet. Reopen to fix errors.');
                   } else {
-                    window.showToast('Failed to save new job.', 'error');
+                    GTS.toast.error('Failed to save new job.');
                   }
                 }
               });
@@ -1516,7 +1403,7 @@
 
             // Capture current panel HTML for potential unsaved state restoration
             // Use serializeDraftHtml to preserve checkbox/select state
-            const currentHtml = panelBody ? serializeDraftHtml(panelBody) : null;
+            const currentHtml = panelBody ? GTS.htmlState.serializeDraftHtml(panelBody) : null;
 
             // Check for missing required fields
             const missingFields = self.getRequiredMissing(form);
@@ -1664,7 +1551,7 @@
       target.setAttribute('hx-trigger', 'refresh');
 
       // Sanitize the HTML to fix any invalid value attributes (e.g., from old cached drafts)
-      const sanitizedHtml = sanitizeDraftHtml(html);
+      const sanitizedHtml = GTS.htmlState.sanitizeDraftHtml(html);
       target.innerHTML = sanitizedHtml;
 
       // Re-run HTMX processing ONLY on the inner form content, not the panel body
@@ -1925,9 +1812,7 @@
           if (hasMissing) {
             // Trigger HTML5 validation display
             if (!form.reportValidity()) {
-              if (window.showToast) {
-                window.showToast('Please fill in all required fields before saving.', 'warning');
-              }
+              GTS.toast.warning('Please fill in all required fields before saving.');
               if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
               return;
             }
@@ -2019,17 +1904,12 @@
           // Use fetch() to avoid navigation - never call form.submit()
           const formData = new FormData(form);
           const actionUrl = form.getAttribute('hx-post') || form.getAttribute('action') || window.location.href;
-          const csrfToken = window.getCookie ? window.getCookie('csrftoken') :
-            document.querySelector('meta[name="csrf-token"]')?.content ||
-            form.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
-
           fetch(actionUrl, {
             method: 'POST',
             body: formData,
-            headers: {
-              'X-CSRFToken': csrfToken || '',
-              'X-Requested-With': 'XMLHttpRequest'
-            }
+            headers: window.GTS && window.GTS.csrf
+              ? GTS.csrf.headers({ 'X-Requested-With': 'XMLHttpRequest' }, { root: form })
+              : { 'X-Requested-With': 'XMLHttpRequest' }
           })
             .then(response => {
               return response.text().then(html => ({
@@ -2176,10 +2056,13 @@
    * Check if the initial save warning has already been shown for this job.
    */
   function hasShownInitialWarning(warningKey) {
+    const key = `gts-job-initial-save-attempted:${warningKey}`;
+    if (window.GTS && window.GTS.storage) {
+      return GTS.storage.getBool(key, true); // Default to true if storage fails
+    }
     try {
-      return localStorage.getItem(`gts-job-initial-save-attempted:${warningKey}`) === 'true';
+      return localStorage.getItem(key) === 'true';
     } catch (e) {
-      // localStorage blocked - treat as already shown to avoid annoyance
       return true;
     }
   }
@@ -2188,10 +2071,13 @@
    * Mark that the initial save warning has been shown for this job.
    */
   function markInitialWarningShown(warningKey) {
-    try {
-      localStorage.setItem(`gts-job-initial-save-attempted:${warningKey}`, 'true');
-    } catch (e) {
-      // localStorage blocked - ignore
+    const key = `gts-job-initial-save-attempted:${warningKey}`;
+    if (window.GTS && window.GTS.storage) {
+      GTS.storage.setBool(key, true);
+    } else {
+      try {
+        localStorage.setItem(key, 'true');
+      } catch (e) { }
     }
   }
 
@@ -2203,14 +2089,22 @@
     if (!form.dataset.tempWarningKey) return;
     const tempKey = form.dataset.tempWarningKey;
     const jobKey = `job:${jobId}`;
-    try {
-      const wasShown = localStorage.getItem(`gts-job-initial-save-attempted:${tempKey}`);
-      if (wasShown === 'true') {
-        localStorage.setItem(`gts-job-initial-save-attempted:${jobKey}`, 'true');
+    const tempStorageKey = `gts-job-initial-save-attempted:${tempKey}`;
+    const jobStorageKey = `gts-job-initial-save-attempted:${jobKey}`;
+
+    if (window.GTS && window.GTS.storage) {
+      if (GTS.storage.getBool(tempStorageKey, false)) {
+        GTS.storage.setBool(jobStorageKey, true);
       }
-      localStorage.removeItem(`gts-job-initial-save-attempted:${tempKey}`);
-    } catch (e) {
-      // localStorage blocked - ignore
+      GTS.storage.remove(tempStorageKey);
+    } else {
+      try {
+        const wasShown = localStorage.getItem(tempStorageKey);
+        if (wasShown === 'true') {
+          localStorage.setItem(jobStorageKey, 'true');
+        }
+        localStorage.removeItem(tempStorageKey);
+      } catch (e) { }
     }
     // Update the form's key reference
     delete form.dataset.tempWarningKey;
@@ -2351,9 +2245,16 @@
 
   function save(vm) {
     const st = { x: vm.x, y: vm.y, w: vm.w, h: vm.h, docked: vm.docked, title: vm.title, isOpen: vm.isOpen };
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); } catch (e) { }
+    if (window.GTS && window.GTS.storage) {
+      GTS.storage.setJson(STORAGE_KEY, st);
+    } else {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); } catch (e) { }
+    }
   }
   function load() {
+    if (window.GTS && window.GTS.storage) {
+      return GTS.storage.getJson(STORAGE_KEY, null);
+    }
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { return null; }
   }
 

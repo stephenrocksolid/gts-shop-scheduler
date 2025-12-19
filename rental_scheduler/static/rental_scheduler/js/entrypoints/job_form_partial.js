@@ -306,12 +306,11 @@
                 } else {
                     // Fallback: try to submit using fetch
                     const formData = new FormData(form);
-                    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
 
                     fetch(form.action || window.location.href, {
                         method: 'POST',
                         body: formData,
-                        headers: csrfToken ? { 'X-CSRFToken': csrfToken.value } : {}
+                        headers: { 'X-CSRFToken': GTS.csrf.getToken({ root: form }) }
                     })
                         .then(function(response) {
                             if (response.ok) {
@@ -338,8 +337,7 @@
                 // Check if clicked element is a print button
                 const btn = e.target.closest('.print-btn');
                 if (btn && !btn.disabled) {
-                    e.preventDefault();
-                    e.stopPropagation();
+                    GTS.dom.stop(e);
                     const jobId = btn.getAttribute('data-job-id');
                     const printType = btn.getAttribute('data-print-type');
 
@@ -432,10 +430,7 @@
             function performStatusUpdate(jobId, status) {
                 fetch('/api/jobs/' + jobId + '/update-status/', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': GTS.getCookie('csrftoken')
-                    },
+                    headers: GTS.csrf.headers({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ status: status })
                 })
                     .then(function(response) { return response.json(); })
@@ -465,10 +460,7 @@
                 if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
                     fetch('/api/jobs/' + jobId + '/delete/', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': GTS.getCookie('csrftoken')
-                        }
+                        headers: GTS.csrf.headers({ 'Content-Type': 'application/json' })
                     })
                         .then(function(response) { return response.json(); })
                         .then(function(data) {
