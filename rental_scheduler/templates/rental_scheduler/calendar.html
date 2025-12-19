@@ -1385,6 +1385,27 @@ Today
     </script>
 {% endblock %}
 {% block extra_js %}
+    <!-- Calendar module registry (must load first) -->
+    <script src="{% static 'rental_scheduler/js/calendar/registry.js' %}?v={{ timestamp|default:'1' }}"></script>
+    
+    <!-- Calendar modules (order doesn't matter after registry) -->
+    <script src="{% static 'rental_scheduler/js/calendar/utils.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/layout.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/events.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/today_sidebar.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/tooltips.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/rendering.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/day_interactions.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/toolbar.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/filters.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/job_actions.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/recurrence_virtual.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/call_reminders.js' %}?v={{ timestamp|default:'1' }}"></script>
+    <script src="{% static 'rental_scheduler/js/calendar/core.js' %}?v={{ timestamp|default:'1' }}"></script>
+    
+    <!-- Main calendar entrypoint (applies mixins + instantiates) -->
     <script src="{% static 'rental_scheduler/js/job_calendar.js' %}?v={{ timestamp|default:'1' }}"></script>
+    
+    <!-- Calendar page behaviors (search panel, sidebar resize, etc.) -->
     <script src="{% static 'rental_scheduler/js/entrypoints/calendar_page.js' %}?v={{ timestamp|default:'1' }}"></script>
 {% endblock %}

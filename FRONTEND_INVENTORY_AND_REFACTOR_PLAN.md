@@ -644,7 +644,7 @@ Definition of Done:
 
 ---
 
-### Phase 3 — Split `job_calendar.js` into logical modules (keep `window.jobCalendar`)
+### Phase 3 — Split `job_calendar.js` into logical modules (keep `window.jobCalendar`) ✅ COMPLETED
 **Goal**: keep all features, but make the code navigable.
 
 Target decomposition (example):
