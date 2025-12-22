@@ -232,6 +232,55 @@ class TestJobPanel:
             has_dates = start_input.count() > 0 or end_input.count() > 0
             assert has_dates, "Job panel should have date inputs"
 
+    def test_job_panel_date_call_received_stays_visible_after_htmx_load(self, page: Page, server_url):
+        """
+        Date Call Received should remain visible even if the panel's date input init
+        runs multiple times (e.g., both htmx:afterSwap and htmx:load fire).
+
+        Regression for: flatpickr alt input being removed while the original input is hidden.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+
+        # Open add job panel
+        add_button = page.locator(".fc-addJobButton-button")
+        if add_button.count() == 0:
+            pytest.skip("No add job button found in calendar toolbar")
+
+        add_button.click()
+        page.wait_for_selector("#job-panel", timeout=5000)
+
+        # Ensure the original field exists
+        page.wait_for_selector("#job-panel input[name='date_call_received']", timeout=5000)
+
+        # Allow initial flatpickr init to settle (setTimeout(100) in panel.js)
+        page.wait_for_timeout(500)
+
+        # Trigger a second init run (simulates the extra htmx lifecycle event)
+        page.evaluate("document.body.dispatchEvent(new Event('htmx:load'))")
+
+        # Allow the handler's setTimeout to run
+        page.wait_for_timeout(400)
+
+        # Assert that either the original input OR its visible flatpickr alt input is present/visible.
+        # Note: flatpickr may hide the original input (type='hidden') and show the alt input instead.
+        page.wait_for_function(
+            """
+            () => {
+              const orig = document.querySelector('#job-panel input[name="date_call_received"]');
+              if (!orig) return false;
+
+              const isVisible = (el) => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+              if (isVisible(orig)) return true;
+
+              // flatpickr altInput is inserted immediately after the original input
+              const alt = orig.nextElementSibling;
+              return isVisible(alt);
+            }
+            """,
+            timeout=5000,
+        )
+
 
 class TestDraftWorkspaceFlow:
     """Test draft minimize → workspace tab → reload → restore flow."""

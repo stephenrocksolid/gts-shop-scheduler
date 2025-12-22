@@ -131,6 +131,12 @@
                     return;
                 }
 
+                // Belt-and-suspenders: sync header calendar → hidden form field before validation
+                // This prevents "calendar missing" errors when UI shows a selected calendar
+                if (window.syncHiddenCalendarFromHeader) {
+                    window.syncHiddenCalendarFromHeader();
+                }
+
                 const missingFields = getRequiredMissing(form);
                 if (missingFields.length > 0) {
                     // Prevent the HTMX request from proceeding

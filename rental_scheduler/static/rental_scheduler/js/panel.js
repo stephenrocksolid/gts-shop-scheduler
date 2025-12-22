@@ -140,8 +140,47 @@
   // ==========================================================================
 
   /**
+   * Get the current hidden calendar select from the panel body.
+   * Returns null if not found. Used for dynamic lookup to avoid stale references.
+   */
+  function getHiddenCalendarSelect() {
+    return document.querySelector('#job-panel .panel-body #calendar-field-container select[name="calendar"]');
+  }
+
+  /**
+   * Sync header calendar select value FROM hidden form select.
+   * Call this when hidden select value may have changed (e.g., server-side update).
+   */
+  function syncHeaderFromHidden() {
+    const hiddenSelect = getHiddenCalendarSelect();
+    const headerSelect = document.getElementById('calendar-header-select');
+    if (hiddenSelect && headerSelect && headerSelect.value !== hiddenSelect.value) {
+      headerSelect.value = hiddenSelect.value;
+    }
+  }
+
+  /**
+   * Sync hidden form select value FROM header calendar select.
+   * Call this when header select value changes (user interaction).
+   */
+  function syncHiddenFromHeader() {
+    const hiddenSelect = getHiddenCalendarSelect();
+    const headerSelect = document.getElementById('calendar-header-select');
+    if (hiddenSelect && headerSelect && hiddenSelect.value !== headerSelect.value) {
+      hiddenSelect.value = headerSelect.value;
+      // Dispatch change event on hidden field in case other code listens for it
+      hiddenSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  // Expose sync functions globally for belt-and-suspenders usage
+  window.syncHiddenCalendarFromHeader = syncHiddenFromHeader;
+  window.syncHeaderCalendarFromHidden = syncHeaderFromHidden;
+
+  /**
    * Initialize the panel header calendar selector by cloning the hidden form select.
-   * Idempotent - safe to call multiple times (uses dataset guard).
+   * Safe to call multiple times - refreshes options and value from current hidden select.
+   * Uses delegated event handling so changes always write to the CURRENT hidden select.
    * @param {HTMLElement} panelBody - The panel body element containing the form
    */
   function initPanelCalendarSelector(panelBody) {
@@ -153,41 +192,53 @@
     const panelCalendarContainer = document.getElementById('panel-calendar-container');
 
     if (!calendarField || !panelCalendarSelector || !panelCalendarContainer) {
-      return; // Elements not found, nothing to do
-    }
-
-    // Check if we already have a header select that matches the current form
-    const existingHeaderSelect = panelCalendarSelector.querySelector('#calendar-header-select');
-
-    // Guard: if the header select already exists and has the same options, just sync value
-    if (existingHeaderSelect && existingHeaderSelect.dataset.calendarInitialized === '1') {
-      // Sync value from hidden field to header select (in case it changed)
-      existingHeaderSelect.value = calendarField.value;
-      panelCalendarContainer.style.display = 'flex';
+      // Hide container if no calendar field in form
+      if (panelCalendarContainer) panelCalendarContainer.style.display = 'none';
       return;
     }
 
-    // Clone the select element for the header (visual display)
-    const clonedSelect = calendarField.cloneNode(true);
-    clonedSelect.id = 'calendar-header-select';
-    clonedSelect.removeAttribute('name'); // Remove name to avoid duplicate submission
-    clonedSelect.dataset.calendarInitialized = '1'; // Mark as initialized
+    // Check if we already have a header select
+    let headerSelect = panelCalendarSelector.querySelector('#calendar-header-select');
 
-    // Clear any existing content in the selector container first
-    panelCalendarSelector.innerHTML = '';
-    // Add the cloned select to the header
-    panelCalendarSelector.appendChild(clonedSelect);
+    if (headerSelect) {
+      // Header select exists - refresh its options from the current hidden field
+      // This handles the case where the panel body was replaced (draft restore)
+      // and the hidden select has different options or value
 
-    // Set the cloned select's value to match the hidden field's current value
-    clonedSelect.value = calendarField.value;
+      // Clear and rebuild options to match current hidden select
+      headerSelect.innerHTML = '';
+      for (const opt of calendarField.options) {
+        const newOpt = opt.cloneNode(true);
+        headerSelect.appendChild(newOpt);
+      }
+      // Sync value from hidden field to header select
+      headerSelect.value = calendarField.value;
+    } else {
+      // Create header select by cloning the hidden one
+      headerSelect = calendarField.cloneNode(true);
+      headerSelect.id = 'calendar-header-select';
+      headerSelect.removeAttribute('name'); // Remove name to avoid duplicate submission
 
-    // Add event listener to sync changes from header dropdown to original hidden field
-    clonedSelect.addEventListener('change', function () {
-      // Update the original hidden field so it gets submitted with the form
-      calendarField.value = this.value;
-      // Dispatch change event on hidden field in case other code listens for it
-      calendarField.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+      // Clear any existing content and add the new select
+      panelCalendarSelector.innerHTML = '';
+      panelCalendarSelector.appendChild(headerSelect);
+
+      // Set the value to match the hidden field
+      headerSelect.value = calendarField.value;
+    }
+
+    // Bind a single delegated change handler on the container (idempotent)
+    // This handler dynamically looks up the hidden select so it never goes stale
+    if (panelCalendarSelector.dataset.calendarChangeHandlerBound !== '1') {
+      panelCalendarSelector.dataset.calendarChangeHandlerBound = '1';
+
+      panelCalendarSelector.addEventListener('change', function(e) {
+        if (e.target && e.target.id === 'calendar-header-select') {
+          // Use dynamic lookup to get the CURRENT hidden select
+          syncHiddenFromHeader();
+        }
+      });
+    }
 
     // Show the container
     panelCalendarContainer.style.display = 'flex';
@@ -427,18 +478,74 @@
   /**
    * Initialize flatpickr on date-only inputs in the panel that aren't
    * handled by schedule_picker.js (e.g., date_call_received, recurrence_until).
+   * 
+   * Uses JS-based idempotency (checking for live _flatpickr instance) rather than
+   * class-based checks, which can persist in cached draft HTML after restore.
    */
   function initPanelDatePickers() {
     const panel = document.getElementById('job-panel');
     if (!panel) return;
 
-    // Find date inputs that don't already have flatpickr and aren't start/end
-    const dateInputs = panel.querySelectorAll('input[type="date"]');
+    // Date field names that should be enhanced (date-only, not datetime)
+    const dateFieldNames = ['date_call_received', 'recurrence_until'];
+
+    // Find date inputs by type="date" OR by name (in case type was already converted to text)
+    const selector = 'input[type="date"], ' + dateFieldNames.map(n => `input[name="${n}"]`).join(', ');
+    const dateInputs = panel.querySelectorAll(selector);
+
     dateInputs.forEach(input => {
-      // Skip if already has flatpickr
-      if (input._flatpickr || input.classList.contains('flatpickr-input')) return;
       // Skip start_dt and end_dt (handled by schedule_picker.js)
       if (input.name === 'start_dt' || input.name === 'end_dt') return;
+
+      // Skip if this is a flatpickr alt input (no name attribute or has marker class)
+      if (!input.name || input.classList.contains('gts-flatpickr-alt')) return;
+
+      // Skip if this input isn't one of our known date-only fields and isn't a native date input.
+      // This keeps us from unexpectedly hijacking other inputs in the panel.
+      if (!dateFieldNames.includes(input.name) && input.type !== 'date') return;
+
+      // Detect a live flatpickr instance (JS-based idempotency)
+      // (Don't rely on class checks; they can persist in cached draft HTML.)
+      const hasLiveInstance = input._flatpickr && typeof input._flatpickr.open === 'function';
+      if (hasLiveInstance) {
+        // If the instance exists and its alt input is still in the DOM, we are done.
+        // IMPORTANT: Do NOT remove alt inputs here; doing so would hide the field because
+        // flatpickr keeps the original input hidden when altInput:true.
+        const alt = input._flatpickr && input._flatpickr.altInput;
+        if (alt && alt.isConnected) return;
+
+        // Self-heal: if an earlier run removed the alt input, destroy and re-init.
+        try {
+          input._flatpickr.destroy();
+        } catch (e) {
+          // Ignore; we'll attempt to re-init below.
+        }
+      }
+
+      // ================================================================
+      // CLEANUP (only when we are about to initialize/re-initialize)
+      // Remove stale alt inputs from restored draft HTML to prevent duplicates.
+      // ================================================================
+      const markerClass = window.GtsDateInputs ? window.GtsDateInputs.ALT_INPUT_MARKER_CLASS : 'gts-flatpickr-alt';
+      let sibling = input.nextElementSibling;
+      while (sibling && sibling.tagName === 'INPUT') {
+        if (sibling.classList.contains(markerClass) || !sibling.name) {
+          const toRemove = sibling;
+          sibling = sibling.nextElementSibling;
+          toRemove.remove();
+        } else {
+          break;
+        }
+      }
+
+      // Clean up stale flatpickr class from restored draft HTML
+      input.classList.remove('flatpickr-input');
+      input.removeAttribute('data-fp-original');
+      input.removeAttribute('readonly');
+      if (input.type === 'hidden') {
+        // Draft restore can leave the original hidden; ensure it's visible before re-init.
+        input.type = 'text';
+      }
 
       // Store original value before converting
       const originalValue = input.value;
@@ -446,11 +553,16 @@
       // Change type to text so flatpickr can work with it
       input.type = 'text';
 
+      // Build altInputClass: include our marker class plus the original input's classes
+      const originalClasses = input.className || '';
+      const altInputClass = 'gts-flatpickr-alt ' + originalClasses;
+
       // Initialize flatpickr with friendly format
-      const fp = window.flatpickr(input, {
+      window.flatpickr(input, {
         dateFormat: 'Y-m-d',
         altInput: true,
         altFormat: 'M j, Y',
+        altInputClass: altInputClass.trim(),
         allowInput: true,
         disableMobile: true,
         defaultDate: originalValue || null,
@@ -464,6 +576,10 @@
         onReady: function (selectedDates, dateStr, instance) {
           if (instance.input) {
             instance.input.setAttribute('data-fp-original', 'true');
+          }
+          // Copy inline styles from original to alt input
+          if (instance.altInput && input.style.cssText) {
+            instance.altInput.style.cssText = input.style.cssText;
           }
         }
       });
@@ -763,6 +879,11 @@
        */
       getRequiredMissing(form) {
         if (!form) return ['form'];
+
+        // Belt-and-suspenders: sync header calendar → hidden form field before validation
+        // This prevents "calendar missing" errors when UI shows a selected calendar
+        syncHiddenFromHeader();
+
         const missing = [];
 
         // Business name - required and must not be whitespace-only
@@ -1717,8 +1838,9 @@
         }
 
         // Initialize schedule picker if available
-        if (window.initSchedulePicker) {
-          window.initSchedulePicker();
+        // Note: schedule_picker.js exposes window.SchedulePicker.init, NOT window.initSchedulePicker
+        if (window.SchedulePicker && window.SchedulePicker.init) {
+          window.SchedulePicker.init();
         }
       }, 50);
     },
