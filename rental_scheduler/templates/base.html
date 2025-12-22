@@ -136,12 +136,52 @@
         <!-- GTS Init Helpers (idempotent initialization for HTMX pages) -->
         <script src="{% static 'rental_scheduler/js/gts_init.js' %}"></script>
 
-        <!-- GTS Shared Library (load order matters: csrf, toast, storage, dom, html_state) -->
+        <!-- GTS Shared Library (load order matters: csrf, toast, storage, dom, html_state, urls) -->
         <script src="{% static 'rental_scheduler/js/shared/csrf.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/toast.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/storage.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/dom.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/html_state.js' %}"></script>
+        <script src="{% static 'rental_scheduler/js/shared/urls.js' %}"></script>
+
+        <!-- GTS Global URL Configuration (Django-injected, used by all JS modules) -->
+        <script>
+        (function() {
+            window.GTS = window.GTS || {};
+            window.GTS.urls = window.GTS.urls || {};
+
+            // Page routes
+            GTS.urls.jobList = "{% url 'rental_scheduler:job_list' %}";
+            GTS.urls.calendarList = "{% url 'rental_scheduler:calendar_list' %}";
+            GTS.urls.calendar = "{% url 'rental_scheduler:calendar' %}";
+
+            // Job partial routes
+            GTS.urls.jobCreatePartialBase = "{% url 'rental_scheduler:job_create_partial' %}";
+
+            // Job API routes (templates with {job_id} placeholder)
+            GTS.urls.jobDetailApiTemplate = "{% url 'rental_scheduler:job_detail_api' pk=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.jobUpdateStatusTemplate = "{% url 'rental_scheduler:update_job_status' job_id=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.jobDeleteTemplate = "{% url 'rental_scheduler:delete_job_api' job_id=0 %}".replace('/0/', '/{job_id}/');
+
+            // Recurrence API
+            GTS.urls.materializeOccurrence = "{% url 'rental_scheduler:materialize_occurrence_api' %}";
+
+            // Call reminder routes
+            GTS.urls.callReminderCreatePartialBase = "{% url 'rental_scheduler:call_reminder_create_partial' %}";
+            GTS.urls.callReminderUpdateTemplate = "{% url 'rental_scheduler:call_reminder_update' pk=0 %}".replace('/0/', '/{pk}/');
+            GTS.urls.callReminderDeleteTemplate = "{% url 'rental_scheduler:call_reminder_delete' pk=0 %}".replace('/0/', '/{pk}/');
+            GTS.urls.jobCallReminderUpdateTemplate = "{% url 'rental_scheduler:job_call_reminder_update' job_id=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.markCallReminderCompleteTemplate = "{% url 'rental_scheduler:mark_call_reminder_complete' job_id=0 %}".replace('/0/', '/{job_id}/');
+
+            // Print URLs (templates with {job_id} placeholder)
+            GTS.urls.jobPrintWoTemplate = "{% url 'rental_scheduler:job_print_wo' pk=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.jobPrintWoCustomerTemplate = "{% url 'rental_scheduler:job_print_wo_customer' pk=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.jobPrintInvoiceTemplate = "{% url 'rental_scheduler:job_print_invoice' pk=0 %}".replace('/0/', '/{job_id}/');
+
+            // Calendar data API
+            GTS.urls.calendarEvents = "{% url 'rental_scheduler:job_calendar_data' %}";
+        })();
+        </script>
 
         <script>
         // Global toast utility (vanilla JS)

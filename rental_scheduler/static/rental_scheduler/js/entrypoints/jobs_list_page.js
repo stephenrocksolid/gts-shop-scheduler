@@ -255,21 +255,9 @@
             // Get job ID from the row
             const jobId = row.getAttribute('data-job-id');
             if (jobId && window.JobPanel) {
-                // Get the job create URL from the config or data attribute
-                let jobCreateUrl = '';
-                if (window.jobListConfig && window.jobListConfig.jobCreateUrl) {
-                    jobCreateUrl = window.jobListConfig.jobCreateUrl;
-                } else if (jobTableContainer.getAttribute('data-job-create-url')) {
-                    jobCreateUrl = jobTableContainer.getAttribute('data-job-create-url');
-                } else if (window.calendarConfig && window.calendarConfig.jobCreateUrl) {
-                    jobCreateUrl = window.calendarConfig.jobCreateUrl;
-                } else {
-                    // Fallback URL
-                    jobCreateUrl = '/jobs/new/partial/';
-                }
-                
+                // Use config-driven URL from GTS.urls (global, always available)
                 window.JobPanel.setTitle('Edit Job');
-                window.JobPanel.load(jobCreateUrl + '?edit=' + jobId);
+                window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
             }
         });
 

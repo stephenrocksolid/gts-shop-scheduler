@@ -109,7 +109,7 @@
 
             // Load job edit form in panel
             window.JobPanel.setTitle('Edit Job');
-            window.JobPanel.load('/jobs/new/partial/?edit=' + jobId);
+            window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
 
             // Track current job ID for workspace integration
             if (window.JobPanel.setCurrentJobId) {
@@ -241,7 +241,7 @@
             var self = this;
             var csrfToken = this.getCSRFToken();
 
-            fetch('/rental_scheduler/api/jobs/' + jobId + '/update-status/', {
+            fetch(GTS.urls.jobUpdateStatus(jobId), {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: {

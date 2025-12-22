@@ -588,8 +588,9 @@
                         searchResults.innerHTML = '<div class="text-center text-gray-500 py-8">Searching...</div>';
                     }
 
-                    // Make AJAX request to job list endpoint
-                    fetch('/jobs/?' + params.toString(), {
+                    // Make AJAX request to job list endpoint using config-driven URL
+                    var jobListUrl = GTS.urls.jobList + '?' + params.toString();
+                    fetch(jobListUrl, {
                         headers: {
                             'X-Requested-With': 'XMLHttpRequest'
                         }
@@ -648,9 +649,9 @@
                         }
 
                         const jobId = row.getAttribute('data-job-id');
-                        if (jobId && window.JobPanel && window.calendarConfig) {
+                        if (jobId && window.JobPanel) {
                             window.JobPanel.setTitle('Edit Job');
-                            window.JobPanel.load(window.calendarConfig.jobCreateUrl + '?edit=' + jobId);
+                            window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
                         }
                     });
 

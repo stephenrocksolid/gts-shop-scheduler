@@ -278,7 +278,7 @@
                             // Remove the event listener
                             document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
 
-                            const url = '/jobs/' + actualJobId + '/print/' + printType + '/';
+                            var url = GTS.urls.jobPrint(actualJobId, printType);
                             printViaIframe(url);
                         } else {
                             console.error('Failed to save job:', event.detail);
@@ -315,7 +315,7 @@
                         .then(function(response) {
                             if (response.ok) {
                                 console.log('Job saved successfully, now printing...');
-                                const url = '/jobs/' + jobId + '/print/' + printType + '/';
+                                var url = GTS.urls.jobPrint(jobId, printType);
                                 printViaIframe(url);
                             } else {
                                 throw new Error('Save failed - status ' + response.status);
@@ -349,7 +349,7 @@
                         saveJobThenPrint(form, jobId, printType);
                     } else if (jobId && jobId !== '0') {
                         // Not in a form but have a valid job ID - print directly
-                        const url = '/jobs/' + jobId + '/print/' + printType + '/';
+                        var url = GTS.urls.jobPrint(jobId, printType);
                         console.log('Print button clicked! JobId:', jobId, 'Type:', printType);
                         printViaIframe(url);
                     } else {
@@ -428,7 +428,7 @@
              * Perform the actual status update API call
              */
             function performStatusUpdate(jobId, status) {
-                fetch('/api/jobs/' + jobId + '/update-status/', {
+                fetch(GTS.urls.jobUpdateStatus(jobId), {
                     method: 'POST',
                     headers: GTS.csrf.headers({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ status: status })
@@ -458,7 +458,7 @@
              */
             function deleteJob(jobId) {
                 if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
-                    fetch('/api/jobs/' + jobId + '/delete/', {
+                    fetch(GTS.urls.jobDelete(jobId), {
                         method: 'POST',
                         headers: GTS.csrf.headers({ 'Content-Type': 'application/json' })
                     })

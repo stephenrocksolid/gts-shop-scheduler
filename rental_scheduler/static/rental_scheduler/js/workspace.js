@@ -98,7 +98,7 @@
             // Load job edit form in panel
             if (window.JobPanel) {
                 window.JobPanel.setTitle('Edit Job');
-                window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
                 window.JobPanel.setCurrentJobId(jobId); // Pass normalized ID
 
                 // Update minimize button after a short delay to ensure panel is ready
@@ -310,7 +310,7 @@
                 } else if (job.isDraft) {
                     // Draft without HTML (shouldn't happen, but handle gracefully)
                     window.JobPanel.setTitle('New Job');
-                    window.JobPanel.load('/jobs/new/partial/');
+                    window.JobPanel.load(GTS.urls.jobCreatePartial());
                     window.JobPanel.currentDraftId = jobId;
                     window.JobPanel.setCurrentJobId(null);
 
@@ -323,7 +323,7 @@
                 } else {
                     // Normal case: load job from server
                     window.JobPanel.setTitle('Edit Job');
-                    window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                    window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
                     window.JobPanel.setCurrentJobId(jobId);
                     window.JobPanel.currentDraftId = null;
 
@@ -732,7 +732,7 @@
                 }
 
                 // For real jobs, fetch from API
-                const response = await fetch(`/api/jobs/${jobId}/detail/`);
+                const response = await fetch(GTS.urls.jobDetailApi(jobId));
                 if (!response.ok) {
                     console.error(`Failed to fetch job details for job ${jobId}`);
                     return;

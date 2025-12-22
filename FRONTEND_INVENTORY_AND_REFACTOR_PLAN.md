@@ -104,6 +104,7 @@ This doc captures:
 - `window.RentalConfig` (defined in `config.js`)
 - `window.JobPanel` (defined in `panel.js`)
 - `window.JobWorkspace` (defined in `workspace.js`)
+- `window.GTS.urls` (defined in `base.html` + `shared/urls.js`) — canonical URL registry
 
 **Key architectural note**
 Because panel + workspace are global, *every page* shares state and side-effects. This is powerful, but it also means:
@@ -133,8 +134,7 @@ Because panel + workspace are global, *every page* shares state and side-effects
 
 **Inputs / data dependencies**
 - `window.calendarConfig` injected by `calendar.html`, including:
-  - `eventsUrl` (expected: `/api/job-calendar-data/`)
-  - `jobCreateUrl` (expected: `/jobs/new/partial/`)
+  - `urls` object (Phase 5): `calendarEvents`, `jobCreatePartial`, `jobList`, `calendarList`, `jobUpdateStatus`, `jobDetailApi`, `materializeOccurrence`, `callReminderCreatePartial`, `jobCallReminderUpdate`, `markCallReminderComplete`, `callReminderUpdate`, `callReminderDelete`
   - `guardrails` (server constants for panel validation)
   - `calendars` list (id, name, color)
   - `statusChoices`
@@ -160,28 +160,28 @@ Because panel + workspace are global, *every page* shares state and side-effects
 - Client event cache:
   - `cal-events-cache:<start>:<end>:<calendarIds>:<status>:<search>` (5-minute TTL, keep last ~5 keys)
 
-**Endpoints touched**
+**Endpoints touched** (all sourced from `GTS.urls` as of Phase 5)
 - Events feed:
-  - `GET window.calendarConfig.eventsUrl` → `/api/job-calendar-data/`
+  - `GET GTS.urls.calendarEvents` → `/api/job-calendar-data/`
 - Panel partials:
-  - `GET /jobs/new/partial/?date=YYYY-MM-DD` (new job)
-  - `GET /jobs/new/partial/?edit=<jobId>` (edit)
-  - `GET /call-reminders/new/partial/?date=YYYY-MM-DD` (new reminder)
+  - `GET GTS.urls.jobCreatePartial({ date: 'YYYY-MM-DD' })` (new job)
+  - `GET GTS.urls.jobCreatePartial({ edit: jobId })` (edit)
+  - `GET GTS.urls.callReminderCreatePartial({ date: 'YYYY-MM-DD' })` (new reminder)
 - Recurrence:
-  - `POST /api/recurrence/materialize/` (virtual occurrence → real job)
+  - `POST GTS.urls.materializeOccurrence()` (virtual occurrence → real job)
 - Call reminders:
-  - `POST /api/jobs/<jobId>/mark-call-reminder-complete/`
-  - `POST /jobs/<jobId>/call-reminder/update/`
-  - `POST /call-reminders/<reminderId>/update/`
-  - `POST /call-reminders/<reminderId>/delete/`
+  - `POST GTS.urls.markCallReminderComplete(jobId)`
+  - `POST GTS.urls.jobCallReminderUpdate(jobId)`
+  - `POST GTS.urls.callReminderUpdate(pk)`
+  - `POST GTS.urls.callReminderDelete(pk)`
 - Navigation:
-  - `/jobs/`, `/calendars/`
+  - `GTS.urls.jobList()`, `GTS.urls.calendarList()`
 
 **Known drift / cleanup targets (calendar)**
-- **Inline JS in `calendar.html` duplicates responsibilities** (sidebar resize, scroll prevention, search panel fetch/DOMParser flow). Move to a single owner.
+- **Inline JS in `calendar.html` duplicates responsibilities** (sidebar resize, scroll prevention, search panel fetch/DOMParser flow). Move to a single owner. ✅ Resolved in Phase 1.
 - **Duplicate FullCalendar config keys** (e.g. `datesSet` is declared twice in `job_calendar.js`, so one overrides the other).
 - **Dead/unused methods** exist (e.g. `showJobRowTooltip()` appears defined but not wired).
-- **Hard-coded URL bug risk**: `updateJobStatus()` uses `/rental_scheduler/api/...` even though the app is mounted at `/` (should rely on `calendarConfig.jobUpdateUrl` or `urls.py`-derived path).
+- ~~**Hard-coded URL bug risk**: `updateJobStatus()` uses `/rental_scheduler/api/...`~~ ✅ Resolved in Phase 5 — all URLs now use `GTS.urls.*`.
 
 ---
 
@@ -259,9 +259,9 @@ Because panel + workspace are global, *every page* shares state and side-effects
 - Draft IDs are of form:
   - `draft-<timestamp>-<random>`
 
-**Backend endpoints used**
+**Backend endpoints used** (sourced from `GTS.urls` as of Phase 5)
 - Tooltip fetch:
-  - `GET /api/jobs/<jobId>/detail/`
+  - `GET GTS.urls.jobDetailApi(jobId)` → `/api/jobs/<jobId>/detail/`
 
 **Known drift / cleanup targets (workspace)**
 - Draft HTML sanitization exists here and in `panel.js` (duplication).
@@ -336,10 +336,14 @@ The partial intercepts `htmx:beforeRequest` to enforce required fields for user-
 
 ### A) `window.calendarConfig` schema (calendar.html → JS)
 Minimal expected fields:
-- `eventsUrl: string`
-- `jobCreateUrl: string`
+- `csrfToken: string`
 - `guardrails: { minValidYear, maxValidYear, warnDaysInFuture, warnJobSpanDays, ... }`
 - `calendars: Array<{ id: number, name: string, color: string }>`
+- `statusChoices: Array`
+- `currentFilters: { calendar, status, search }`
+- `savedFilters: Object`
+
+**Note**: All URL endpoints are now sourced from `window.GTS.urls` (defined in `base.html`), not from `calendarConfig`.
 
 ### B) Events feed schema (backend → FullCalendar)
 FullCalendar expects `events` array with fields like:
@@ -626,13 +630,15 @@ Definition of Done:
 - `rental_scheduler/static/rental_scheduler/js/shared/storage.js`
 - `rental_scheduler/static/rental_scheduler/js/shared/dom.js`
 - `rental_scheduler/static/rental_scheduler/js/shared/html_state.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/urls.js` (added in Phase 5)
 
-Create shared modules (even without a bundler, we can do plain JS files loaded in order):
+Shared modules (plain JS files loaded in order):
 - `shared/csrf.js` (single CSRF getter)
 - `shared/toast.js` (wrap `window.showToast`)
 - `shared/storage.js` (namespaced localStorage helpers)
 - `shared/dom.js` (safe event binding, delegation helpers)
 - `shared/html_state.js` (serialize/sanitize draft HTML)
+- `shared/urls.js` (URL interpolation helper + convenience wrappers)
 
 Definition of Done:
 - ✅ Panel + workspace use the same serialize/sanitize code.
@@ -704,15 +710,73 @@ Definition of Done:
 
 ---
 
-### Phase 5 — Make URL usage consistent (stop hard-coded endpoints)
+### Phase 5 — Make URL usage consistent (stop hard-coded endpoints) ✅ COMPLETED
 **Goal**: URLs come from Django or one config object.
 
-- Prefer Django-injected URLs in `window.calendarConfig` for calendar-related endpoints.
-- For other pages, prefer adding small `data-*` attributes with URLs or injecting a `window.urls` object.
-- Remove hard-coded `/rental_scheduler/...` style paths.
+**Status**: ✅ **COMPLETED** (2025-12-22)
+
+**What was done**:
+
+1. **Created `shared/urls.js`** - URL interpolation helper and convenience wrappers
+   - `GTS.urls.interpolate(template, params)` - Replaces `{key}` placeholders and adds query params
+   - Convenience wrappers for all commonly used URLs (e.g., `GTS.urls.jobDetailApi(jobId)`)
+   - Throws console errors for missing required parameters
+
+2. **Updated `base.html`** to inject `window.GTS.urls` with Django-reversed URLs:
+   - Direct URLs: `jobList`, `calendarList`, `calendar`, `calendarEvents`, `materializeOccurrence`
+   - Base URLs (for query params): `jobCreatePartialBase`, `callReminderCreatePartialBase`
+   - Template URLs (with placeholders): `jobDetailApiTemplate`, `jobUpdateStatusTemplate`, `jobDeleteTemplate`, `callReminderUpdateTemplate`, `callReminderDeleteTemplate`, `jobCallReminderUpdateTemplate`, `markCallReminderCompleteTemplate`, `jobPrintWoTemplate`, `jobPrintWoCustomerTemplate`, `jobPrintInvoiceTemplate`
+
+3. **Updated `calendar.html`** - removed legacy URL properties:
+   - Removed `eventsUrl`, `jobUpdateUrl`, `jobDetailUrl`, `jobEditUrl`, `jobCreateUrl`
+   - All URLs now sourced exclusively from `GTS.urls`
+   - Also removed unused `jobListConfig` from `job_list.html`
+
+4. **Replaced hard-coded URLs in all calendar modules** (`calendar/*.js`):
+   - `core.js`: Navigation to `/jobs/` and `/calendars/` → `GTS.urls.jobList` / `calendarList`
+   - `events.js`: Removed hard-coded `/api/job-calendar-data/` fallback
+   - `job_actions.js`: Edit job partial + status update
+   - `tooltips.js`: Job detail API fetch
+   - `day_interactions.js`: New job/reminder creation URLs
+   - `recurrence_virtual.js`: Materialize API + edit job partial
+   - `call_reminders.js`: Complete/update/delete reminder endpoints
+
+5. **Replaced hard-coded URLs in globally loaded scripts**:
+   - `workspace.js`: Job partial loading + tooltip API fetch
+   - `job_form_partial.js`: Print URLs + status update + delete
+
+6. **Replaced hard-coded URLs in page entrypoints**:
+   - `calendar_page.js`: Search results fetch + open job in panel
+   - `jobs_list_page.js`: Removed hard-coded `/jobs/new/partial/` fallback
+
+7. **Added pytest guard test** (`tests/test_no_hardcoded_urls.py`):
+   - Scans all JS files for forbidden URL patterns
+   - Patterns include: `/api/`, `/jobs/`, `/calendars/`, `/call-reminders/`, `/rental_scheduler/`
+   - Allowlist for `GTS.urls.*` references (the canonical URL source)
+   - Can run standalone: `python tests/test_no_hardcoded_urls.py`
+
+**Files created**:
+- `rental_scheduler/static/rental_scheduler/js/shared/urls.js`
+- `tests/test_no_hardcoded_urls.py`
+
+**Files modified**:
+- `rental_scheduler/templates/base.html`
+- `rental_scheduler/templates/rental_scheduler/calendar.html`
+- `rental_scheduler/templates/rental_scheduler/jobs/job_list.html`
+- `rental_scheduler/static/rental_scheduler/js/calendar/core.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/events.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/job_actions.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/tooltips.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/day_interactions.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/recurrence_virtual.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/call_reminders.js`
+- `rental_scheduler/static/rental_scheduler/js/workspace.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/calendar_page.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/jobs_list_page.js`
 
 Definition of Done:
-- No hard-coded app-prefix URLs in JS.
+- ✅ No hard-coded app-prefix URLs in JS (verified by guard test).
 
 ---
 
@@ -806,12 +870,15 @@ Keep `panel.js` + `workspace.js` facades initially, then shrink them to wrappers
 
 ## Appendix C — Existing test safety net
 - Playwright smoke tests: `tests/e2e/test_calendar_smoke.py`
+- Hard-coded URL guard: `tests/test_no_hardcoded_urls.py` (added in Phase 5)
+  - Scans all JS files for forbidden URL patterns
+  - Run standalone: `python tests/test_no_hardcoded_urls.py`
 
 Recommended additions:
-- “minimize → tab appears → restore → save”
-- “draft persists across reload”
-- “virtual occurrence materialize opens job”
-- “call reminder update/delete reflected on calendar”
+- "minimize → tab appears → restore → save"
+- "draft persists across reload"
+- "virtual occurrence materialize opens job"
+- "call reminder update/delete reflected on calendar"
 
 
 

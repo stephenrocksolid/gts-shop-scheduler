@@ -1356,11 +1356,6 @@ Today
     <script>
     // Calendar configuration and data (kept inline - required by job_calendar.js and calendar_page.js)
     window.calendarConfig = {
-        eventsUrl: "{% url 'rental_scheduler:job_calendar_data' %}",
-        jobUpdateUrl: "{% url 'rental_scheduler:update_job_status' 0 %}".replace('/0/', '/'),
-        jobDetailUrl: "",
-        jobEditUrl: "",
-        jobCreateUrl: "{% url 'rental_scheduler:job_create_partial' %}",
         csrfToken: "{{ csrf_token }}",
         calendars: JSON.parse('{{ calendars_json|default:"[]"|escapejs }}'),
         statusChoices: JSON.parse('{{ status_choices|default:"[]"|escapejs }}'),

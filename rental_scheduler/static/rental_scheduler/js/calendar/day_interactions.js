@@ -146,17 +146,19 @@
                     });
 
                     if (isSunday) {
-                        var url = '/call-reminders/new/partial/?date=' + dateStr;
+                        var queryParams = { date: dateStr };
                         if (self.defaultCalendar) {
-                            url += '&calendar=' + self.defaultCalendar;
+                            queryParams.calendar = self.defaultCalendar;
                         }
+                        var url = GTS.urls.callReminderCreatePartial(queryParams);
                         window.JobPanel.setTitle('New Call Reminder');
                         window.JobPanel.load(url);
                     } else {
-                        var url = '/jobs/new/partial/?date=' + dateStr;
+                        var queryParams = { date: dateStr };
                         if (self.defaultCalendar) {
-                            url += '&calendar=' + self.defaultCalendar;
+                            queryParams.calendar = self.defaultCalendar;
                         }
+                        var url = GTS.urls.jobCreatePartial(queryParams);
                         window.JobPanel.setTitle('New Job');
                         window.JobPanel.load(url);
                     }

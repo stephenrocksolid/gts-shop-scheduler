@@ -27,7 +27,7 @@
             console.log('Materializing virtual occurrence:', parentId, originalStart);
             this.showLoading();
 
-            fetch('/api/recurrence/materialize/', {
+            fetch(GTS.urls.materializeOccurrence, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -60,7 +60,7 @@
                         });
                     } else if (window.JobPanel) {
                         window.JobPanel.setTitle('Edit Job');
-                        window.JobPanel.load('/jobs/new/partial/?edit=' + jobId);
+                        window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
                         if (window.JobPanel.setCurrentJobId) {
                             window.JobPanel.setCurrentJobId(jobId);
                         }
@@ -98,7 +98,7 @@
             console.log('Materializing virtual call reminder:', parentId, originalStart);
             this.showLoading();
 
-            fetch('/api/recurrence/materialize/', {
+            fetch(GTS.urls.materializeOccurrence, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

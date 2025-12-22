@@ -35,12 +35,7 @@
 {% endblock %}
 
 {% block extra_js %}
-    <script>
-    // Minimal config object for jobs list page
-    window.jobListConfig = {
-        jobCreateUrl: "{% url 'rental_scheduler:job_create_partial' %}"
-    };
-    </script>
+    <!-- Jobs list page behaviors (uses GTS.urls from base.html) -->
     <script src="{% static 'rental_scheduler/js/entrypoints/jobs_list_page.js' %}"></script>
 {% endblock %}
 

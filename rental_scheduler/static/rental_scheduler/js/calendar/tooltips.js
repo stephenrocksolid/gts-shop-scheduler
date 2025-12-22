@@ -224,7 +224,7 @@
             var jobId = rowElement && rowElement.getAttribute ? rowElement.getAttribute('data-job-id') : null;
             if (!jobId) return;
 
-            fetch('/api/jobs/' + jobId + '/detail/')
+            fetch(GTS.urls.jobDetailApi(jobId))
                 .then(function(response) {
                     if (!response.ok) return null;
                     return response.json();

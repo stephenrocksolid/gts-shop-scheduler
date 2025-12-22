@@ -103,7 +103,7 @@
          */
         proto.markCallReminderComplete = function(jobId) {
             var self = this;
-            fetch('/api/jobs/' + jobId + '/mark-call-reminder-complete/', {
+            fetch(GTS.urls.markCallReminderComplete(jobId), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -135,7 +135,7 @@
             var notesEl = document.getElementById('reminder-notes');
             var notes = notesEl ? notesEl.value : '';
 
-            fetch('/jobs/' + jobId + '/call-reminder/update/', {
+            fetch(GTS.urls.jobCallReminderUpdate(jobId), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -168,7 +168,7 @@
         proto.openJobFromReminder = function(jobId) {
             if (window.JobPanel) {
                 window.JobPanel.setTitle('Edit Job');
-                window.JobPanel.load('/jobs/new/partial/?edit=' + jobId);
+                window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
             }
         };
 
@@ -180,7 +180,7 @@
             var notesEl = document.getElementById('reminder-notes');
             var notes = notesEl ? notesEl.value : '';
 
-            fetch('/call-reminders/' + reminderId + '/update/', {
+            fetch(GTS.urls.callReminderUpdate(reminderId), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -212,7 +212,7 @@
          */
         proto.markStandaloneReminderComplete = function(reminderId) {
             var self = this;
-            fetch('/call-reminders/' + reminderId + '/update/', {
+            fetch(GTS.urls.callReminderUpdate(reminderId), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -246,7 +246,7 @@
                 return;
             }
 
-            fetch('/call-reminders/' + reminderId + '/delete/', {
+            fetch(GTS.urls.callReminderDelete(reminderId), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

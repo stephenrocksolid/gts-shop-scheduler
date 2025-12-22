@@ -79,13 +79,13 @@
                     jobsButton: {
                         text: 'Jobs',
                         click: function() {
-                            window.location.href = '/jobs/';
+                            window.location.href = GTS.urls.jobList;
                         }
                     },
                     settingsButton: {
                         text: 'Settings',
                         click: function() {
-                            window.location.href = '/calendars/';
+                            window.location.href = GTS.urls.calendarList;
                         }
                     },
                     todaySidebarButton: {

@@ -248,8 +248,13 @@
             // No cache or forced refresh - show loading and fetch
             this.showLoading();
 
-            // Use the correct API endpoint from calendarConfig
-            var apiUrl = (window.calendarConfig && window.calendarConfig.eventsUrl) || '/api/job-calendar-data/';
+            // Use the calendar events URL from GTS.urls (canonical source)
+            var apiUrl = GTS.urls.calendarEvents;
+            if (!apiUrl) {
+                console.error('[Calendar] No calendar events URL configured');
+                failureCallback('Calendar events URL not configured');
+                return;
+            }
 
             var fullUrl = apiUrl + '?' + params;
 
@@ -355,7 +360,12 @@
          */
         proto._backgroundRefetch = function(info, cacheKey, cachedSignature, perfEnabled) {
             var self = this;
-            var apiUrl = (window.calendarConfig && window.calendarConfig.eventsUrl) || '/api/job-calendar-data/';
+            // Use the calendar events URL from GTS.urls (canonical source)
+            var apiUrl = GTS.urls.calendarEvents;
+            if (!apiUrl) {
+                console.error('[Calendar] No calendar events URL configured for background refetch');
+                return;
+            }
 
             // Build params
             var params = new URLSearchParams({
