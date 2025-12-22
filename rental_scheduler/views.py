@@ -493,6 +493,20 @@ class JobListView(ListView):
         return context
 
 
+class JobListTablePartialView(JobListView):
+    """
+    Returns only the job list table fragment (no surrounding page layout).
+    Used by the calendar search panel to avoid HTML scraping.
+    """
+    template_name = 'rental_scheduler/partials/job_list_table.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        # Remove 'calendars' from context - the table partial doesn't need the full calendar list
+        context.pop('calendars', None)
+        return context
+
+
 class JobDeleteView(DeleteView):
     """Delete a job"""
     model = Job

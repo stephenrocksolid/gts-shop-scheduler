@@ -163,6 +163,8 @@ Because panel + workspace are global, *every page* shares state and side-effects
 **Endpoints touched** (all sourced from `GTS.urls` as of Phase 5)
 - Events feed:
   - `GET GTS.urls.calendarEvents` → `/api/job-calendar-data/`
+- Search panel (Phase 6):
+  - `GET GTS.urls.jobListTablePartial` → `/jobs/partial/table/` (table fragment for search results)
 - Panel partials:
   - `GET GTS.urls.jobCreatePartial({ date: 'YYYY-MM-DD' })` (new job)
   - `GET GTS.urls.jobCreatePartial({ edit: jobId })` (edit)
@@ -324,10 +326,10 @@ The partial intercepts `htmx:beforeRequest` to enforce required fields for user-
   - date filter radios
   - keyboard navigation
   - click-to-open JobPanel
-- The calendar search panel (`calendar.html`) performs a `fetch('/jobs/?...')`, then DOM-parses the HTML and extracts `#job-table-container`.
+- ~~The calendar search panel (`calendar.html`) performs a `fetch('/jobs/?...')`, then DOM-parses the HTML and extracts `#job-table-container`.~~ ✅ Resolved in Phase 6 — now uses dedicated partial endpoint.
 
 **Cleanup direction (without feature loss)**
-- Replace “fetch + DOMParser + extract” with a dedicated partial endpoint (server returns the table fragment directly).
+- ~~Replace "fetch + DOMParser + extract" with a dedicated partial endpoint (server returns the table fragment directly).~~ ✅ Done in Phase 6.
 - Share one implementation of dropdown + keyboard navigation between job list and calendar search.
 
 ---
@@ -780,14 +782,48 @@ Definition of Done:
 
 ---
 
-### Phase 6 — Replace HTML scraping with partial endpoints (keep UX identical)
+### Phase 6 — Replace HTML scraping with partial endpoints (keep UX identical) ✅ COMPLETED
 **Goal**: remove `fetch('/jobs/?...') + DOMParser` patterns.
 
-- Create/route a server endpoint that returns only the job table fragment.
-- Calendar search panel should request that fragment directly.
+**Status**: ✅ **COMPLETED** (2025-12-22)
+
+**What was done**:
+
+1. **Created `JobListTablePartialView`** in `rental_scheduler/views.py`
+   - Inherits from `JobListView` (reuses all filtering/sorting/pagination logic)
+   - Returns only the table fragment (`partials/job_list_table.html`) instead of the full page
+   - Endpoint: `GET /jobs/partial/table/` → `name='job_list_table_partial'`
+
+2. **Added URL route** in `rental_scheduler/urls.py`
+   - `path('jobs/partial/table/', JobListTablePartialView.as_view(), name='job_list_table_partial')`
+
+3. **Exposed endpoint in `window.GTS.urls`** (`base.html`)
+   - Added `GTS.urls.jobListTablePartial` for use by calendar search
+
+4. **Updated calendar search** in `entrypoints/calendar_page.js`
+   - Changed fetch from `GTS.urls.jobList` to `GTS.urls.jobListTablePartial`
+   - Removed `DOMParser` usage — now injects HTML directly into `#search-results`
+   - All existing behaviors preserved (loading state, keyboard navigation, row click handlers)
+
+5. **Added unit tests** (`rental_scheduler/tests/test_job_list_table_partial.py`)
+   - Verifies endpoint returns 200
+   - Verifies response is a partial (no `<html>`, `<body>` wrapper)
+   - Verifies query params (search, calendars, date_filter) work correctly
+   - Verifies parity with full `JobListView`
+
+**Files created**:
+- `rental_scheduler/tests/test_job_list_table_partial.py`
+
+**Files modified**:
+- `rental_scheduler/views.py` (added `JobListTablePartialView`)
+- `rental_scheduler/urls.py` (added route)
+- `rental_scheduler/templates/base.html` (added `GTS.urls.jobListTablePartial`)
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/calendar_page.js` (switched to partial endpoint)
 
 Definition of Done:
-- Search results are fetched as a purpose-built partial.
+- ✅ Search results are fetched as a purpose-built partial.
+- ✅ No remaining `DOMParser` usage for calendar search results.
+- ✅ UX is identical to before (same table markup, same row click behavior).
 
 ---
 
@@ -847,6 +883,9 @@ Keep `panel.js` + `workspace.js` facades initially, then shrink them to wrappers
 
 ### Calendar
 - `GET /api/job-calendar-data/`
+
+### Job list partials (Phase 6)
+- `GET /jobs/partial/table/` — returns job table fragment for calendar search (no full page wrapper)
 
 ### Job panel partials
 - `GET /jobs/new/partial/` (supports `?date=` and `?edit=`)

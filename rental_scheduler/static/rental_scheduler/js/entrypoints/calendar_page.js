@@ -588,22 +588,18 @@
                         searchResults.innerHTML = '<div class="text-center text-gray-500 py-8">Searching...</div>';
                     }
 
-                    // Make AJAX request to job list endpoint using config-driven URL
-                    var jobListUrl = GTS.urls.jobList + '?' + params.toString();
-                    fetch(jobListUrl, {
+                    // Make AJAX request to job list table partial endpoint (no HTML scraping needed)
+                    var jobListTableUrl = GTS.urls.jobListTablePartial + '?' + params.toString();
+                    fetch(jobListTableUrl, {
                         headers: {
                             'X-Requested-With': 'XMLHttpRequest'
                         }
                     })
                         .then(function(response) { return response.text(); })
                         .then(function(html) {
-                            // Parse the HTML and extract the job table
-                            const parser = new DOMParser();
-                            const doc = parser.parseFromString(html, 'text/html');
-                            const jobTable = doc.querySelector('#job-table-container');
-
-                            if (jobTable && searchResults) {
-                                searchResults.innerHTML = jobTable.innerHTML;
+                            // Inject the table fragment directly (no DOMParser needed)
+                            if (searchResults) {
+                                searchResults.innerHTML = html;
 
                                 // Update job rows for keyboard navigation
                                 updateJobRows();
@@ -615,9 +611,6 @@
                                 if (searchInput) {
                                     searchInput.focus();
                                 }
-                            } else if (searchResults) {
-                                searchResults.innerHTML = '<div class="text-center text-gray-500 py-8">No results found.</div>';
-                                updateJobRows();
                             }
                         })
                         .catch(function(error) {

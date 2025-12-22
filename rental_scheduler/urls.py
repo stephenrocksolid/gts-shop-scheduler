@@ -16,6 +16,7 @@ from .views import (
     CalendarUpdateView,
     CalendarDeleteView,
     JobListView,
+    JobListTablePartialView,
     JobDeleteView,
     JobPrintWOView,
     JobPrintWOCustomerView,
@@ -80,6 +81,7 @@ urlpatterns = [
     
     # Job URLs
     path('jobs/', JobListView.as_view(), name='job_list'),
+    path('jobs/partial/table/', JobListTablePartialView.as_view(), name='job_list_table_partial'),
     path('jobs/import/', calendar_import, name='calendar_import'),
     path('jobs/import/history/', import_history, name='import_history'),
     path('jobs/import/<str:batch_id>/revert/', revert_import, name='revert_import'),
