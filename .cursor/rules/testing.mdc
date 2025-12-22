@@ -1,0 +1,23 @@
+---
+alwaysApply: true
+---
+
+## Testing expectations
+
+- Add/update tests when you:
+  - fix a bug (add a regression test)
+  - add a feature or change behavior (including contracts: URLs, JS globals, event schemas, storage keys)
+  - refactor non-trivially (especially around calendar, panel, workspace, recurrence)
+- Prefer **updating existing tests** before creating new ones.
+
+## What to write (smallest effective test)
+
+- **Pure Python logic**: unit tests in `rental_scheduler/tests/` (pytest).
+- **Django views/partials/APIs**: Django client tests in `rental_scheduler/tests/` (assert status + key HTML/JSON fields; avoid brittle full-page string matching).
+- **Cross-layer UI flows** (JS ↔ backend): add/extend Playwright smoke tests in `tests/e2e/` when the behavior is user-critical.
+
+## How to run
+
+- Unit/integration: `pytest`
+- E2E: run `python manage.py runserver`, then `DJANGO_ALLOW_ASYNC_UNSAFE=true pytest tests/e2e -v` (optionally set `BASE_URL`)
+

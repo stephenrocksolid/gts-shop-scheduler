@@ -1,4 +1,6 @@
-# Recurring Events API Documentation
+# Recurring Events API
+
+Last updated: 2025-12-22
 
 ## Overview
 The recurring events API provides full support for Google Calendar-like recurring job management.
@@ -129,25 +131,62 @@ This cancels all recurring instances on or after the specified date.
 **Endpoint:** `DELETE /api/jobs/<id>/delete-recurring/?scope=<scope>`
 
 **Query Parameters:**
-- `scope`: One of `"this_only"`, `"all"`, or `"future"`
+- `scope`: One of `"this_only"`, `"all"`, or `"this_and_future"`
 
 **Scopes:**
 - `this_only`: Delete only this job (default)
 - `all`: Delete entire series (parent + all instances)
-- `future`: Delete this and all future instances
+- `this_and_future`: Delete this and all future instances
 
 **Response:**
 ```json
 {
   "success": true,
   "deleted_count": 5,
-  "scope": "future"
+  "scope": "this_and_future"
+}
+```
+
+**Alternative (POST body scope):**
+
+The backend also accepts a POST body for scope selection:
+
+`POST /api/jobs/<id>/delete-recurring/` with JSON body:
+
+```json
+{ "delete_scope": "this_only" }
+```
+
+---
+
+### 5. Materialize Virtual Occurrence (Forever Series)
+
+The calendar feed can include **virtual** occurrences for never-ending series. This endpoint creates (or returns) the real `Job` row for a specific occurrence.
+
+**Endpoint:** `POST /api/recurrence/materialize/`
+
+**Request Body:**
+
+```json
+{
+  "parent_id": 123,
+  "original_start": "2026-02-20T10:00:00"
+}
+```
+
+**Response:**
+
+```json
+{
+  "job_id": 456,
+  "created": true,
+  "job": { "id": 456, "recurrence_parent_id": 123, "...": "..." }
 }
 ```
 
 ---
 
-### 5. Get Calendar Data (Updated)
+### 6. Get Calendar Data (Updated)
 
 **Endpoint:** `GET /api/job-calendar-data/`
 
@@ -202,6 +241,8 @@ This cancels all recurring instances on or after the specified date.
 ---
 
 ## Frontend Integration Examples
+
+**Important (project rule):** this codebase forbids hard-coded app URLs in JS. If you add frontend code that calls these endpoints, inject them into `window.GTS.urls` (in `base.html`) and call them via the `GTS.urls.*` helpers (see `docs/reference/urls-and-routing.md`).
 
 ### Detecting Recurring Events
 
@@ -374,35 +415,11 @@ This verifies:
 
 ---
 
-## Next Steps for Frontend
+## Frontend status
 
-1. **Add Recurring UI to Job Form**
-   - Checkbox: "Make this a recurring event"
-   - Dropdown: Recurrence type (Monthly, Yearly, etc.)
-   - Input: Interval (Every N months/years)
-   - Input: End after X occurrences or by date
+Recurring UI (including virtual occurrence materialization) is implemented in the current frontend.
 
-2. **Show Recurring Indicators**
-   - Add icon/badge to recurring events on calendar
-   - Distinguish between parent and instance events
+References:
 
-3. **Update Edit Dialog**
-   - Show scope options for recurring instances
-   - Add "Cancel future occurrences" button
-   - Add "Delete series" option
-
-4. **Update Delete Dialog**
-   - Show scope options (this only, all, future)
-   - Warn user about cascade effects
-
-5. **Add Recurrence Info Panel**
-   - Show recurrence pattern in job details
-   - Link to parent event
-   - Show occurrence number (e.g., "3 of 12")
-
-
-
-
-
-
-
+- `docs/architecture/frontend.md`
+- `rental_scheduler/static/rental_scheduler/js/calendar/recurrence_virtual.js`

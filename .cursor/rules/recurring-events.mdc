@@ -1,0 +1,20 @@
+---
+alwaysApply: true
+---
+
+## Canonical references
+
+- Guide: `docs/features/recurring-events/guide.md`
+- API: `docs/features/recurring-events/api.md`
+
+## Invariants to preserve
+
+- A recurring series is modeled as:
+  - a **parent job** with `recurrence_rule`
+  - **instance jobs** with `recurrence_parent` + `recurrence_original_start`
+- “Forever” series are supported via **virtual occurrences** in the calendar feed:
+  - `extendedProps.type` includes `virtual_job` / `virtual_call_reminder`
+  - UI materializes via `POST /api/recurrence/materialize/`
+- Delete scopes for recurring delete use:
+  - `this_only`, `this_and_future`, `all`
+

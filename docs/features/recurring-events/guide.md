@@ -1,7 +1,14 @@
-# Recurring Events Implementation Guide
+# Recurring Events (Guide)
+
+Last updated: 2025-12-22
 
 ## Overview
+
 This document describes the Google Calendar-like recurring event system implemented in the GTS Scheduler.
+
+See also:
+
+- API reference: `docs/features/recurring-events/api.md`
 
 ## Database Schema
 
@@ -13,7 +20,8 @@ This document describes the Google Calendar-like recurring event system implemen
      "type": "monthly|yearly|weekly|daily",
      "interval": 2,           // Every 2 months/years/weeks/days
      "count": 12,             // Generate 12 occurrences
-     "until_date": "2025-12-31"  // Don't generate after this date
+     "until_date": "2025-12-31",  // Don't generate after this date (optional)
+     "end": "never"               // Optional: marks a “forever” series (virtual occurrences)
    }
    ```
 
@@ -150,17 +158,23 @@ parent.delete()
 # CASCADE deletes parent and ALL child instances
 ```
 
-## API Endpoints
+## API Endpoints (JSON)
 
-### Create Recurring Job
+These endpoints are implemented in `rental_scheduler/views_recurring.py` and are documented in more detail in:
+
+- `docs/features/recurring-events/api.md`
+
+### Create job with recurrence
+
 ```
 POST /api/jobs/create/
 {
   "business_name": "ABC Company",
   "start": "2025-01-01T09:00:00",
   "end": "2025-01-01T17:00:00",
-  "calendar": 1,
+  "calendar_id": 1,
   "recurrence": {
+    "enabled": true,
     "type": "monthly",
     "interval": 2,
     "count": 12
@@ -168,7 +182,28 @@ POST /api/jobs/create/
 }
 ```
 
-### Update Recurring Job
+### Create a “forever” series (virtual occurrences)
+
+For never-ending series, send `end: "never"` (or explicitly mark it as forever and omit `count`/`until_date`).
+
+```
+POST /api/jobs/create/
+{
+  "business_name": "Weekly Check-in",
+  "start": "2025-01-01T09:00:00",
+  "end": "2025-01-01T10:00:00",
+  "calendar_id": 1,
+  "recurrence": {
+    "enabled": true,
+    "type": "weekly",
+    "interval": 1,
+    "end": "never"
+  }
+}
+```
+
+### Update job with scope
+
 ```
 POST /api/jobs/<id>/update/
 {
@@ -177,7 +212,8 @@ POST /api/jobs/<id>/update/
 }
 ```
 
-### Cancel Future Recurrences
+### Cancel future recurrences
+
 ```
 POST /api/jobs/<parent_id>/cancel-future/
 {
@@ -185,10 +221,33 @@ POST /api/jobs/<parent_id>/cancel-future/
 }
 ```
 
-### Delete Recurring Event
+### Delete recurring with scope
+
+Either:
+
 ```
-DELETE /api/jobs/<id>/delete/
-?scope=all  // Options: "this_only", "all", "future"
+DELETE /api/jobs/<id>/delete-recurring/?scope=this_only|this_and_future|all
+```
+
+Or:
+
+```
+POST /api/jobs/<id>/delete-recurring/
+{
+  "delete_scope": "this_only"  // or: "this_and_future", "all"
+}
+```
+
+### Materialize a virtual occurrence (forever series)
+
+When the calendar emits “virtual” occurrences, the UI materializes them into real rows via:
+
+```
+POST /api/recurrence/materialize/
+{
+  "parent_id": 123,
+  "original_start": "2026-02-20T10:00:00"
+}
 ```
 
 ## Calendar Query
@@ -211,7 +270,8 @@ jobs = Job.objects.filter(
     status='canceled'
 ).select_related('calendar', 'recurrence_parent')
 
-# Calendar will display both parent jobs and generated instances
+# Calendar will display parent jobs and materialized instances.
+# For “forever” series, the calendar feed also emits virtual occurrences in the requested window.
 ```
 
 ## Frontend Integration
@@ -244,6 +304,21 @@ if (job.is_recurring_instance) {
     // - Cancel future occurrences
 }
 ```
+
+### Virtual occurrences (forever series)
+
+For “forever” series, the calendar feed may emit **virtual** events (not backed by a real `Job` row yet):
+
+- `extendedProps.type === 'virtual_job'`
+- `extendedProps.type === 'virtual_call_reminder'`
+
+Virtual events include:
+
+- `extendedProps.recurrence_parent_id`
+- `extendedProps.recurrence_original_start` (ISO datetime string)
+- `extendedProps.is_virtual === true`
+
+The frontend materializes them via `POST /api/recurrence/materialize/` and then opens the resulting real job.
 
 ## Best Practices
 

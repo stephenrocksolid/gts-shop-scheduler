@@ -1,0 +1,23 @@
+---
+alwaysApply: true
+---
+
+## Canonical references
+
+- Frontend architecture: `docs/architecture/frontend.md`
+- URL strategy (no hard-coded URLs): `docs/reference/urls-and-routing.md`
+- Frontend globals/contracts: `docs/reference/frontend-globals.md`
+
+## Hard rules
+
+- **No hard-coded app URLs in JS** (`/api/...`, `/jobs/...`, etc). Use `window.GTS.urls` + helpers in `rental_scheduler/static/rental_scheduler/js/shared/urls.js`.
+- Keep global facades stable:
+  - `window.JobPanel` (`panel.js`)
+  - `window.JobWorkspace` (`workspace.js`)
+  - `window.jobCalendar` (`job_calendar.js`, calendar page)
+- Entry points:
+  - `entrypoints/calendar_page.js` is calendar-page only.
+  - `entrypoints/jobs_list_page.js` is jobs-list only.
+  - `entrypoints/job_form_partial.js` loads globally (panel can open on any page).
+- Any code that runs on HTMX swaps must be **idempotent** (avoid double-binding; prefer delegation).
+
