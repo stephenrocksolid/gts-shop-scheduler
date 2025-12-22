@@ -104,12 +104,22 @@ class TestCalendarTemplateOtherConfig:
     """Test other calendarConfig properties are present."""
     
     def test_events_url_present(self, api_client):
-        """eventsUrl should be present in config."""
+        """Calendar events URL should be present in GTS.urls config."""
         url = reverse('rental_scheduler:calendar')
         response = api_client.get(url)
         content = response.content.decode('utf-8')
         
-        assert 'eventsUrl' in content
+        # After Phase 5, URLs are injected via window.GTS.urls (not window.calendarConfig)
+        # Check that the calendar events endpoint is present
+        assert 'GTS.urls.calendarEvents' in content
+        
+        # Verify it's not empty (should contain the job-calendar-data path)
+        match = re.search(r'GTS\.urls\.calendarEvents\s*=\s*["\']([^"\']+)["\']', content)
+        assert match, "GTS.urls.calendarEvents should be assigned a URL"
+        
+        events_url = match.group(1)
+        assert events_url, "Calendar events URL should not be empty"
+        assert 'job-calendar-data' in events_url, "Calendar events URL should point to job-calendar-data endpoint"
     
     def test_csrf_token_present(self, api_client):
         """csrfToken should be present in config."""
