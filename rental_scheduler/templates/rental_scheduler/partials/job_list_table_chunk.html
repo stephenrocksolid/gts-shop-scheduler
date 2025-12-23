@@ -36,53 +36,6 @@
 {% endfor %}
 </tbody></table>
 
-{# Out-of-band updates for pagination controls #}
-{% url 'rental_scheduler:job_list_table_partial' as base_url %}
-{% if jobs.has_next %}
-    {# Update load-more button to point to next page #}
-    <a href="?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if last_job_is_past_event is not None %}&prev_is_past_event={{ last_job_is_past_event|yesno:"1,0" }}{% endif %}"
-       id="job-list-load-more-btn"
-       hx-get="{{ base_url }}?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if last_job_is_past_event is not None %}&prev_is_past_event={{ last_job_is_past_event|yesno:"1,0" }}{% endif %}"
-       hx-target="#job-table-body"
-       hx-swap="beforeend"
-       hx-select="#job-list-chunk-rows > tr"
-       hx-indicator="#job-list-load-more-spinner"
-       hx-swap-oob="true"
-       class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
-        <span id="job-list-load-more-text">Load more</span>
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" id="job-list-load-more-icon">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-        </svg>
-        <span id="job-list-load-more-spinner" class="htmx-indicator">
-            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 74 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-        </span>
-    </a>
-{% else %}
-    {# No more pages: remove load-more button #}
-    <div id="job-list-load-more-btn" hx-swap-oob="true" style="display: none;"></div>
-{% endif %}
-
-{# Update status line #}
-<p class="text-sm text-gray-700" id="job-list-status" aria-live="polite" hx-swap-oob="true">
-    Showing <span class="font-medium">{{ jobs.start_index }}</span> to 
-    <span class="font-medium">{{ jobs.end_index }}</span> of 
-    <span class="font-medium">{{ jobs.paginator.count }}</span> results
-</p>
-
-{# Update page indicator #}
-<span id="job-list-page-indicator" hx-swap-oob="true">{{ jobs.number }}</span>
-
-{# Update jump-to-page select #}
-<select name="page" 
-        id="jump-to-page-select"
-        onchange="this.form.submit()"
-        hx-swap-oob="true"
-        class="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-    {% for num in jobs.paginator.page_range %}
-        <option value="{{ num }}" {% if jobs.number == num %}selected{% endif %}>{{ num }}</option>
-    {% endfor %}
-</select>
+{# Out-of-band update for entire pagination footer #}
+{% include 'rental_scheduler/partials/job_list_pagination_footer.html' with oob=True %}
 

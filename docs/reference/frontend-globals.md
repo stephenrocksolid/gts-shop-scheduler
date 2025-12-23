@@ -83,6 +83,7 @@ Injected by Django in `base.html`. See `docs/reference/urls-and-routing.md` for 
 
 - `GTS.urls.jobDeleteRecurringTemplate` → `/api/jobs/{job_id}/delete-recurring/` (template)
 - `GTS.urls.jobDeleteRecurring(jobId)` → helper function (in `urls.js`)
+- `GTS.urls.seriesOccurrences` → `/api/recurrence/series-occurrences/` (grouped search expansion)
 
 ## Legacy globals (kept for compatibility)
 

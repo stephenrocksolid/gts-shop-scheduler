@@ -245,7 +245,46 @@ Each virtual occurrence row includes:
 
 ---
 
-### 7. Get Calendar Data (Updated)
+### 7. Series Occurrences (Grouped Search)
+
+Returns an HTML fragment with materialized + virtual occurrences for a recurring series, filtered by search query and scope. Used by the Jobs list when search is active to expand series header rows.
+
+**Endpoint:** `GET /api/recurrence/series-occurrences/`
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `parent_id` | int | Yes | ID of the recurring parent job |
+| `scope` | string | Yes | `upcoming` or `past` - which occurrences to return |
+| `search` | string | No | Search query to filter occurrences |
+| `count` | int | No | Number of occurrences to return (default: 10, max: 50) |
+| `offset` | int | No | Offset for pagination (default: 0) |
+
+**Response:** HTML fragment containing `<tr>` elements for each occurrence.
+
+Each occurrence row includes:
+
+- `data-series-id` - The parent job ID
+- `data-series-scope` - The scope (`upcoming` or `past`)
+- `data-job-id` - For materialized jobs, the job ID
+- `data-virtual="1"` - For virtual occurrences only
+
+**Behavior:**
+
+- Returns materialized occurrences (parent + instances) filtered by search and scope
+- For forever series where parent matches search, also returns virtual occurrences
+- Supports pagination with `offset` and `count` parameters
+- Includes "Show more" button when more results are available
+
+**Error Responses:**
+
+- `400` - Missing `parent_id`, invalid scope, or job is an instance (not a parent)
+- `404` - Job not found
+
+---
+
+### 8. Get Calendar Data (Updated)
 
 **Endpoint:** `GET /api/job-calendar-data/`
 

@@ -4,6 +4,7 @@ These will replace/augment the existing job create/update/delete endpoints.
 """
 
 import json
+from django.db import models
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_protect
@@ -802,3 +803,208 @@ def recurrence_preview_occurrences(request):
     }
     
     return render(request, 'rental_scheduler/partials/virtual_occurrence_rows.html', context)
+
+
+@require_http_methods(["GET"])
+def series_occurrences_api(request):
+    """
+    Return HTML fragment with materialized + virtual occurrences for a recurring series,
+    filtered by search query and scope (upcoming/past).
+    
+    Query params:
+        parent_id: int - ID of the recurring parent job
+        scope: str - 'upcoming' or 'past'
+        search: str - Search query to filter occurrences
+        count: int - Number of occurrences to return (default 10, max 50)
+        offset: int - Offset for pagination (default 0)
+        
+    Returns HTML rows suitable for insertion after a series header row.
+    """
+    from django.shortcuts import render
+    from django.utils import timezone
+    from datetime import timedelta
+    import re
+    
+    from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
+    from rental_scheduler.utils.phone import format_phone
+    
+    MAX_COUNT = 50
+    
+    parent_id = request.GET.get('parent_id')
+    scope = request.GET.get('scope', 'upcoming')
+    search_query = request.GET.get('search', '').strip()
+    count = request.GET.get('count', '10')
+    offset = request.GET.get('offset', '0')
+    
+    if not parent_id:
+        return JsonResponse({'error': 'parent_id is required'}, status=400)
+    
+    if scope not in ('upcoming', 'past'):
+        return JsonResponse({'error': 'scope must be "upcoming" or "past"'}, status=400)
+    
+    try:
+        parent_id = int(parent_id)
+        count = min(int(count), MAX_COUNT)
+        offset = int(offset)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid parent_id, count, or offset'}, status=400)
+    
+    try:
+        parent = Job.objects.select_related('calendar').get(pk=parent_id, is_deleted=False)
+    except Job.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+    
+    # Verify this is a recurring parent
+    if parent.recurrence_parent is not None:
+        return JsonResponse({'error': 'This is a recurring instance, not a parent'}, status=400)
+    
+    if not parent.recurrence_rule:
+        return JsonResponse({'error': 'This job is not a recurring parent'}, status=400)
+    
+    now = timezone.now()
+    
+    # Tokenize search query for filtering
+    def tokenize_search(query):
+        """Extract alphanumeric tokens from search query."""
+        raw_tokens = re.split(r'[^a-zA-Z0-9]+', query.lower())
+        tokens = []
+        for tok in raw_tokens:
+            if not tok or len(tok) == 1:
+                continue
+            if tok.isdigit() and len(tok) < 3:
+                continue
+            tokens.append(tok)
+        return tokens
+    
+    def job_matches_search(job, tokens):
+        """Check if a job matches all search tokens."""
+        if not tokens:
+            return True
+        
+        # Build searchable text blob
+        search_blob = '|'.join([
+            str(job.business_name or ''),
+            str(job.contact_name or ''),
+            str(job.phone or ''),
+            str(job.address_line1 or ''),
+            str(job.address_line2 or ''),
+            str(job.city or ''),
+            str(job.state or ''),
+            str(job.trailer_color or ''),
+            str(job.trailer_serial or ''),
+            str(job.trailer_details or ''),
+            str(job.notes or ''),
+            str(job.repair_notes or ''),
+        ]).lower()
+        
+        # Remove punctuation for matching
+        for char in '.,-()\'"/\\ +':
+            search_blob = search_blob.replace(char, '')
+        
+        # Check all tokens are present
+        return all(token in search_blob for token in tokens)
+    
+    tokens = tokenize_search(search_query)
+    
+    # Query materialized occurrences (parent + instances)
+    materialized_queryset = Job.objects.select_related('calendar').filter(
+        is_deleted=False
+    ).filter(
+        # Parent or its instances
+        models.Q(pk=parent_id) | models.Q(recurrence_parent_id=parent_id)
+    )
+    
+    # Filter by scope
+    if scope == 'upcoming':
+        materialized_queryset = materialized_queryset.filter(start_dt__gte=now)
+    else:  # past
+        materialized_queryset = materialized_queryset.filter(start_dt__lt=now)
+    
+    # Order appropriately
+    if scope == 'upcoming':
+        materialized_queryset = materialized_queryset.order_by('start_dt')
+    else:
+        materialized_queryset = materialized_queryset.order_by('-start_dt')
+    
+    # Filter by search tokens if search is active
+    materialized_jobs = []
+    for job in materialized_queryset:
+        if job_matches_search(job, tokens):
+            materialized_jobs.append(job)
+    
+    # Apply offset and limit to materialized jobs
+    total_materialized = len(materialized_jobs)
+    materialized_jobs = materialized_jobs[offset:offset + count]
+    
+    # For forever series in upcoming scope, also generate virtual occurrences
+    virtual_occurrences = []
+    parent_matches_search = job_matches_search(parent, tokens)
+    
+    if is_forever_series(parent) and scope == 'upcoming' and parent_matches_search:
+        # Determine how many virtual occurrences we need
+        remaining_slots = count - len(materialized_jobs)
+        
+        if remaining_slots > 0:
+            # Get materialized instance starts to exclude
+            materialized_starts = set(
+                Job.objects.filter(
+                    recurrence_parent=parent
+                ).values_list('recurrence_original_start', flat=True)
+            )
+            # Also include the parent's start
+            materialized_starts.add(parent.start_dt)
+            
+            # Generate virtual occurrences
+            today = timezone.localdate()
+            rule = parent.recurrence_rule or {}
+            recurrence_type = rule.get('type', 'monthly')
+            interval = rule.get('interval', 1)
+            
+            # Calculate window based on recurrence type
+            if recurrence_type == 'daily':
+                window_days = (remaining_slots + 10) * interval + 30
+            elif recurrence_type == 'weekly':
+                window_days = (remaining_slots + 10) * interval * 7 + 30
+            elif recurrence_type == 'monthly':
+                window_days = (remaining_slots + 10) * interval * 31 + 60
+            else:  # yearly
+                window_days = (remaining_slots + 10) * interval * 366 + 60
+            
+            window_end = today + timedelta(days=window_days)
+            
+            occurrences = generate_occurrences_in_window(
+                parent,
+                today,
+                window_end,
+                safety_cap=remaining_slots + 20
+            )
+            
+            # Filter out parent and already-materialized
+            for occ in occurrences:
+                if occ.get('is_parent'):
+                    continue
+                if occ['start_dt'] in materialized_starts:
+                    continue
+                virtual_occurrences.append(occ)
+                if len(virtual_occurrences) >= remaining_slots:
+                    break
+    
+    # Determine if there are more results
+    has_more = (
+        (offset + count < total_materialized) or
+        (is_forever_series(parent) and scope == 'upcoming' and parent_matches_search)
+    )
+    
+    context = {
+        'parent': parent,
+        'parent_id': parent_id,
+        'scope': scope,
+        'materialized_jobs': materialized_jobs,
+        'virtual_occurrences': virtual_occurrences,
+        'offset': offset + count,
+        'has_more': has_more,
+        'search_query': search_query,
+        'format_phone': format_phone,
+    }
+    
+    return render(request, 'rental_scheduler/partials/series_occurrence_rows.html', context)

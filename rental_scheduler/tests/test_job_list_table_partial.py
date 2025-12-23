@@ -247,6 +247,82 @@ def test_job_list_table_partial_htmx_returns_chunk(api_client, calendar):
 
 
 @pytest.mark.django_db
+def test_job_list_table_partial_htmx_shows_cumulative_status(api_client, calendar):
+    """HTMX chunk responses (load-more) should show cumulative status: 'Showing 1 to N'."""
+    url = reverse("rental_scheduler:job_list_table_partial")
+    now = timezone.now()
+
+    # Create 30 jobs (paginate_by = 25, so page 2 will have 5 jobs)
+    for i in range(30):
+        Job.objects.create(
+            calendar=calendar,
+            business_name=f"Job {i}",
+            start_dt=now + timedelta(days=i),
+            end_dt=now + timedelta(days=i, hours=1),
+            all_day=False,
+            status="uncompleted",
+        )
+
+    # Request page 2 with HTMX header (simulating load-more)
+    response = api_client.get(url, {"page": 2}, HTTP_HX_REQUEST="true")
+    assert response.status_code == 200
+
+    content = response.content.decode("utf-8")
+
+    # Should show cumulative status: "Showing 1 to 30" (not "Showing 26 to 30")
+    assert "Showing" in content
+    # Look for the pattern "Showing <span...>1</span> to <span...>30</span>"
+    import re
+    # Match "Showing" followed by number in span, "to", another number in span
+    match = re.search(r'Showing\s+<span[^>]*>(\d+)</span>\s+to\s+<span[^>]*>(\d+)</span>', content)
+    assert match is not None, "Should find 'Showing X to Y' pattern"
+    start_num = int(match.group(1))
+    end_num = int(match.group(2))
+    
+    # For load-more (HTMX), start should always be 1 (cumulative)
+    assert start_num == 1, f"HTMX chunk should show cumulative start (1), got {start_num}"
+    # End should be total loaded so far (30 jobs)
+    assert end_num == 30, f"HTMX chunk should show cumulative end (30), got {end_num}"
+
+
+@pytest.mark.django_db
+def test_job_list_table_partial_non_htmx_shows_page_range_status(api_client, calendar):
+    """Non-HTMX responses (direct navigation) should show page-range status: 'Showing 26 to 50'."""
+    url = reverse("rental_scheduler:job_list_table_partial")
+    now = timezone.now()
+
+    # Create 50 jobs (paginate_by = 25, so page 2 will have jobs 26-50)
+    for i in range(50):
+        Job.objects.create(
+            calendar=calendar,
+            business_name=f"Job {i}",
+            start_dt=now + timedelta(days=i),
+            end_dt=now + timedelta(days=i, hours=1),
+            all_day=False,
+            status="uncompleted",
+        )
+
+    # Request page 2 WITHOUT HTMX header (simulating direct navigation or jump-to-page)
+    response = api_client.get(url, {"page": 2})
+    assert response.status_code == 200
+
+    content = response.content.decode("utf-8")
+
+    # Should show page-range status: "Showing 26 to 50" (not "Showing 1 to 50")
+    assert "Showing" in content
+    import re
+    match = re.search(r'Showing\s+<span[^>]*>(\d+)</span>\s+to\s+<span[^>]*>(\d+)</span>', content)
+    assert match is not None, "Should find 'Showing X to Y' pattern"
+    start_num = int(match.group(1))
+    end_num = int(match.group(2))
+    
+    # For direct navigation (non-HTMX), start should be page start (26)
+    assert start_num == 26, f"Non-HTMX should show page-range start (26), got {start_num}"
+    # End should be page end (50)
+    assert end_num == 50, f"Non-HTMX should show page-range end (50), got {end_num}"
+
+
+@pytest.mark.django_db
 def test_job_list_table_partial_htmx_chunk_includes_oob_updates(api_client, calendar):
     """HTMX chunk responses should include out-of-band updates for pagination controls."""
     url = reverse("rental_scheduler:job_list_table_partial")
@@ -268,15 +344,19 @@ def test_job_list_table_partial_htmx_chunk_includes_oob_updates(api_client, cale
 
     content = response.content.decode("utf-8")
 
-    # Should have OOB updates for status line
-    assert 'id="job-list-status"' in content
+    # Should have OOB update for entire pagination footer
+    assert 'id="job-list-pagination-footer"' in content
     assert 'hx-swap-oob="true"' in content
 
-    # Should have OOB update for page indicator
-    assert 'id="job-list-page-indicator"' in content
+    # Footer should contain status line
+    assert 'id="job-list-status"' in content
 
-    # Should have OOB update for load-more button (if has_next) or removal marker
-    assert ("job-list-load-more-btn" in content or "Load more" in content)
+    # Footer should contain page indicator
+    assert 'id="job-list-page-indicator"' in content
+    
+    # Since this is page 2 of 2 (30 jobs, 25 per page), there should be no load-more button
+    # The footer should not contain a load-more button section
+    assert "Load more" not in content or 'id="job-list-load-more-btn"' not in content
 
 
 @pytest.mark.django_db
@@ -379,9 +459,13 @@ def test_job_list_table_partial_htmx_empty_chunk_no_error(api_client, calendar):
     assert response.status_code == 200
     content = response.content.decode("utf-8")
     
-    # Should not contain table wrapper (chunk template)
-    assert "<table" not in content
+    # Should contain table wrapper (chunk template always wraps in table)
+    assert "<table" in content
+    assert 'id="job-list-chunk-rows"' in content
+    # Should NOT contain table header (still a "chunk", not full table UI)
     assert "<thead" not in content
+    # Should be empty (no job rows)
+    assert "job-row" not in content
 
 
 @pytest.mark.django_db
@@ -432,4 +516,10 @@ def test_job_list_table_partial_htmx_empty_page_first_row_is_past_not_set(api_cl
     
     # Should return empty chunk (no rows, no errors)
     content = response.content.decode("utf-8")
-    assert "<table" not in content
+    # Should contain table wrapper (chunk template always wraps in table)
+    assert "<table" in content
+    assert 'id="job-list-chunk-rows"' in content
+    # Should NOT contain table header (still a "chunk", not full table UI)
+    assert "<thead" not in content
+    # Should be empty (no job rows)
+    assert "job-row" not in content

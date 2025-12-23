@@ -243,6 +243,22 @@
 
         // Use event delegation for clicks
         jobTableContainer.addEventListener('click', function(e) {
+            // Handle series header row click (grouped search mode)
+            const seriesRow = e.target.closest('.series-header-row');
+            if (seriesRow) {
+                e.stopPropagation();
+                handleSeriesHeaderClick(seriesRow);
+                return;
+            }
+
+            // Handle "Show more" button for series occurrences
+            const showMoreSeriesBtn = e.target.closest('.show-more-series-btn');
+            if (showMoreSeriesBtn) {
+                e.stopPropagation();
+                handleShowMoreSeriesOccurrences(showMoreSeriesBtn);
+                return;
+            }
+
             // Handle expand/collapse button for forever series
             const expandBtn = e.target.closest('.expand-occurrences-btn');
             if (expandBtn) {
@@ -502,6 +518,156 @@
                 }
                 row.style.opacity = '1';
                 row.style.pointerEvents = '';
+            });
+    }
+
+    // ========================================================================
+    // SERIES HEADER EXPAND/COLLAPSE (Grouped Search Mode)
+    // ========================================================================
+
+    /**
+     * Handle click on a series header row to expand/collapse occurrences
+     */
+    function handleSeriesHeaderClick(headerRow) {
+        var seriesId = headerRow.getAttribute('data-series-id');
+        var scope = headerRow.getAttribute('data-scope');
+        var isExpanded = headerRow.getAttribute('data-expanded') === 'true';
+
+        if (isExpanded) {
+            // Collapse: remove occurrence rows
+            collapseSeriesOccurrences(seriesId, scope, headerRow);
+        } else {
+            // Expand: fetch and insert occurrence rows
+            expandSeriesOccurrences(seriesId, scope, headerRow);
+        }
+    }
+
+    /**
+     * Expand series to show matching occurrences
+     */
+    function expandSeriesOccurrences(seriesId, scope, headerRow) {
+        var icon = headerRow.querySelector('.expand-icon');
+        
+        // Show loading state
+        headerRow.style.opacity = '0.7';
+        if (icon) icon.style.opacity = '0.5';
+
+        // Get current search query from URL
+        var urlParams = new URLSearchParams(window.location.search);
+        var searchQuery = urlParams.get('search') || '';
+
+        var url = GTS.urls.seriesOccurrences + 
+            '?parent_id=' + seriesId + 
+            '&scope=' + scope + 
+            '&search=' + encodeURIComponent(searchQuery) +
+            '&count=10&offset=0';
+        
+        fetch(url, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+            .then(function(response) {
+                if (!response.ok) {
+                    return response.text().then(function(text) {
+                        throw new Error('Failed to fetch occurrences: ' + text);
+                    });
+                }
+                return response.text();
+            })
+            .then(function(html) {
+                // Remove any existing occurrence rows for this series
+                removeSeriesOccurrenceRows(seriesId, scope);
+
+                // Insert new rows after header
+                headerRow.insertAdjacentHTML('afterend', html);
+
+                // Update header state
+                headerRow.setAttribute('data-expanded', 'true');
+                headerRow.setAttribute('aria-expanded', 'true');
+                if (icon) {
+                    icon.style.transform = 'rotate(90deg)';
+                    icon.style.opacity = '1';
+                }
+            })
+            .catch(function(error) {
+                console.error('Error fetching series occurrences:', error);
+                if (window.showToast) {
+                    window.showToast('Failed to load occurrences', 'error');
+                }
+            })
+            .finally(function() {
+                headerRow.style.opacity = '1';
+                if (icon) icon.style.opacity = '1';
+            });
+    }
+
+    /**
+     * Collapse (hide) series occurrence rows
+     */
+    function collapseSeriesOccurrences(seriesId, scope, headerRow) {
+        removeSeriesOccurrenceRows(seriesId, scope);
+
+        var icon = headerRow.querySelector('.expand-icon');
+        headerRow.setAttribute('data-expanded', 'false');
+        headerRow.setAttribute('aria-expanded', 'false');
+        if (icon) {
+            icon.style.transform = 'rotate(0deg)';
+        }
+    }
+
+    /**
+     * Remove all occurrence rows for a given series and scope
+     */
+    function removeSeriesOccurrenceRows(seriesId, scope) {
+        var selector = '.series-occurrence-row[data-series-id="' + seriesId + '"][data-series-scope="' + scope + '"]';
+        var rows = document.querySelectorAll(selector);
+        rows.forEach(function(row) {
+            row.remove();
+        });
+    }
+
+    /**
+     * Handle "Show more" button click for series occurrences
+     */
+    function handleShowMoreSeriesOccurrences(btn) {
+        var parentId = btn.getAttribute('data-parent-id');
+        var scope = btn.getAttribute('data-scope');
+        var currentOffset = parseInt(btn.getAttribute('data-current-offset'), 10) || 0;
+        var searchQuery = decodeURIComponent(btn.getAttribute('data-search') || '');
+
+        // Show loading state
+        btn.textContent = 'Loading...';
+        btn.disabled = true;
+
+        var url = GTS.urls.seriesOccurrences + 
+            '?parent_id=' + parentId + 
+            '&scope=' + scope + 
+            '&search=' + encodeURIComponent(searchQuery) +
+            '&count=10&offset=' + currentOffset;
+        
+        fetch(url, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch more occurrences');
+                }
+                return response.text();
+            })
+            .then(function(html) {
+                // Find the show-more row and replace it with new content
+                var showMoreRow = btn.closest('tr');
+                if (showMoreRow) {
+                    showMoreRow.insertAdjacentHTML('beforebegin', html);
+                    showMoreRow.remove();
+                }
+            })
+            .catch(function(error) {
+                console.error('Error fetching more occurrences:', error);
+                if (window.showToast) {
+                    window.showToast('Failed to load more occurrences', 'error');
+                }
+                btn.textContent = 'Show more occurrences...';
+                btn.disabled = false;
             });
     }
 

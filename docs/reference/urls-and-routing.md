@@ -35,6 +35,10 @@ The repo enforces this with:
   - `jobDeleteTemplate` (expects `{job_id}`)
   - `jobDeleteRecurringTemplate` (expects `{job_id}`) - added Dec 2025 for recurring delete
   - call reminder templates, print templates, etc.
+- Recurrence URLs:
+  - `materializeOccurrence` - POST to materialize virtual occurrence
+  - `recurrencePreview` - GET preview of upcoming virtual occurrences
+  - `seriesOccurrences` - GET expanded occurrence rows for grouped search (added Dec 2025)
 
 `shared/urls.js` wraps these into convenient functions, e.g.:
 

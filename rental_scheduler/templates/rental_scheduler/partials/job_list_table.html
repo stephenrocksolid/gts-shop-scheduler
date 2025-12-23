@@ -144,112 +144,80 @@
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200" id="job-table-body">
-                    {% for job in jobs %}
-                        {% if date_filter == 'all' and current_sort == 'smart' %}
-                            {% if forloop.first %}
-                                {# First row: show Upcoming or Past header based on first job #}
-                                {% if job.is_past_event %}
-                                    <tr class="bg-gray-100 border-t-2 border-gray-300">
-                                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
-                                            Past Events
-                                        </td>
-                                    </tr>
-                                {% else %}
-                                    <tr class="bg-blue-50 border-t-2 border-blue-200">
-                                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
-                                            Upcoming Events
-                                        </td>
-                                    </tr>
-                                {% endif %}
-                            {% else %}
-                                {# Subsequent rows: insert Past header when is_past_event changes from 0 to 1 #}
-                                {% ifchanged job.is_past_event %}
+                    {% if is_grouped_search %}
+                        {# Grouped search mode: render series header rows with expand/collapse #}
+                        {% if grouped_search.upcoming_series or grouped_search.upcoming_standalone %}
+                            <tr class="bg-blue-50 border-t-2 border-blue-200">
+                                <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
+                                    Upcoming Events
+                                </td>
+                            </tr>
+                            {# Render upcoming series header rows #}
+                            {% for series in grouped_search.upcoming_series %}
+                                {% include 'rental_scheduler/partials/series_header_row.html' with series=series %}
+                            {% endfor %}
+                            {# Render upcoming standalone (non-recurring) jobs #}
+                            {% for job in grouped_search.upcoming_standalone %}
+                                {% include 'rental_scheduler/partials/job_row.html' with job=job %}
+                            {% endfor %}
+                        {% endif %}
+                        
+                        {% if grouped_search.past_series or grouped_search.past_standalone %}
+                            <tr class="bg-gray-100 border-t-2 border-gray-300">
+                                <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                                    Past Events
+                                </td>
+                            </tr>
+                            {# Render past series header rows #}
+                            {% for series in grouped_search.past_series %}
+                                {% include 'rental_scheduler/partials/series_header_row.html' with series=series %}
+                            {% endfor %}
+                            {# Render past standalone (non-recurring) jobs #}
+                            {% for job in grouped_search.past_standalone %}
+                                {% include 'rental_scheduler/partials/job_row.html' with job=job %}
+                            {% endfor %}
+                        {% endif %}
+                    {% else %}
+                        {# Standard mode: render individual job rows #}
+                        {% for job in jobs %}
+                            {% if date_filter == 'all' and current_sort == 'smart' %}
+                                {% if forloop.first %}
+                                    {# First row: show Upcoming or Past header based on first job #}
                                     {% if job.is_past_event %}
                                         <tr class="bg-gray-100 border-t-2 border-gray-300">
                                             <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
                                                 Past Events
                                             </td>
                                         </tr>
+                                    {% else %}
+                                        <tr class="bg-blue-50 border-t-2 border-blue-200">
+                                            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
+                                                Upcoming Events
+                                            </td>
+                                        </tr>
                                     {% endif %}
-                                {% endifchanged %}
+                                {% else %}
+                                    {# Subsequent rows: insert Past header when is_past_event changes from 0 to 1 #}
+                                    {% ifchanged job.is_past_event %}
+                                        {% if job.is_past_event %}
+                                            <tr class="bg-gray-100 border-t-2 border-gray-300">
+                                                <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                                                    Past Events
+                                                </td>
+                                            </tr>
+                                        {% endif %}
+                                    {% endifchanged %}
+                                {% endif %}
                             {% endif %}
-                        {% endif %}
-                        {% include 'rental_scheduler/partials/job_row.html' with job=job %}
-                    {% endfor %}
+                            {% include 'rental_scheduler/partials/job_row.html' with job=job %}
+                        {% endfor %}
+                    {% endif %}
                 </tbody>
             </table>
         </div>
 
         <!-- Pagination Footer -->
-        {% if jobs.has_other_pages %}
-            {% url 'rental_scheduler:job_list_table_partial' as base_url %}
-            <div id="job-list-pagination-footer" class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <!-- Status line with aria-live for screen readers -->
-                    <div class="flex-shrink-0">
-                        <p class="text-sm text-gray-700" id="job-list-status" aria-live="polite">
-                            Showing <span class="font-medium">{{ jobs.start_index }}</span> to 
-                            <span class="font-medium">{{ jobs.end_index }}</span> of 
-                            <span class="font-medium">{{ jobs.paginator.count }}</span> results
-                        </p>
-                    </div>
-                    
-                    <!-- Compact pagination controls -->
-                    <div class="flex items-center gap-3 flex-shrink-0">
-                        <!-- Page indicator -->
-                        <span class="text-sm text-gray-600 whitespace-nowrap">
-                            Page <span id="job-list-page-indicator">{{ jobs.number }}</span> / {{ jobs.paginator.num_pages }}
-                        </span>
-                        
-                        <!-- Jump to page (compact select) -->
-                        <form method="get" class="inline-flex items-center gap-2" id="jump-to-page-form">
-                            <label for="jump-to-page-select" class="text-sm text-gray-600 sr-only">Jump to page</label>
-                            <select name="page" 
-                                    id="jump-to-page-select"
-                                    onchange="this.form.submit()"
-                                    class="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                {% for num in jobs.paginator.page_range %}
-                                    <option value="{{ num }}" {% if jobs.number == num %}selected{% endif %}>{{ num }}</option>
-                                {% endfor %}
-                            </select>
-                            <!-- Preserve all query params -->
-                            {% if current_sort %}<input type="hidden" name="sort" value="{{ current_sort }}">{% endif %}
-                            {% if current_direction %}<input type="hidden" name="direction" value="{{ current_direction }}">{% endif %}
-                            {% if search_query %}<input type="hidden" name="search" value="{{ search_query }}">{% endif %}
-                            {% for cal_id in selected_calendars %}<input type="hidden" name="calendars" value="{{ cal_id }}">{% endfor %}
-                            {% if date_filter %}<input type="hidden" name="date_filter" value="{{ date_filter }}">{% endif %}
-                            {% if start_date %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
-                            {% if end_date %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
-                        </form>
-                    </div>
-                    
-                    <!-- Load More Button (inline with other controls) -->
-                    {% if jobs.has_next %}
-                        <div class="flex-shrink-0 flex items-center">
-                            <a href="?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if last_job_is_past_event is not None %}&prev_is_past_event={{ last_job_is_past_event|yesno:"1,0" }}{% endif %}"
-                               id="job-list-load-more-btn"
-                               hx-get="{{ base_url }}?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if last_job_is_past_event is not None %}&prev_is_past_event={{ last_job_is_past_event|yesno:"1,0" }}{% endif %}"
-                               hx-target="#job-table-body"
-                               hx-swap="beforeend"
-                               hx-select="#job-list-chunk-rows > tr"
-                               hx-indicator="#job-list-load-more-spinner"
-                               class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
-                                <span id="job-list-load-more-text">Load more</span>
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" id="job-list-load-more-icon">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                </svg>
-                                <span id="job-list-load-more-spinner" class="htmx-indicator">
-                                    <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                </span>
-                            </a>
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
-        {% endif %}
+        {% include 'rental_scheduler/partials/job_list_pagination_footer.html' with oob=False %}
     {% else %}
         <div class="text-center py-12">
             <div class="text-gray-500 text-lg mb-4">No jobs found</div>

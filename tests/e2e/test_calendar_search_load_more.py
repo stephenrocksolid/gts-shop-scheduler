@@ -146,6 +146,12 @@ class TestCalendarSearchLoadMore:
         initial_row_count = page.locator(".job-row").count()
         assert initial_row_count == 25, f"Expected 25 rows on first page, got {initial_row_count}"
         
+        # Check initial status badge (should show "Showing 1 to 25 of 30")
+        status_text = page.locator("#job-list-status").text_content()
+        assert "Showing" in status_text
+        assert "1" in status_text and "25" in status_text and "30" in status_text, \
+            f"Initial status should show 'Showing 1 to 25 of 30', got: {status_text}"
+        
         # Check that load-more button exists
         load_more_btn = page.locator("#job-list-load-more-btn")
         expect(load_more_btn).to_be_visible(timeout=5000)
@@ -165,6 +171,12 @@ class TestCalendarSearchLoadMore:
         # Count rows after load more
         final_row_count = page.locator(".job-row").count()
         assert final_row_count == 30, f"Expected 30 rows after load more, got {final_row_count}"
+        
+        # Check updated status badge (should show cumulative: "Showing 1 to 30 of 30")
+        updated_status_text = page.locator("#job-list-status").text_content()
+        assert "Showing" in updated_status_text
+        assert "1" in updated_status_text and "30" in updated_status_text, \
+            f"After load-more, status should show cumulative 'Showing 1 to 30 of 30', got: {updated_status_text}"
         
         # Verify load-more button is hidden/removed (no more pages)
         page.wait_for_function("""
@@ -310,6 +322,10 @@ class TestCalendarSearchLoadMore:
         if initial_row_count < 25:
             pytest.skip("Not enough jobs for pagination test")
         
+        # Check initial status badge
+        status_text = page.locator("#job-list-status").text_content()
+        assert "Showing" in status_text, f"Status badge should be visible, got: {status_text}"
+        
         # Check for load-more button
         load_more_btn = page.locator("#job-list-load-more-btn")
         if load_more_btn.count() == 0:
@@ -327,6 +343,13 @@ class TestCalendarSearchLoadMore:
         page.wait_for_function(f"""
             () => document.querySelectorAll('.job-row').length > {initial_row_count}
         """, timeout=10000)
+        
+        # Check updated status badge shows cumulative count (starts with 1)
+        updated_status_text = page.locator("#job-list-status").text_content()
+        assert "Showing" in updated_status_text
+        # After load-more, should show "Showing 1 to X" (cumulative)
+        assert "1" in updated_status_text, \
+            f"After load-more, status should show cumulative starting from 1, got: {updated_status_text}"
         
         # Check no HTMX errors occurred
         htmx_errors = [e for e in console_errors if 'htmx' in e.lower() or 'queryselectorall' in e.lower()]
