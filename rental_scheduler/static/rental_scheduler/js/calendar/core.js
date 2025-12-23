@@ -112,6 +112,7 @@
                 expandRows: true,      // Allow rows to expand to fill space
                 windowResizeDelay: 50, // better resizing behavior
                 displayEventTime: true,
+                eventDisplay: 'block', // Force block display to ensure colors always show (not dot events)
                 eventTimeFormat: {
                     hour: 'numeric',
                     minute: '2-digit',
