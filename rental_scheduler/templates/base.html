@@ -138,13 +138,14 @@
         <!-- GTS Init Helpers (idempotent initialization for HTMX pages) -->
         <script src="{% static 'rental_scheduler/js/gts_init.js' %}"></script>
 
-        <!-- GTS Shared Library (load order matters: csrf, toast, storage, dom, html_state, urls) -->
+        <!-- GTS Shared Library (load order matters: csrf, toast, storage, dom, html_state, urls, then UI modules) -->
         <script src="{% static 'rental_scheduler/js/shared/csrf.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/toast.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/storage.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/dom.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/html_state.js' %}"></script>
         <script src="{% static 'rental_scheduler/js/shared/urls.js' %}"></script>
+        <script src="{% static 'rental_scheduler/js/shared/series_occurrences_ui.js' %}"></script>
 
         <!-- GTS Global URL Configuration (Django-injected, used by all JS modules) -->
         <script>

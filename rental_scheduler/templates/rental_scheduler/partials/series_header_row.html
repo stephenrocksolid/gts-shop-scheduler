@@ -1,18 +1,25 @@
 {# Series header row for grouped recurring search results #}
 {# This row represents a recurring series, not an individual occurrence #}
-<tr class="series-header-row hover:bg-indigo-50 cursor-pointer border-l-4 border-indigo-500 bg-indigo-50/30"
+<tr class="series-header-row hover:bg-indigo-50 cursor-pointer border-l-4 border-indigo-500 bg-indigo-50/30 transition-opacity duration-200"
     id="series-row-{{ series.parent_id }}-{{ series.scope }}"
     data-series-id="{{ series.parent_id }}"
     data-scope="{{ series.scope }}"
     data-expanded="false"
     data-match-count="{{ series.match_count }}"
     aria-expanded="false"
+    aria-label="Expand recurring series: {{ series.display_name }}"
     role="button"
     tabindex="0">
     <td class="px-6 py-4 whitespace-nowrap text-center">
         <div class="flex items-center justify-center gap-2">
+            {# Expand arrow icon - rotates when expanded #}
             <svg class="w-4 h-4 text-indigo-500 expand-icon transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+            {# Loading spinner - hidden by default, shown during fetch #}
+            <svg class="w-4 h-4 text-indigo-500 loading-spinner hidden animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
             <div>
                 <div class="text-sm font-medium text-gray-900">{{ series.display_name }}</div>
@@ -34,7 +41,7 @@
         </span>
     </td>
     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center" colspan="2">
-        <span class="text-indigo-600 font-medium">Click to expand</span>
+        <span class="expand-label text-indigo-600 font-medium">Click to expand</span>
     </td>
     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">
         {% if series.is_forever %}

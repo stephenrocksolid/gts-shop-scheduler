@@ -221,114 +221,109 @@ def _group_jobs_into_series(jobs, now):
     """
     Group jobs into recurring series for search result display.
     
+    Returns interleaved row items that preserve the original sort order,
+    with series headers appearing exactly where the first matching occurrence
+    would have appeared (collapse-in-place).
+    
     Args:
-        jobs: List/queryset of Job objects
+        jobs: List/queryset of Job objects (already sorted)
         now: Current datetime (for upcoming/past classification)
         
     Returns:
         dict with structure:
         {
-            'upcoming_series': [
-                {
-                    'parent_id': int,
-                    'display_name': str,
-                    'phone': str,
-                    'calendar_name': str,
-                    'calendar_color': str,
-                    'recurrence_type': str,
-                    'is_forever': bool,
-                    'match_count': int,
-                    'scope': 'upcoming',
-                    'jobs': [Job, ...],  # Matching jobs in this scope
-                },
+            'upcoming_rows': [
+                {'type': 'series', 'series': series_info},  # or
+                {'type': 'job', 'job': job},
                 ...
             ],
-            'past_series': [...],  # Same structure with scope='past'
-            'upcoming_standalone': [Job, ...],  # Non-recurring upcoming jobs
-            'past_standalone': [Job, ...],  # Non-recurring past jobs
+            'past_rows': [...],  # Same structure
+        }
+        
+    Where series_info is:
+        {
+            'parent_id': int,
+            'display_name': str,
+            'phone': str,
+            'calendar_name': str,
+            'calendar_color': str,
+            'recurrence_type': str,
+            'is_forever': bool,
+            'match_count': int,
+            'scope': 'upcoming' | 'past',
         }
     """
     from rental_scheduler.utils.recurrence import is_forever_series
     
-    # Group by series and scope
-    series_groups = {}  # key: (parent_id, scope) -> {'parent': Job, 'jobs': [Job], 'scope': str}
-    upcoming_standalone = []
-    past_standalone = []
+    # Track which series we've already emitted a header for (per scope)
+    # Key: (parent_id, scope), Value: series_info dict (we'll update match_count)
+    seen_series = {}
     
+    # Output rows per scope
+    upcoming_rows = []
+    past_rows = []
+    
+    # First pass: collect match counts for each series
+    series_match_counts = {}  # (parent_id, scope) -> count
     for job in jobs:
         is_past = job.start_dt < now
         scope = 'past' if is_past else 'upcoming'
         
-        # Determine series key
+        parent_id = None
         if job.recurrence_parent_id:
-            # This is an instance - group under parent
-            series_key = (job.recurrence_parent_id, scope)
-            if series_key not in series_groups:
-                # Pre-fetch parent if not already loaded
-                parent = job.recurrence_parent
-                series_groups[series_key] = {
-                    'parent_id': job.recurrence_parent_id,
-                    'parent': parent,
-                    'jobs': [],
-                    'scope': scope,
-                }
-            series_groups[series_key]['jobs'].append(job)
-            
+            parent_id = job.recurrence_parent_id
         elif job.recurrence_rule:
-            # This is a parent - starts a series group
-            series_key = (job.id, scope)
-            if series_key not in series_groups:
-                series_groups[series_key] = {
-                    'parent_id': job.id,
-                    'parent': job,
-                    'jobs': [],
+            parent_id = job.id
+            
+        if parent_id:
+            key = (parent_id, scope)
+            series_match_counts[key] = series_match_counts.get(key, 0) + 1
+    
+    # Second pass: build interleaved row items
+    for job in jobs:
+        is_past = job.start_dt < now
+        scope = 'past' if is_past else 'upcoming'
+        rows = past_rows if is_past else upcoming_rows
+        
+        # Determine if this is part of a recurring series
+        parent_id = None
+        parent = None
+        
+        if job.recurrence_parent_id:
+            parent_id = job.recurrence_parent_id
+            parent = job.recurrence_parent
+        elif job.recurrence_rule:
+            parent_id = job.id
+            parent = job
+        
+        if parent_id and parent:
+            # This is part of a recurring series
+            series_key = (parent_id, scope)
+            
+            if series_key not in seen_series:
+                # First occurrence of this series in this scope - emit header
+                series_info = {
+                    'parent_id': parent_id,
+                    'display_name': parent.display_name if hasattr(parent, 'display_name') else parent.business_name,
+                    'phone': parent.phone or '',
+                    'calendar_name': parent.calendar.name if parent.calendar else '',
+                    'calendar_color': parent.calendar.color if parent.calendar else '#6366F1',
+                    'recurrence_type': (parent.recurrence_rule or {}).get('type', 'recurring'),
+                    'is_forever': is_forever_series(parent) if parent.recurrence_rule else False,
+                    'match_count': series_match_counts.get(series_key, 1),
                     'scope': scope,
                 }
-            series_groups[series_key]['jobs'].append(job)
-            
+                seen_series[series_key] = series_info
+                rows.append({'type': 'series', 'series': series_info})
+            # else: we've already emitted a header for this series, skip this job
+            # (it's "collapsed" under the header)
         else:
-            # Non-recurring job - standalone
-            if is_past:
-                past_standalone.append(job)
-            else:
-                upcoming_standalone.append(job)
-    
-    # Convert to list format with metadata
-    upcoming_series = []
-    past_series = []
-    
-    for (parent_id, scope), group in series_groups.items():
-        parent = group['parent']
-        if not parent:
-            continue
-            
-        series_info = {
-            'parent_id': parent_id,
-            'display_name': parent.display_name if hasattr(parent, 'display_name') else parent.business_name,
-            'phone': parent.phone or '',
-            'calendar_name': parent.calendar.name if parent.calendar else '',
-            'calendar_color': parent.calendar.color if parent.calendar else '#6366F1',
-            'recurrence_type': (parent.recurrence_rule or {}).get('type', 'recurring'),
-            'is_forever': is_forever_series(parent) if parent.recurrence_rule else False,
-            'match_count': len(group['jobs']),
-            'scope': scope,
-            'jobs': group['jobs'],
-        }
-        
-        if scope == 'upcoming':
-            upcoming_series.append(series_info)
-        else:
-            past_series.append(series_info)
-    
-    # Sort series by earliest matching job start_dt
-    upcoming_series.sort(key=lambda s: min(j.start_dt for j in s['jobs']) if s['jobs'] else now)
-    past_series.sort(key=lambda s: max(j.start_dt for j in s['jobs']) if s['jobs'] else now, reverse=True)
+            # Standalone (non-recurring) job - emit directly
+            rows.append({'type': 'job', 'job': job})
     
     return {
-        'upcoming_series': upcoming_series,
-        'past_series': past_series,
-        'upcoming_standalone': upcoming_standalone,
-        'past_standalone': past_standalone,
+        'upcoming_rows': upcoming_rows,
+        'past_rows': past_rows,
     }
 
 
@@ -699,7 +694,51 @@ class JobListView(ListView):
         else:
             context['last_job_is_past_event'] = None
         
+        # Add pagination presenter context for footer display
+        # Use append-only mode for consistent UX: user loads more to see more items
+        self._add_pagination_presenter_context(context, is_append_mode=True)
+        
         return context
+    
+    def _add_pagination_presenter_context(self, context, *, is_append_mode):
+        """
+        Add pagination display context for footer templates.
+        
+        Args:
+            context: Template context dict
+            is_append_mode: If True, use cumulative display (show 1 to N);
+                          if False, use page-range display (show X to Y)
+        """
+        from django.utils import timezone as tz
+        
+        jobs = context.get('jobs')
+        if not jobs or not hasattr(jobs, 'paginator'):
+            return
+        
+        # Pagination display values
+        # NOTE: Django Page's start_index, end_index, has_next, next_page_number are methods
+        context['is_append_mode'] = is_append_mode
+        # show_start: always 1 for append mode (cumulative), else current page start
+        context['show_start'] = 1 if is_append_mode else jobs.start_index()
+        context['show_end'] = jobs.end_index()
+        context['show_total'] = jobs.paginator.count
+        
+        # Build canonical next-page querystring to avoid duplication in templates
+        if jobs.has_next():
+            params = self.request.GET.copy()
+            params['page'] = jobs.next_page_number()
+            # For chunk responses, track if last job is a past event (for boundary detection)
+            if context.get('date_filter') == 'all' and context.get('current_sort') == 'smart':
+                if hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
+                    job_list = list(jobs.object_list)
+                    last_job = job_list[-1]
+                    if hasattr(last_job, 'is_past_event'):
+                        params['prev_is_past_event'] = '1' if last_job.is_past_event else '0'
+                    else:
+                        params['prev_is_past_event'] = '1' if last_job.start_dt < tz.now() else '0'
+            context['next_page_querystring'] = params.urlencode()
+        else:
+            context['next_page_querystring'] = ''
 
 
 class JobListTablePartialView(JobListView):
@@ -770,32 +809,7 @@ class JobListTablePartialView(JobListView):
         # For HTMX chunk responses, add boundary detection context
         is_htmx = self.request.headers.get('HX-Request') == 'true'
         
-        # Pagination display logic (single source of truth for status badge)
-        jobs = context.get('jobs')
-        if jobs and hasattr(jobs, 'paginator'):
-            # is_append_mode: cumulative display for HTMX load-more, page-range for navigation
-            context['is_append_mode'] = is_htmx
-            # show_start: always 1 for append mode (cumulative), else current page start
-            context['show_start'] = 1 if is_htmx else jobs.start_index
-            context['show_end'] = jobs.end_index
-            context['show_total'] = jobs.paginator.count
-            
-            # Build canonical next-page querystring to avoid duplication in templates
-            if jobs.has_next:
-                params = self.request.GET.copy()
-                params['page'] = jobs.next_page_number
-                # For chunk responses, track if last job is a past event (for boundary detection)
-                if context.get('date_filter') == 'all' and context.get('current_sort') == 'smart':
-                    if hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
-                        job_list = list(jobs.object_list)
-                        last_job = job_list[-1]
-                        if hasattr(last_job, 'is_past_event'):
-                            params['prev_is_past_event'] = '1' if last_job.is_past_event else '0'
-                        else:
-                            params['prev_is_past_event'] = '1' if last_job.start_dt < tz.now() else '0'
-                context['next_page_querystring'] = params.urlencode()
-            else:
-                context['next_page_querystring'] = ''
+        # NOTE: Parent already sets is_append_mode=True; no need to override here.
         
         if is_htmx:
             # Check if we need to insert a section header at the boundary
@@ -805,6 +819,7 @@ class JobListTablePartialView(JobListView):
                 context['prev_is_past_event'] = int(prev_is_past_event)
             
             # Determine if first row of this chunk is past event
+            jobs = context.get('jobs')
             if jobs and hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
                 if context.get('date_filter') == 'all' and context.get('current_sort') == 'smart':
                     # Convert to list to support indexing (QuerySet may not support it efficiently)

@@ -2,8 +2,8 @@
 
 {# Chunk template for HTMX load-more: appends rows to #job-table-body and updates pagination controls via OOB #}
 
-{# Wrap rows in a table structure to prevent HTMX parse errors with mixed table/non-table fragments #}
-<table><tbody id="job-list-chunk-rows">
+{# Wrap in tbody so HTMX can parse the response; we'll use hx-select to extract only the rows #}
+<tbody id="job-list-chunk-wrapper">
 {# Optional section header if crossing boundary from upcoming to past #}
 {% if date_filter == 'all' and current_sort == 'smart' and prev_is_past_event == 0 and first_row_is_past %}
     <tr class="bg-gray-100 border-t-2 border-gray-300">
@@ -34,8 +34,8 @@
     {% endif %}
     {% include 'rental_scheduler/partials/job_row.html' with job=job %}
 {% endfor %}
-</tbody></table>
+</tbody>
 
-{# Out-of-band update for entire pagination footer #}
+{# Out-of-band update for entire pagination footer - processed BEFORE hx-select filtering #}
 {% include 'rental_scheduler/partials/job_list_pagination_footer.html' with oob=True %}
 

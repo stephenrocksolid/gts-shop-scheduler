@@ -1,13 +1,17 @@
 {% load static %}
 {# Expanded occurrence rows for a recurring series #}
-{# Contains both materialized jobs and virtual occurrences #}
+{# Renders a unified list of materialized jobs and virtual occurrences, sorted by start_dt #}
 
-{% for job in materialized_jobs %}
+{% for row in occurrence_rows %}
+{% if row.kind == 'materialized' %}
+{# --- Materialized job row --- #}
+{% with job=row.job %}
 <tr class="hover:bg-gray-50 job-row series-occurrence-row bg-gray-50/50"
     id="job-row-{{ job.id }}"
     data-job-id="{{ job.id }}"
     data-series-id="{{ parent_id }}"
-    data-series-scope="{{ scope }}">
+    data-series-scope="{{ scope }}"
+    data-occurrence-start="{{ row.start_dt|date:'c' }}">
     <td class="px-6 py-4 whitespace-nowrap text-center">
         <div class="flex items-center justify-center">
             <span class="text-gray-400 mr-2 text-xs">└</span>
@@ -80,15 +84,17 @@
         </div>
     </td>
 </tr>
-{% endfor %}
-
-{% for occ in virtual_occurrences %}
+{% endwith %}
+{% else %}
+{# --- Virtual occurrence row --- #}
+{% with occ=row.occ %}
 <tr class="hover:bg-gray-50 job-row series-occurrence-row virtual-occurrence-row bg-indigo-50/30"
     data-virtual="1"
     data-recurrence-parent-id="{{ parent_id }}"
     data-recurrence-original-start="{{ occ.start_dt|date:'c' }}"
     data-series-id="{{ parent_id }}"
-    data-series-scope="{{ scope }}">
+    data-series-scope="{{ scope }}"
+    data-occurrence-start="{{ row.start_dt|date:'c' }}">
     <td class="px-6 py-4 whitespace-nowrap text-center">
         <div class="flex items-center justify-center">
             <span class="text-indigo-400 mr-2" title="Virtual occurrence (click to open)">↻</span>
@@ -132,14 +138,14 @@
         <span class="text-indigo-600 text-xs">Click to open</span>
     </td>
 </tr>
+{% endwith %}
+{% endif %}
 {% empty %}
-{% if not materialized_jobs %}
 <tr class="series-occurrence-row" data-series-id="{{ parent_id }}" data-series-scope="{{ scope }}">
     <td colspan="7" class="px-6 py-4 text-center text-gray-500 text-sm">
         No matching occurrences found.
     </td>
 </tr>
-{% endif %}
 {% endfor %}
 
 {% if has_more %}
@@ -158,4 +164,3 @@
     </td>
 </tr>
 {% endif %}
-

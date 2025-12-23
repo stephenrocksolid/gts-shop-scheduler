@@ -234,25 +234,29 @@
     }
 
     // ========================================================================
-    // ROW CLICK HANDLERS (Event Delegation)
+    // ROW CLICK HANDLERS (Event Delegation on document.body for HTMX resilience)
     // ========================================================================
 
     function initRowClickHandlers() {
-        const jobTableContainer = document.getElementById('job-table-container');
-        if (!jobTableContainer) return;
-
-        // Use event delegation for clicks
-        jobTableContainer.addEventListener('click', function(e) {
+        // Use document.body for delegation - survives any HTMX swap of #job-table-container
+        // Filter inside handler to only process events within #job-table-container
+        
+        document.body.addEventListener('click', function(e) {
+            // Only handle clicks inside #job-table-container
+            var container = e.target.closest('#job-table-container');
+            if (!container) return;
+            
             // Handle series header row click (grouped search mode)
-            const seriesRow = e.target.closest('.series-header-row');
+            var seriesRow = e.target.closest('.series-header-row');
             if (seriesRow) {
+                e.preventDefault();
                 e.stopPropagation();
                 handleSeriesHeaderClick(seriesRow);
                 return;
             }
 
             // Handle "Show more" button for series occurrences
-            const showMoreSeriesBtn = e.target.closest('.show-more-series-btn');
+            var showMoreSeriesBtn = e.target.closest('.show-more-series-btn');
             if (showMoreSeriesBtn) {
                 e.stopPropagation();
                 handleShowMoreSeriesOccurrences(showMoreSeriesBtn);
@@ -260,7 +264,7 @@
             }
 
             // Handle expand/collapse button for forever series
-            const expandBtn = e.target.closest('.expand-occurrences-btn');
+            var expandBtn = e.target.closest('.expand-occurrences-btn');
             if (expandBtn) {
                 e.stopPropagation();
                 handleExpandOccurrences(expandBtn);
@@ -268,14 +272,14 @@
             }
 
             // Handle "Show more" button
-            const showMoreBtn = e.target.closest('.show-more-occurrences-btn');
+            var showMoreBtn = e.target.closest('.show-more-occurrences-btn');
             if (showMoreBtn) {
                 e.stopPropagation();
                 handleShowMoreOccurrences(showMoreBtn);
                 return;
             }
 
-            const row = e.target.closest('.job-row');
+            var row = e.target.closest('.job-row');
             if (!row) return;
 
             // Don't navigate if user clicked on an action link or button
@@ -291,7 +295,7 @@
             }
 
             // Get job ID from the row
-            const jobId = row.getAttribute('data-job-id');
+            var jobId = row.getAttribute('data-job-id');
             if (jobId && window.JobPanel) {
                 // Use config-driven URL from GTS.urls (global, always available)
                 window.JobPanel.setTitle('Edit Job');
@@ -299,16 +303,33 @@
             }
         });
 
-        // Use event delegation for hover (using mouseover/mouseout since mouseenter doesn't bubble)
-        jobTableContainer.addEventListener('mouseover', function(e) {
-            const row = e.target.closest('.job-row');
+        // Keyboard accessibility for series header rows (Enter/Space to expand)
+        document.body.addEventListener('keydown', function(e) {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            
+            var seriesRow = e.target.closest('.series-header-row');
+            if (seriesRow && seriesRow.closest('#job-table-container')) {
+                e.preventDefault();
+                handleSeriesHeaderClick(seriesRow);
+            }
+        });
+
+        // Use event delegation for hover on document.body (filter to container)
+        document.body.addEventListener('mouseover', function(e) {
+            var container = e.target.closest('#job-table-container');
+            if (!container) return;
+            
+            var row = e.target.closest('.job-row');
             if (row && !row.classList.contains('bg-blue-100')) {
                 row.style.backgroundColor = '#f9fafb';
             }
         });
 
-        jobTableContainer.addEventListener('mouseout', function(e) {
-            const row = e.target.closest('.job-row');
+        document.body.addEventListener('mouseout', function(e) {
+            var container = e.target.closest('#job-table-container');
+            if (!container) return;
+            
+            var row = e.target.closest('.job-row');
             if (row && !row.classList.contains('bg-blue-100')) {
                 row.style.backgroundColor = '';
             }
@@ -523,105 +544,25 @@
 
     // ========================================================================
     // SERIES HEADER EXPAND/COLLAPSE (Grouped Search Mode)
+    // Uses shared GTS.seriesOccurrencesUI module
     // ========================================================================
+
+    /**
+     * Get current search query from the page (URL or input)
+     */
+    function getSeriesSearchQuery() {
+        var urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get('search') || '';
+    }
 
     /**
      * Handle click on a series header row to expand/collapse occurrences
      */
     function handleSeriesHeaderClick(headerRow) {
-        var seriesId = headerRow.getAttribute('data-series-id');
-        var scope = headerRow.getAttribute('data-scope');
-        var isExpanded = headerRow.getAttribute('data-expanded') === 'true';
-
-        if (isExpanded) {
-            // Collapse: remove occurrence rows
-            collapseSeriesOccurrences(seriesId, scope, headerRow);
-        } else {
-            // Expand: fetch and insert occurrence rows
-            expandSeriesOccurrences(seriesId, scope, headerRow);
-        }
-    }
-
-    /**
-     * Expand series to show matching occurrences
-     */
-    function expandSeriesOccurrences(seriesId, scope, headerRow) {
-        var icon = headerRow.querySelector('.expand-icon');
-        
-        // Show loading state
-        headerRow.style.opacity = '0.7';
-        if (icon) icon.style.opacity = '0.5';
-
-        // Get current search query from URL
-        var urlParams = new URLSearchParams(window.location.search);
-        var searchQuery = urlParams.get('search') || '';
-
-        var url = GTS.urls.seriesOccurrences + 
-            '?parent_id=' + seriesId + 
-            '&scope=' + scope + 
-            '&search=' + encodeURIComponent(searchQuery) +
-            '&count=10&offset=0';
-        
-        fetch(url, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-            .then(function(response) {
-                if (!response.ok) {
-                    return response.text().then(function(text) {
-                        throw new Error('Failed to fetch occurrences: ' + text);
-                    });
-                }
-                return response.text();
-            })
-            .then(function(html) {
-                // Remove any existing occurrence rows for this series
-                removeSeriesOccurrenceRows(seriesId, scope);
-
-                // Insert new rows after header
-                headerRow.insertAdjacentHTML('afterend', html);
-
-                // Update header state
-                headerRow.setAttribute('data-expanded', 'true');
-                headerRow.setAttribute('aria-expanded', 'true');
-                if (icon) {
-                    icon.style.transform = 'rotate(90deg)';
-                    icon.style.opacity = '1';
-                }
-            })
-            .catch(function(error) {
-                console.error('Error fetching series occurrences:', error);
-                if (window.showToast) {
-                    window.showToast('Failed to load occurrences', 'error');
-                }
-            })
-            .finally(function() {
-                headerRow.style.opacity = '1';
-                if (icon) icon.style.opacity = '1';
-            });
-    }
-
-    /**
-     * Collapse (hide) series occurrence rows
-     */
-    function collapseSeriesOccurrences(seriesId, scope, headerRow) {
-        removeSeriesOccurrenceRows(seriesId, scope);
-
-        var icon = headerRow.querySelector('.expand-icon');
-        headerRow.setAttribute('data-expanded', 'false');
-        headerRow.setAttribute('aria-expanded', 'false');
-        if (icon) {
-            icon.style.transform = 'rotate(0deg)';
-        }
-    }
-
-    /**
-     * Remove all occurrence rows for a given series and scope
-     */
-    function removeSeriesOccurrenceRows(seriesId, scope) {
-        var selector = '.series-occurrence-row[data-series-id="' + seriesId + '"][data-series-scope="' + scope + '"]';
-        var rows = document.querySelectorAll(selector);
-        rows.forEach(function(row) {
-            row.remove();
+        GTS.seriesOccurrencesUI.toggle(headerRow, {
+            count: 5,
+            getSearchQuery: getSeriesSearchQuery,
+            rootEl: document
         });
     }
 
@@ -629,46 +570,10 @@
      * Handle "Show more" button click for series occurrences
      */
     function handleShowMoreSeriesOccurrences(btn) {
-        var parentId = btn.getAttribute('data-parent-id');
-        var scope = btn.getAttribute('data-scope');
-        var currentOffset = parseInt(btn.getAttribute('data-current-offset'), 10) || 0;
-        var searchQuery = decodeURIComponent(btn.getAttribute('data-search') || '');
-
-        // Show loading state
-        btn.textContent = 'Loading...';
-        btn.disabled = true;
-
-        var url = GTS.urls.seriesOccurrences + 
-            '?parent_id=' + parentId + 
-            '&scope=' + scope + 
-            '&search=' + encodeURIComponent(searchQuery) +
-            '&count=10&offset=' + currentOffset;
-        
-        fetch(url, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-            .then(function(response) {
-                if (!response.ok) {
-                    throw new Error('Failed to fetch more occurrences');
-                }
-                return response.text();
-            })
-            .then(function(html) {
-                // Find the show-more row and replace it with new content
-                var showMoreRow = btn.closest('tr');
-                if (showMoreRow) {
-                    showMoreRow.insertAdjacentHTML('beforebegin', html);
-                    showMoreRow.remove();
-                }
-            })
-            .catch(function(error) {
-                console.error('Error fetching more occurrences:', error);
-                if (window.showToast) {
-                    window.showToast('Failed to load more occurrences', 'error');
-                }
-                btn.textContent = 'Show more occurrences...';
-                btn.disabled = false;
-            });
+        GTS.seriesOccurrencesUI.showMore(btn, {
+            count: 5,
+            rootEl: document
+        });
     }
 
     // ========================================================================

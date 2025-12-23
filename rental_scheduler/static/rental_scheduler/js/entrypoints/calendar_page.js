@@ -637,8 +637,27 @@
                     GTS.markElInitialized(searchResults, 'search_row_handlers');
 
                     searchResults.addEventListener('click', function(e) {
-                        // Handle expand/collapse button for forever series
+                        const seriesHeaderRow = e.target.closest('.series-header-row');
                         const expandBtn = e.target.closest('.expand-occurrences-btn');
+                        const showMoreBtn = e.target.closest('.show-more-occurrences-btn');
+                        const showMoreSeriesBtn = e.target.closest('.show-more-series-btn');
+                        const jobRow = e.target.closest('.job-row');
+
+                        // Handle grouped-search series header expand/collapse
+                        if (seriesHeaderRow) {
+                            e.stopPropagation();
+                            handleSeriesHeaderClick(seriesHeaderRow);
+                            return;
+                        }
+
+                        // Handle "Show more" for grouped-search series occurrences
+                        if (showMoreSeriesBtn) {
+                            e.stopPropagation();
+                            handleShowMoreSeriesOccurrences(showMoreSeriesBtn);
+                            return;
+                        }
+
+                        // Handle expand/collapse button for forever series
                         if (expandBtn) {
                             e.stopPropagation();
                             handleExpandOccurrences(expandBtn, searchResults);
@@ -646,15 +665,15 @@
                         }
 
                         // Handle "Show more" button
-                        const showMoreBtn = e.target.closest('.show-more-occurrences-btn');
                         if (showMoreBtn) {
                             e.stopPropagation();
                             handleShowMoreOccurrences(showMoreBtn, searchResults);
                             return;
                         }
 
-                        const row = e.target.closest('.job-row');
-                        if (!row) return;
+                        if (!jobRow) {
+                            return;
+                        }
 
                         // Don't navigate if user clicked on an action link or button
                         if (e.target.tagName === 'A' || e.target.closest('a') ||
@@ -663,12 +682,12 @@
                         }
 
                         // Check if this is a virtual occurrence row
-                        if (row.getAttribute('data-virtual') === '1') {
-                            handleVirtualRowClick(row);
+                        if (jobRow.getAttribute('data-virtual') === '1') {
+                            handleVirtualRowClick(jobRow);
                             return;
                         }
 
-                        const jobId = row.getAttribute('data-job-id');
+                        const jobId = jobRow.getAttribute('data-job-id');
                         if (jobId && window.JobPanel) {
                             window.JobPanel.setTitle('Edit Job');
                             window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
@@ -701,6 +720,47 @@
                         }
                     });
                 }
+            }
+
+            // ========================================================================
+            // SERIES HEADER EXPAND/COLLAPSE (Grouped Search Mode)
+            // Uses shared GTS.seriesOccurrencesUI module
+            // ========================================================================
+
+            function getSeriesSearchQuery() {
+                const direct = (searchInput && typeof searchInput.value === 'string') ? searchInput.value : '';
+                if (direct) return direct;
+                const urlParams = new URLSearchParams(window.location.search);
+                return urlParams.get('search') || '';
+            }
+
+            /**
+             * Handle click on a series header row to expand/collapse occurrences
+             */
+            function handleSeriesHeaderClick(headerRow) {
+                var promise = GTS.seriesOccurrencesUI.toggle(headerRow, {
+                    count: 5,
+                    getSearchQuery: getSeriesSearchQuery,
+                    rootEl: searchResults || document
+                });
+                // Update job rows cache after expand completes
+                if (promise && typeof promise.then === 'function') {
+                    promise.then(function() {
+                        updateJobRows();
+                    });
+                } else {
+                    // Collapse is synchronous
+                    updateJobRows();
+                }
+            }
+
+            function handleShowMoreSeriesOccurrences(btn) {
+                GTS.seriesOccurrencesUI.showMore(btn, {
+                    count: 5,
+                    rootEl: searchResults || document
+                }).then(function() {
+                    updateJobRows();
+                });
             }
 
             /**

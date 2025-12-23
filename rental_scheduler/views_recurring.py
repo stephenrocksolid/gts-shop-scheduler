@@ -815,10 +815,12 @@ def series_occurrences_api(request):
         parent_id: int - ID of the recurring parent job
         scope: str - 'upcoming' or 'past'
         search: str - Search query to filter occurrences
-        count: int - Number of occurrences to return (default 10, max 50)
-        offset: int - Offset for pagination (default 0)
+        count: int - Number of occurrences to return (default 5, max 50)
+        offset: int - Offset for pagination in the combined list (default 0)
         
     Returns HTML rows suitable for insertion after a series header row.
+    The rows are sorted chronologically (ascending for upcoming, descending for past)
+    with materialized and virtual occurrences interleaved by start_dt.
     """
     from django.shortcuts import render
     from django.utils import timezone
@@ -833,7 +835,7 @@ def series_occurrences_api(request):
     parent_id = request.GET.get('parent_id')
     scope = request.GET.get('scope', 'upcoming')
     search_query = request.GET.get('search', '').strip()
-    count = request.GET.get('count', '10')
+    count = request.GET.get('count', '5')
     offset = request.GET.get('offset', '0')
     
     if not parent_id:
@@ -905,6 +907,15 @@ def series_occurrences_api(request):
         return all(token in search_blob for token in tokens)
     
     tokens = tokenize_search(search_query)
+    parent_matches_search = job_matches_search(parent, tokens)
+    
+    # How many total combined entries do we need to fetch to serve this page?
+    # We need offset + count + 1 (the +1 to check has_more)
+    needed = offset + count + 1
+    
+    # -------------------------------------------------------------------------
+    # Build combined occurrence list (materialized + virtual), sorted by start_dt
+    # -------------------------------------------------------------------------
     
     # Query materialized occurrences (parent + instances)
     materialized_queryset = Job.objects.select_related('calendar').filter(
@@ -920,87 +931,102 @@ def series_occurrences_api(request):
     else:  # past
         materialized_queryset = materialized_queryset.filter(start_dt__lt=now)
     
-    # Order appropriately
+    # Order appropriately for merging
     if scope == 'upcoming':
         materialized_queryset = materialized_queryset.order_by('start_dt')
     else:
         materialized_queryset = materialized_queryset.order_by('-start_dt')
     
-    # Filter by search tokens if search is active
-    materialized_jobs = []
+    # Filter by search tokens and build materialized entries
+    materialized_entries = []
     for job in materialized_queryset:
         if job_matches_search(job, tokens):
-            materialized_jobs.append(job)
-    
-    # Apply offset and limit to materialized jobs
-    total_materialized = len(materialized_jobs)
-    materialized_jobs = materialized_jobs[offset:offset + count]
+            materialized_entries.append({
+                'kind': 'materialized',
+                'start_dt': job.start_dt,
+                'job': job,
+            })
     
     # For forever series in upcoming scope, also generate virtual occurrences
-    virtual_occurrences = []
-    parent_matches_search = job_matches_search(parent, tokens)
+    virtual_entries = []
     
     if is_forever_series(parent) and scope == 'upcoming' and parent_matches_search:
-        # Determine how many virtual occurrences we need
-        remaining_slots = count - len(materialized_jobs)
+        # Get materialized instance starts to exclude (compare by recurrence_original_start)
+        materialized_starts = set(
+            Job.objects.filter(
+                recurrence_parent=parent
+            ).values_list('recurrence_original_start', flat=True)
+        )
+        # Also include the parent's start
+        materialized_starts.add(parent.start_dt)
         
-        if remaining_slots > 0:
-            # Get materialized instance starts to exclude
-            materialized_starts = set(
-                Job.objects.filter(
-                    recurrence_parent=parent
-                ).values_list('recurrence_original_start', flat=True)
-            )
-            # Also include the parent's start
-            materialized_starts.add(parent.start_dt)
-            
-            # Generate virtual occurrences
-            today = timezone.localdate()
-            rule = parent.recurrence_rule or {}
-            recurrence_type = rule.get('type', 'monthly')
-            interval = rule.get('interval', 1)
-            
-            # Calculate window based on recurrence type
-            if recurrence_type == 'daily':
-                window_days = (remaining_slots + 10) * interval + 30
-            elif recurrence_type == 'weekly':
-                window_days = (remaining_slots + 10) * interval * 7 + 30
-            elif recurrence_type == 'monthly':
-                window_days = (remaining_slots + 10) * interval * 31 + 60
-            else:  # yearly
-                window_days = (remaining_slots + 10) * interval * 366 + 60
-            
-            window_end = today + timedelta(days=window_days)
-            
-            occurrences = generate_occurrences_in_window(
-                parent,
-                today,
-                window_end,
-                safety_cap=remaining_slots + 20
-            )
-            
-            # Filter out parent and already-materialized
-            for occ in occurrences:
-                if occ.get('is_parent'):
-                    continue
-                if occ['start_dt'] in materialized_starts:
-                    continue
-                virtual_occurrences.append(occ)
-                if len(virtual_occurrences) >= remaining_slots:
-                    break
+        # Generate enough virtual occurrences to potentially fill the combined list
+        # We need to generate more than 'needed' to account for ones that might be
+        # materialized and thus excluded
+        today = timezone.localdate()
+        rule = parent.recurrence_rule or {}
+        recurrence_type = rule.get('type', 'monthly')
+        interval = rule.get('interval', 1)
+        
+        # Calculate window based on recurrence type - generous to ensure enough
+        gen_count = needed + len(materialized_entries) + 20
+        if recurrence_type == 'daily':
+            window_days = gen_count * interval + 30
+        elif recurrence_type == 'weekly':
+            window_days = gen_count * interval * 7 + 30
+        elif recurrence_type == 'monthly':
+            window_days = gen_count * interval * 31 + 60
+        else:  # yearly
+            window_days = gen_count * interval * 366 + 60
+        
+        window_end = today + timedelta(days=window_days)
+        
+        occurrences = generate_occurrences_in_window(
+            parent,
+            today,
+            window_end,
+            safety_cap=gen_count
+        )
+        
+        # Filter out parent and already-materialized, build virtual entries
+        for occ in occurrences:
+            if occ.get('is_parent'):
+                continue
+            if occ['start_dt'] in materialized_starts:
+                continue
+            virtual_entries.append({
+                'kind': 'virtual',
+                'start_dt': occ['start_dt'],
+                'occ': occ,
+            })
     
-    # Determine if there are more results
-    has_more = (
-        (offset + count < total_materialized) or
-        (is_forever_series(parent) and scope == 'upcoming' and parent_matches_search)
-    )
+    # -------------------------------------------------------------------------
+    # Merge materialized + virtual into a single sorted list
+    # -------------------------------------------------------------------------
+    
+    if scope == 'upcoming':
+        # Ascending by start_dt
+        combined = sorted(
+            materialized_entries + virtual_entries,
+            key=lambda x: x['start_dt']
+        )
+    else:
+        # Past scope: descending by start_dt (no virtual for past)
+        combined = sorted(
+            materialized_entries,
+            key=lambda x: x['start_dt'],
+            reverse=True
+        )
+    
+    # Apply combined offset/limit
+    has_more = len(combined) > offset + count
+    occurrence_rows = combined[offset:offset + count]
     
     context = {
         'parent': parent,
         'parent_id': parent_id,
         'scope': scope,
-        'materialized_jobs': materialized_jobs,
-        'virtual_occurrences': virtual_occurrences,
+        'occurrence_rows': occurrence_rows,
         'offset': offset + count,
         'has_more': has_more,
         'search_query': search_query,

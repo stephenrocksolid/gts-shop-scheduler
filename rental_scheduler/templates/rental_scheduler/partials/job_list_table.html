@@ -145,36 +145,35 @@
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200" id="job-table-body">
                     {% if is_grouped_search %}
-                        {# Grouped search mode: render series header rows with expand/collapse #}
-                        {% if grouped_search.upcoming_series or grouped_search.upcoming_standalone %}
+                        {# Grouped search mode: render interleaved series headers and standalone jobs #}
+                        {# Series headers appear exactly where the first matching occurrence would have #}
+                        {% if grouped_search.upcoming_rows %}
                             <tr class="bg-blue-50 border-t-2 border-blue-200">
                                 <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
                                     Upcoming Events
                                 </td>
                             </tr>
-                            {# Render upcoming series header rows #}
-                            {% for series in grouped_search.upcoming_series %}
-                                {% include 'rental_scheduler/partials/series_header_row.html' with series=series %}
-                            {% endfor %}
-                            {# Render upcoming standalone (non-recurring) jobs #}
-                            {% for job in grouped_search.upcoming_standalone %}
-                                {% include 'rental_scheduler/partials/job_row.html' with job=job %}
+                            {% for row in grouped_search.upcoming_rows %}
+                                {% if row.type == 'series' %}
+                                    {% include 'rental_scheduler/partials/series_header_row.html' with series=row.series %}
+                                {% else %}
+                                    {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+                                {% endif %}
                             {% endfor %}
                         {% endif %}
                         
-                        {% if grouped_search.past_series or grouped_search.past_standalone %}
+                        {% if grouped_search.past_rows %}
                             <tr class="bg-gray-100 border-t-2 border-gray-300">
                                 <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
                                     Past Events
                                 </td>
                             </tr>
-                            {# Render past series header rows #}
-                            {% for series in grouped_search.past_series %}
-                                {% include 'rental_scheduler/partials/series_header_row.html' with series=series %}
-                            {% endfor %}
-                            {# Render past standalone (non-recurring) jobs #}
-                            {% for job in grouped_search.past_standalone %}
-                                {% include 'rental_scheduler/partials/job_row.html' with job=job %}
+                            {% for row in grouped_search.past_rows %}
+                                {% if row.type == 'series' %}
+                                    {% include 'rental_scheduler/partials/series_header_row.html' with series=row.series %}
+                                {% else %}
+                                    {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+                                {% endif %}
                             {% endfor %}
                         {% endif %}
                     {% else %}
