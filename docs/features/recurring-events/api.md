@@ -221,7 +221,7 @@ Returns an HTML fragment containing the next N virtual occurrences for a forever
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `parent_id` | int | Yes | ID of the forever recurring parent job |
-| `count` | int | No | Number of occurrences to return (default: 5, max: 20) |
+| `count` | int | No | Number of occurrences to return (default: 5, max: 200) |
 
 **Response:** HTML fragment containing `<tr>` elements for each virtual occurrence.
 
@@ -232,7 +232,11 @@ Each virtual occurrence row includes:
 - `data-recurrence-original-start` - ISO datetime for the occurrence start
 - `data-parent-row-id` - Reference to the parent row for JS manipulation
 
-If more occurrences exist beyond the requested count, a "Show 5 more" button row is included.
+**Load-More Behavior:**
+
+- For forever series, a "Show 5 more" button is always displayed until the maximum count (200) is reached
+- Users can repeatedly click "Show more" to incrementally load additional occurrences
+- This avoids loading hundreds of occurrences at once while still allowing deep exploration
 
 **Error Responses:**
 

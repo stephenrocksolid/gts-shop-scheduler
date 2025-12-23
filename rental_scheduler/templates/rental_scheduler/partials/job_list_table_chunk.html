@@ -1,0 +1,88 @@
+{% load static %}
+
+{# Chunk template for HTMX load-more: appends rows to #job-table-body and updates pagination controls via OOB #}
+
+{# Wrap rows in a table structure to prevent HTMX parse errors with mixed table/non-table fragments #}
+<table><tbody id="job-list-chunk-rows">
+{# Optional section header if crossing boundary from upcoming to past #}
+{% if date_filter == 'all' and current_sort == 'smart' and prev_is_past_event == 0 and first_row_is_past %}
+    <tr class="bg-gray-100 border-t-2 border-gray-300">
+        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+            Past Events
+        </td>
+    </tr>
+{% endif %}
+
+{# Job rows to append #}
+{% for job in jobs %}
+    {# Only insert section header if this is the first row and we're crossing boundary #}
+    {% if date_filter == 'all' and current_sort == 'smart' %}
+        {% if forloop.first and prev_is_past_event == 0 and job.is_past_event %}
+            {# Header already emitted above, skip #}
+        {% elif not forloop.first %}
+            {# Check if we're crossing boundary mid-chunk #}
+            {% ifchanged job.is_past_event %}
+                {% if job.is_past_event %}
+                    <tr class="bg-gray-100 border-t-2 border-gray-300">
+                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                            Past Events
+                        </td>
+                    </tr>
+                {% endif %}
+            {% endifchanged %}
+        {% endif %}
+    {% endif %}
+    {% include 'rental_scheduler/partials/job_row.html' with job=job %}
+{% endfor %}
+</tbody></table>
+
+{# Out-of-band updates for pagination controls #}
+{% url 'rental_scheduler:job_list_table_partial' as base_url %}
+{% if jobs.has_next %}
+    {# Update load-more button to point to next page #}
+    <a href="?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if last_job_is_past_event is not None %}&prev_is_past_event={{ last_job_is_past_event|yesno:"1,0" }}{% endif %}"
+       id="job-list-load-more-btn"
+       hx-get="{{ base_url }}?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if last_job_is_past_event is not None %}&prev_is_past_event={{ last_job_is_past_event|yesno:"1,0" }}{% endif %}"
+       hx-target="#job-table-body"
+       hx-swap="beforeend"
+       hx-select="#job-list-chunk-rows > tr"
+       hx-indicator="#job-list-load-more-spinner"
+       hx-swap-oob="true"
+       class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+        <span id="job-list-load-more-text">Load more</span>
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" id="job-list-load-more-icon">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+        </svg>
+        <span id="job-list-load-more-spinner" class="htmx-indicator">
+            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 74 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </span>
+    </a>
+{% else %}
+    {# No more pages: remove load-more button #}
+    <div id="job-list-load-more-btn" hx-swap-oob="true" style="display: none;"></div>
+{% endif %}
+
+{# Update status line #}
+<p class="text-sm text-gray-700" id="job-list-status" aria-live="polite" hx-swap-oob="true">
+    Showing <span class="font-medium">{{ jobs.start_index }}</span> to 
+    <span class="font-medium">{{ jobs.end_index }}</span> of 
+    <span class="font-medium">{{ jobs.paginator.count }}</span> results
+</p>
+
+{# Update page indicator #}
+<span id="job-list-page-indicator" hx-swap-oob="true">{{ jobs.number }}</span>
+
+{# Update jump-to-page select #}
+<select name="page" 
+        id="jump-to-page-select"
+        onchange="this.form.submit()"
+        hx-swap-oob="true"
+        class="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    {% for num in jobs.paginator.page_range %}
+        <option value="{{ num }}" {% if jobs.number == num %}selected{% endif %}>{{ num }}</option>
+    {% endfor %}
+</select>
+

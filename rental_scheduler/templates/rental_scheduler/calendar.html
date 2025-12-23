@@ -293,6 +293,13 @@
         font-size: 0.75rem !important;
     }
 
+    /* Force pagination footer to display horizontally in search results */
+    #search-results #job-list-pagination-footer > div {
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 1rem !important;
+    }
+
     /* Search & Today toggle button styling - white with grey border when inactive, blue when expanded */
     .fc-searchButton-button,
     .fc-todaySidebarButton-button {

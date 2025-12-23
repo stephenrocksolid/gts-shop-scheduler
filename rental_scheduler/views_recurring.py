@@ -708,7 +708,7 @@ def recurrence_preview_occurrences(request):
     
     Query params:
         parent_id: int - ID of the recurring parent job
-        count: int - Number of occurrences to preview (default 5, max 20)
+        count: int - Number of occurrences to preview (default 5, max 200)
     
     Returns HTML rows suitable for insertion into a job table.
     """
@@ -718,6 +718,8 @@ def recurrence_preview_occurrences(request):
     from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
     from rental_scheduler.utils.phone import format_phone
     
+    MAX_PREVIEW_COUNT = 200
+    
     parent_id = request.GET.get('parent_id')
     count = request.GET.get('count', '5')
     
@@ -726,7 +728,7 @@ def recurrence_preview_occurrences(request):
     
     try:
         parent_id = int(parent_id)
-        count = min(int(count), 20)  # Cap at 20 to prevent abuse
+        count = min(int(count), MAX_PREVIEW_COUNT)  # Cap at 200 to prevent abuse
     except ValueError:
         return JsonResponse({'error': 'Invalid parent_id or count'}, status=400)
     
@@ -766,7 +768,7 @@ def recurrence_preview_occurrences(request):
         parent,
         today,
         window_end,
-        safety_cap=count + 5  # A few extra in case some are materialized
+        safety_cap=count + 10  # A few extra in case some are materialized
     )
     
     # Get already-materialized instance starts for this parent
@@ -787,12 +789,15 @@ def recurrence_preview_occurrences(request):
         if len(virtual_occurrences) >= count:
             break
     
+    # For forever series, show "more" button until we hit the max
+    has_more = count < MAX_PREVIEW_COUNT
+    
     # Build context for template
     context = {
         'parent': parent,
         'occurrences': virtual_occurrences,
         'count': count,
-        'has_more': len(occurrences) > len(virtual_occurrences) + 1,  # +1 for parent
+        'has_more': has_more,
         'format_phone': format_phone,
     }
     

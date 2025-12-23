@@ -517,7 +517,7 @@ class TestDraftWorkspaceFlow:
         page.locator("input[name='business_name']").fill(f"E2E Draft Save {unique_id}")
         # start_dt/end_dt may be managed by flatpickr (original input becomes type=hidden),
         # so set via JS / flatpickr API instead of locator.fill().
-        page.evaluate(
+        date_set = page.evaluate(
             """
             (dateStr) => {
                 const withinPanel = (selector) => document.querySelector('#job-panel ' + selector);
@@ -546,12 +546,28 @@ class TestDraftWorkspaceFlow:
                     allDay.dispatchEvent(new Event('change', { bubbles: true }));
                 }
 
-                setField('start_dt', dateStr);
-                setField('end_dt', dateStr);
+                const startOk = setField('start_dt', dateStr);
+                const endOk = setField('end_dt', dateStr);
+                return startOk && endOk;
             }
             """,
             weekday_date,
         )
+        assert date_set, "Date fields must be set before form submission"
+        
+        # Wait for flatpickr to update
+        page.wait_for_timeout(300)
+        
+        # Verify dates are set
+        dates_ok = page.evaluate("""
+            () => {
+                const withinPanel = (selector) => document.querySelector('#job-panel ' + selector);
+                const startDt = withinPanel('input[name="start_dt"]');
+                const endDt = withinPanel('input[name="end_dt"]');
+                return startDt && startDt.value && endDt && endDt.value;
+            }
+        """)
+        assert dates_ok, "Date fields must have values before form submission"
 
         # Select a calendar value. Do it in-page to avoid brittleness about seeded IDs.
         # Also sets the hidden form select to guarantee server-side validation passes.
@@ -565,7 +581,7 @@ class TestDraftWorkspaceFlow:
                     return opt ? opt.value : null;
                 };
                 const value = pick(header) || pick(hidden);
-                if (!value) return;
+                if (!value) return false;
                 if (header) {
                     header.value = value;
                     header.dispatchEvent(new Event('change', { bubbles: true }));
@@ -574,25 +590,42 @@ class TestDraftWorkspaceFlow:
                     hidden.value = value;
                     hidden.dispatchEvent(new Event('change', { bubbles: true }));
                 }
+                // Call the sync function that validation uses
+                if (window.syncHiddenCalendarFromHeader && typeof window.syncHiddenCalendarFromHeader === 'function') {
+                    window.syncHiddenCalendarFromHeader();
+                }
+                return true;
             }
         """)
+        
+        # Wait a bit for calendar sync to complete
+        page.wait_for_timeout(300)
+        
+        # Verify calendar is set before proceeding
+        calendar_set = page.evaluate("""
+            () => {
+                const hidden = document.querySelector('#job-panel .panel-body select[name="calendar"]');
+                return hidden && hidden.value && hidden.value !== '';
+            }
+        """)
+        assert calendar_set, "Calendar must be set before form submission"
 
-        # Capture job ID from HX-Trigger so we can clean up after the test
+        # Set up handler to capture job ID from HX-Trigger
         page.evaluate("""
             () => {
                 window.__e2eLastJobId = null;
+                window.__e2eDebugLog = [];
                 const handler = (event) => {
                     try {
-                        const form = event.target && event.target.closest
-                            ? event.target.closest('form[data-gts-job-form]')
-                            : null;
-                        if (!form) return;
                         const xhr = event.detail && event.detail.xhr;
-                        const header = xhr && xhr.getResponseHeader ? xhr.getResponseHeader('HX-Trigger') : null;
-                        if (!header) return;
-                        const data = JSON.parse(header);
-                        if (data.jobSaved && data.jobSaved.jobId) {
-                            window.__e2eLastJobId = String(data.jobSaved.jobId);
+                        if (xhr && xhr.status === 200) {
+                            const header = xhr.getResponseHeader ? xhr.getResponseHeader('HX-Trigger') : null;
+                            if (header) {
+                                const data = JSON.parse(header);
+                                if (data.jobSaved && data.jobSaved.jobId) {
+                                    window.__e2eLastJobId = String(data.jobSaved.jobId);
+                                }
+                            }
                         }
                     } catch (e) {
                         // ignore
@@ -604,13 +637,67 @@ class TestDraftWorkspaceFlow:
 
         job_id = None
         try:
+            # Ensure form is fully ready - wait for flatpickr and all initialization
+            page.wait_for_timeout(1000)
+            
+            # Sync calendar before validation
+            page.evaluate("""
+                () => {
+                    const form = document.querySelector('form[data-gts-job-form]');
+                    if (form && window.syncHiddenCalendarFromHeader) {
+                        window.syncHiddenCalendarFromHeader();
+                    }
+                }
+            """)
+            
+            # Verify all required fields are set
+            form_state = page.evaluate("""
+                () => {
+                    const form = document.querySelector('form[data-gts-job-form]');
+                    if (!form) return {error: 'No form found'};
+                    const businessName = form.querySelector('input[name="business_name"]');
+                    const startDt = form.querySelector('input[name="start_dt"]');
+                    const endDt = form.querySelector('input[name="end_dt"]');
+                    const calendar = form.querySelector('select[name="calendar"]');
+                    
+                    return {
+                        business_name: businessName ? businessName.value : null,
+                        start_dt: startDt ? startDt.value : null,
+                        end_dt: endDt ? endDt.value : null,
+                        calendar: calendar ? calendar.value : null,
+                    };
+                }
+            """)
+            print(f"Form state before submission: {form_state}")
+            
+            # Capture console errors
+            console_errors = []
+            page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+            
             # Click Save (HTMX submission) and wait for it to succeed
             save_btn = page.locator("#job-panel form button[type='submit']")
             expect(save_btn).to_be_visible()
+            
             save_btn.click()
+            
+            # Wait for the request to complete
+            page.wait_for_timeout(2000)
 
             # Wait for jobSaved to be captured and for the draft tab to be removed
-            page.wait_for_function("() => !!window.__e2eLastJobId", timeout=15000)
+            try:
+                page.wait_for_function("() => !!window.__e2eLastJobId", timeout=15000)
+            except Exception as e:
+                # If timeout, show debug info
+                debug_log = page.evaluate("() => window.__e2eDebugLog || []")
+                print(f"Debug log: {debug_log}")
+                # Check if form submission happened
+                form_html = page.evaluate("() => document.querySelector('form[data-gts-job-form]')?.outerHTML?.slice(0, 500)")
+                print(f"Form HTML (first 500 chars): {form_html}")
+                # Check for validation errors
+                errors = page.evaluate("() => Array.from(document.querySelectorAll('.error, .field-error')).map(el => el.textContent)")
+                print(f"Validation errors: {errors}")
+                print(f"Console errors: {console_errors}")
+                raise
             job_id = page.evaluate("window.__e2eLastJobId")
 
             # Draft should be removed from workspace, and panel should close

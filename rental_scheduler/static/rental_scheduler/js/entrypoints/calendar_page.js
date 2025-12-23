@@ -601,6 +601,11 @@
                             if (searchResults) {
                                 searchResults.innerHTML = html;
 
+                                // Process HTMX attributes in the injected HTML so load-more button works
+                                if (window.htmx && typeof window.htmx.process === 'function') {
+                                    window.htmx.process(searchResults);
+                                }
+
                                 // Update job rows for keyboard navigation
                                 updateJobRows();
 
@@ -683,6 +688,18 @@
                             row.style.backgroundColor = '';
                         }
                     });
+
+                    // Listen for HTMX swaps to refresh keyboard navigation cache
+                    // This handles load-more appends
+                    document.body.addEventListener('htmx:afterSwap', function(event) {
+                        // Check if the swap target was the job table body (load-more append)
+                        if (event.detail && event.detail.target && 
+                            (event.detail.target.id === 'job-table-body' || 
+                             (event.detail.target.querySelector && event.detail.target.querySelector('#job-table-body')))) {
+                            // Refresh the cached job rows for keyboard navigation
+                            updateJobRows();
+                        }
+                    });
                 }
             }
 
@@ -705,6 +722,7 @@
              */
             function expandOccurrences(parentId, btn, count, container) {
                 const icon = btn.querySelector('.expand-icon');
+                const label = btn.querySelector('.expand-label');
                 
                 btn.disabled = true;
                 if (icon) icon.style.opacity = '0.5';
@@ -726,6 +744,8 @@
                         parentRow.insertAdjacentHTML('afterend', html);
 
                         btn.setAttribute('data-expanded', 'true');
+                        btn.setAttribute('aria-expanded', 'true');
+                        if (label) label.textContent = 'Hide upcoming';
                         if (icon) {
                             icon.style.transform = 'rotate(180deg)';
                             icon.style.opacity = '1';
@@ -748,7 +768,10 @@
                 removeVirtualRows(parentId, container);
 
                 const icon = btn.querySelector('.expand-icon');
+                const label = btn.querySelector('.expand-label');
                 btn.setAttribute('data-expanded', 'false');
+                btn.setAttribute('aria-expanded', 'false');
+                if (label) label.textContent = 'Show upcoming';
                 if (icon) {
                     icon.style.transform = 'rotate(0deg)';
                 }

@@ -113,6 +113,47 @@ parent.update_recurring_instances(
 )
 ```
 
+#### Edit Recurrence Rule (Finite ↔ Forever)
+
+You can edit a recurring parent to change its recurrence rule, including converting between finite and forever series.
+
+**Converting Finite to Forever:**
+```python
+# A job with count=50 can be changed to forever
+parent = Job.objects.get(id=parent_id, recurrence_parent__isnull=True)
+
+# Update the recurrence rule
+rule = parent.recurrence_rule or {}
+rule['end'] = 'never'
+rule['count'] = None
+rule['until_date'] = None
+parent.recurrence_rule = rule
+parent.save(update_fields=['recurrence_rule'])
+
+# Existing materialized instances remain intact
+# Virtual occurrences will now generate indefinitely
+```
+
+**Converting Forever to Finite:**
+```python
+# A forever series can be converted to have a count
+parent = Job.objects.get(id=parent_id, recurrence_parent__isnull=True)
+
+rule = parent.recurrence_rule or {}
+rule['count'] = 24
+rule['until_date'] = None
+if 'end' in rule:
+    del rule['end']
+parent.recurrence_rule = rule
+parent.save(update_fields=['recurrence_rule'])
+```
+
+**Important Notes:**
+- Only recurring *parents* can have their recurrence rule edited (not instances)
+- Existing materialized instances are preserved—no data loss occurs
+- Virtual occurrences adjust automatically based on the new rule
+- The UI (Job Form) supports this via the "Ends" dropdown
+
 ### Marking an Instance Complete
 
 ```python
@@ -336,15 +377,18 @@ This ensures forever series remain discoverable when searching for future events
 
 ### Expandable preview of upcoming occurrences
 
-Forever series rows in the Jobs list and Calendar Search Panel include an **expand button** (chevron icon) that reveals the next 5 upcoming virtual occurrences:
+Forever series rows in the Jobs list and Calendar Search Panel include a **"Show upcoming"** button next to the ∞ badge that reveals the next 5 upcoming virtual occurrences:
 
-- Click the expand button to show virtual occurrence rows
+- Click the **"Show upcoming"** button to expand and show virtual occurrence rows (the button changes to "Hide upcoming" when expanded)
 - Virtual rows are styled with a subtle indigo background and a "↻" icon to indicate they are not yet real jobs
 - **Click any virtual row** to materialize it into a real Job and open it for editing
-- Use the **"Show 5 more"** button to load additional occurrences
-- Click the expand button again to collapse/hide the virtual rows
+- Use the **"Show 5 more"** button to load additional occurrences (repeatable up to a maximum of 200 occurrences)
+- Click the **"Hide upcoming"** button again to collapse the virtual rows
 
-Virtual occurrences are generated on-the-fly via `GET /api/recurrence/preview/?parent_id=X&count=N`. Clicking a virtual row calls `POST /api/recurrence/materialize/` to create the real Job before opening it.
+**Technical Details:**
+- Virtual occurrences are generated on-the-fly via `GET /api/recurrence/preview/?parent_id=X&count=N` (max: 200)
+- Clicking a virtual row calls `POST /api/recurrence/materialize/` to create the real Job before opening it
+- The 200-occurrence cap prevents abuse while still allowing users to explore far into the future incrementally
 
 ## Best Practices
 

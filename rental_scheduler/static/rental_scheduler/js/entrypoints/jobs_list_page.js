@@ -324,33 +324,28 @@
      */
     function expandOccurrences(parentId, btn, count) {
         const icon = btn.querySelector('.expand-icon');
+        const label = btn.querySelector('.expand-label');
         
         // Show loading state
         btn.disabled = true;
         if (icon) icon.style.opacity = '0.5';
 
         const previewUrl = GTS.urls.recurrencePreview + '?parent_id=' + parentId + '&count=' + count;
-        console.log('Fetching preview:', previewUrl);
         
         fetch(previewUrl, {
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
             .then(function(response) {
-                console.log('Preview response status:', response.status);
                 if (!response.ok) {
                     return response.text().then(function(text) {
-                        console.error('Preview error response:', text);
                         throw new Error('Failed to fetch occurrences: ' + text);
                     });
                 }
                 return response.text();
             })
             .then(function(html) {
-                console.log('Preview HTML length:', html.length, 'first 200 chars:', html.substring(0, 200));
-                
                 // Find the parent row
                 const parentRow = document.getElementById('job-row-' + parentId);
-                console.log('Parent row found:', !!parentRow, 'id=job-row-' + parentId);
                 if (!parentRow) return;
 
                 // Remove any existing virtual rows for this parent
@@ -358,10 +353,11 @@
 
                 // Insert new rows after parent
                 parentRow.insertAdjacentHTML('afterend', html);
-                console.log('Inserted HTML after parent row');
 
                 // Update button state
                 btn.setAttribute('data-expanded', 'true');
+                btn.setAttribute('aria-expanded', 'true');
+                if (label) label.textContent = 'Hide upcoming';
                 if (icon) {
                     icon.style.transform = 'rotate(180deg)';
                     icon.style.opacity = '1';
@@ -387,7 +383,10 @@
         removeVirtualRows(parentId);
 
         const icon = btn.querySelector('.expand-icon');
+        const label = btn.querySelector('.expand-label');
         btn.setAttribute('data-expanded', 'false');
+        btn.setAttribute('aria-expanded', 'false');
+        if (label) label.textContent = 'Show upcoming';
         if (icon) {
             icon.style.transform = 'rotate(0deg)';
         }

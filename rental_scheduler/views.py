@@ -508,6 +508,13 @@ class JobListView(ListView):
         context = super().get_context_data(**kwargs)
         context['title'] = 'Jobs'
         
+        # Fix pagination context: make 'jobs' refer to the Page object (not just the list)
+        # so templates can call .has_next, .has_other_pages, .start_index, etc.
+        # Django ListView puts the page in 'page_obj' by default, but our templates expect 'jobs'.
+        if 'page_obj' in context and context['page_obj'] is not None:
+            context['jobs'] = context['page_obj']
+        # If pagination is not active, 'jobs' will still be the queryset/list (fallback)
+        
         # Add sorting context
         context['current_sort'] = getattr(self, '_effective_sort', self.request.GET.get('sort', 'start_dt'))
         context['current_direction'] = getattr(self, '_effective_direction', self.request.GET.get('direction', 'desc'))
@@ -535,6 +542,25 @@ class JobListView(ListView):
         # (used to show appropriate badge/info in templates)
         context['includes_forever_parents'] = getattr(self, '_includes_forever_parents', False)
         
+        # For load-more links: determine if last job on current page is a past event
+        # (needed for boundary-safe section header insertion)
+        jobs = context.get('jobs')
+        if jobs and hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
+            if context['date_filter'] == 'all' and context['current_sort'] == 'smart':
+                # Convert to list to support negative indexing (QuerySet doesn't support it)
+                job_list = list(jobs.object_list)
+                last_job = job_list[-1]
+                if hasattr(last_job, 'is_past_event'):
+                    context['last_job_is_past_event'] = bool(last_job.is_past_event)
+                else:
+                    # Fallback: check start_dt against now
+                    from django.utils import timezone
+                    context['last_job_is_past_event'] = last_job.start_dt < timezone.now()
+            else:
+                context['last_job_is_past_event'] = None
+        else:
+            context['last_job_is_past_event'] = None
+        
         return context
 
 
@@ -542,13 +568,88 @@ class JobListTablePartialView(JobListView):
     """
     Returns only the job list table fragment (no surrounding page layout).
     Used by the calendar search panel to avoid HTML scraping.
+    
+    For HTMX requests (HX-Request header), returns a chunk template that appends
+    rows to the existing table body, plus out-of-band updates for pagination controls.
     """
     template_name = 'rental_scheduler/partials/job_list_table.html'
+
+    def paginate_queryset(self, queryset, page_size):
+        """
+        Override pagination to handle out-of-range pages gracefully for HTMX requests.
+        Returns empty page instead of raising Http404.
+        """
+        from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+        from django.core.paginator import Page as DjangoPage
+        
+        paginator = Paginator(queryset, page_size)
+        page_number = self.request.GET.get('page', 1)
+        
+        is_htmx = self.request.headers.get('HX-Request') == 'true'
+        
+        # Handle empty queryset case for HTMX
+        if is_htmx and paginator.count == 0:
+            # Create an empty page manually
+            empty_page = DjangoPage([], 1, paginator)
+            return (paginator, empty_page, [], False)
+        
+        try:
+            page = paginator.page(page_number)
+        except PageNotAnInteger:
+            # If page is not an integer, deliver first page
+            page = paginator.page(1)
+        except EmptyPage:
+            if is_htmx:
+                # For HTMX chunk requests, return last valid page with empty list
+                # This allows the chunk template to render OOB updates safely
+                if paginator.num_pages > 0:
+                    page = paginator.page(paginator.num_pages)
+                    # Override object_list to empty to avoid showing stale data
+                    page.object_list = []
+                else:
+                    # Fallback: create empty page
+                    page = DjangoPage([], 1, paginator)
+            else:
+                # For non-HTMX requests, maintain default behavior (raise 404)
+                raise
+        
+        return (paginator, page, page.object_list, page.has_other_pages())
+
+    def get_template_names(self):
+        """Return chunk template for HTMX requests, full table template otherwise."""
+        is_htmx = self.request.headers.get('HX-Request') == 'true'
+        if is_htmx:
+            return ['rental_scheduler/partials/job_list_table_chunk.html']
+        return [self.template_name]
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         # Remove 'calendars' from context - the table partial doesn't need the full calendar list
         context.pop('calendars', None)
+        
+        # For HTMX chunk responses, add boundary detection context
+        is_htmx = self.request.headers.get('HX-Request') == 'true'
+        if is_htmx:
+            # Check if we need to insert a section header at the boundary
+            # This happens when crossing from "upcoming" to "past" in smart sort mode
+            prev_is_past_event = self.request.GET.get('prev_is_past_event')
+            if prev_is_past_event is not None:
+                context['prev_is_past_event'] = int(prev_is_past_event)
+            
+            # Determine if first row of this chunk is past event
+            jobs = context.get('jobs')
+            if jobs and hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
+                if context.get('date_filter') == 'all' and context.get('current_sort') == 'smart':
+                    # Convert to list to support indexing (QuerySet may not support it efficiently)
+                    job_list = list(jobs.object_list)
+                    first_job = job_list[0]
+                    if hasattr(first_job, 'is_past_event'):
+                        context['first_row_is_past'] = bool(first_job.is_past_event)
+                    else:
+                        # Fallback: check start_dt against now
+                        from django.utils import timezone
+                        context['first_row_is_past'] = first_job.start_dt < timezone.now()
+        
         return context
 
 
@@ -2352,6 +2453,68 @@ def job_create_submit(request):
                 # Generate recurring instances for non-forever series
                 job.generate_recurring_instances()
                 logger.info(f"Created recurring job {job.id} with {recurrence_type} recurrence ({count or 'until ' + str(until_date)} occurrences)")
+        
+        # Handle recurring event updates (finite -> forever conversion)
+        elif recurrence_enabled and job_id and job.is_recurring_parent:
+            # Only allow editing recurring parents (not instances)
+            if job.recurrence_parent:
+                messages.error(request, 'Cannot edit recurrence for an instance. Edit the parent series instead.')
+                return redirect('rental_scheduler:job_list')
+            
+            # Parse recurrence settings from form
+            recurrence_end_mode = request.POST.get('recurrence_end', 'never')
+            
+            # Update recurrence rule based on end mode
+            if recurrence_end_mode == 'never':
+                # Converting to forever series
+                rule = job.recurrence_rule or {}
+                rule['end'] = 'never'
+                rule['count'] = None
+                rule['until_date'] = None
+                job.recurrence_rule = rule
+                job.save(update_fields=['recurrence_rule'])
+                logger.info(f"Updated job {job.id} to forever recurring series")
+            elif recurrence_end_mode == 'after_count':
+                # Converting to finite count series
+                recurrence_count_raw = request.POST.get('recurrence_count')
+                if recurrence_count_raw:
+                    try:
+                        count = int(recurrence_count_raw)
+                        if count < 1:
+                            messages.error(request, 'Recurrence count must be at least 1.')
+                            return redirect('rental_scheduler:job_list')
+                        if count > 500:
+                            messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+                            return redirect('rental_scheduler:job_list')
+                        
+                        rule = job.recurrence_rule or {}
+                        rule['count'] = count
+                        rule['until_date'] = None
+                        if 'end' in rule:
+                            del rule['end']
+                        job.recurrence_rule = rule
+                        job.save(update_fields=['recurrence_rule'])
+                        logger.info(f"Updated job {job.id} to finite count recurring series (count={count})")
+                    except (TypeError, ValueError):
+                        messages.error(request, 'Recurrence count must be a whole number.')
+                        return redirect('rental_scheduler:job_list')
+            elif recurrence_end_mode == 'on_date':
+                # Converting to finite date series
+                recurrence_until_raw = request.POST.get('recurrence_until')
+                if recurrence_until_raw:
+                    try:
+                        until_date = datetime.strptime(recurrence_until_raw, DATE_ONLY_FMT).date()
+                        rule = job.recurrence_rule or {}
+                        rule['count'] = None
+                        rule['until_date'] = until_date.isoformat()
+                        if 'end' in rule:
+                            del rule['end']
+                        job.recurrence_rule = rule
+                        job.save(update_fields=['recurrence_rule'])
+                        logger.info(f"Updated job {job.id} to finite date recurring series (until={until_date})")
+                    except ValueError:
+                        messages.error(request, 'Recurrence end date must be a valid date (YYYY-MM-DD).')
+                        return redirect('rental_scheduler:job_list')
         
         logger.info(f"Job saved successfully: {job.id}")
         # Return a simple success response that triggers the close action
