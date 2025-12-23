@@ -304,6 +304,9 @@ class TestSeriesOccurrencesEndpoint:
         
         # Should contain occurrence rows
         assert "series-occurrence-row" in content
+        # Parent/template row should be labeled with its occurrence number (parent is always #1)
+        assert "#1" in content
+        assert "Series Template" not in content
 
     def test_series_occurrences_filters_by_scope(self, api_client, calendar):
         """Endpoint respects scope parameter (upcoming vs past)."""
@@ -513,4 +516,152 @@ class TestSeriesOccurrencesEndpoint:
         # Verify we have both materialized and virtual rows (mixed)
         assert 'data-virtual="1"' in content, "Expected at least one virtual row"
         assert 'data-job-id="' in content, "Expected at least one materialized row"
+
+    def test_series_occurrences_past_descending_order(self, api_client, calendar):
+        """
+        Past scope returns materialized occurrences in descending order (newest-first)
+        with correct 5-row count.
+        
+        Regression test for past ordering behavior.
+        """
+        import re
+        from datetime import datetime
+        
+        now = timezone.now()
+        tz = timezone.get_current_timezone()
+        
+        # Create a monthly recurring parent that started 8 months ago
+        parent_start = timezone.make_aware(
+            datetime(now.year, now.month, now.day, 10, 0, 0), tz
+        ) - timedelta(days=240)  # ~8 months ago
+        
+        parent = Job.objects.create(
+            calendar=calendar,
+            business_name="Past Ordering Test",
+            start_dt=parent_start,
+            end_dt=parent_start + timedelta(hours=1),
+            all_day=False,
+            status="uncompleted",
+            recurrence_rule={"type": "monthly", "interval": 1, "count": 12},
+        )
+        
+        # Create 7 materialized past instances (months 1-7)
+        for i in range(1, 8):
+            instance_start = parent_start + timedelta(days=30 * i)
+            if instance_start < now:  # Only create if in the past
+                Job.objects.create(
+                    calendar=calendar,
+                    business_name="Past Ordering Test",
+                    start_dt=instance_start,
+                    end_dt=instance_start + timedelta(hours=1),
+                    all_day=False,
+                    status="uncompleted",
+                    recurrence_parent=parent,
+                    recurrence_original_start=instance_start,
+                )
+        
+        url = reverse("rental_scheduler:series_occurrences_api")
+        response = api_client.get(url, {
+            "parent_id": parent.id,
+            "scope": "past",
+            "search": "Past Ordering",
+            "count": "5",
+            "offset": "0",
+        })
+        
+        assert response.status_code == 200
+        content = response.content.decode("utf-8")
+        
+        # Count occurrence rows (with data-occurrence-start attribute)
+        occurrence_starts = re.findall(r'data-occurrence-start="([^"]+)"', content)
+        
+        # Should have at most 5 occurrence rows (may be fewer if not enough past instances)
+        assert len(occurrence_starts) <= 5, f"Expected at most 5 occurrence rows, got {len(occurrence_starts)}"
+        assert len(occurrence_starts) >= 1, "Expected at least 1 past occurrence row"
+        
+        # Parse the timestamps and verify they are monotonically DECREASING (newest first)
+        from django.utils.dateparse import parse_datetime
+        parsed_times = []
+        for iso_str in occurrence_starts:
+            dt = parse_datetime(iso_str)
+            assert dt is not None, f"Could not parse datetime: {iso_str}"
+            parsed_times.append(dt)
+        
+        # Verify descending order (newest-first)
+        for i in range(len(parsed_times) - 1):
+            assert parsed_times[i] >= parsed_times[i + 1], (
+                f"Occurrence at index {i} ({parsed_times[i]}) is not >= index {i+1} ({parsed_times[i+1]}). "
+                "Past scope should be sorted newest-first."
+            )
+        
+        # Verify no virtual rows in past scope (materialized-only)
+        assert 'data-virtual="1"' not in content, "Past scope should not contain virtual rows"
+        # Should have materialized rows
+        assert 'data-job-id="' in content, "Expected materialized rows in past scope"
+
+    def test_grouped_search_two_headers_for_same_series(self, api_client, calendar):
+        """
+        When a recurring series has matches in both upcoming and past,
+        two separate series header rows are rendered with different scopes.
+        
+        Regression test for proper scope-based header deduplication.
+        """
+        now = timezone.now()
+        
+        # Create parent in the past (will appear in Past section)
+        parent = Job.objects.create(
+            calendar=calendar,
+            business_name="DualHeader Test Series",
+            start_dt=now - timedelta(days=60),
+            end_dt=now - timedelta(days=60, hours=-1),
+            all_day=False,
+            status="uncompleted",
+            recurrence_rule={"type": "monthly", "interval": 1, "end": "never"},
+        )
+        
+        # Create a past instance
+        Job.objects.create(
+            calendar=calendar,
+            business_name="DualHeader Test Series",
+            start_dt=now - timedelta(days=30),
+            end_dt=now - timedelta(days=30, hours=-1),
+            all_day=False,
+            status="uncompleted",
+            recurrence_parent=parent,
+            recurrence_original_start=now - timedelta(days=30),
+        )
+        
+        # Create a future instance (will appear in Upcoming section)
+        Job.objects.create(
+            calendar=calendar,
+            business_name="DualHeader Test Series",
+            start_dt=now + timedelta(days=30),
+            end_dt=now + timedelta(days=30, hours=1),
+            all_day=False,
+            status="uncompleted",
+            recurrence_parent=parent,
+            recurrence_original_start=now + timedelta(days=30),
+        )
+        
+        url = reverse("rental_scheduler:job_list_table_partial")
+        response = api_client.get(url, {"search": "DualHeader", "date_filter": "all"})
+        
+        assert response.status_code == 200
+        content = response.content.decode("utf-8")
+        
+        # Should show both section headers
+        assert "Upcoming Events" in content
+        assert "Past Events" in content
+        
+        # Should have exactly 2 series header rows (one upcoming, one past)
+        header_count = content.count("series-header-row")
+        assert header_count == 2, f"Expected 2 series header rows, got {header_count}"
+        
+        # Verify both scopes are represented
+        assert f'data-scope="upcoming"' in content, "Should have upcoming scope header"
+        assert f'data-scope="past"' in content, "Should have past scope header"
+        
+        # Both headers should be for the same parent
+        assert content.count(f'data-series-id="{parent.id}"') == 2, \
+            "Both headers should reference the same parent ID"
 

@@ -74,6 +74,19 @@ Because the panel loads/swaps HTML fragments, frontend code must be **idempotent
 - Use `rental_scheduler/static/rental_scheduler/js/gts_init.js` helpers (e.g. “init once” patterns) where needed.
 - Avoid binding duplicate handlers on `htmx:load` / `htmx:afterSwap`.
 
+## HTMX fragment validity (important)
+
+When returning **HTML fragments** for HTMX (`hx-get` / `hx-select`), the response must be **valid HTML when parsed as a standalone fragment**. Browsers will drop/reparent invalid top-level nodes, which can make `hx-select` match **zero** nodes even though the raw response text “looks right”.
+
+Common pitfall:
+
+- **Table fragments**: do **not** return a bare `<tbody>` or `<tr>` at the top-level. Wrap in `<table><tbody>…</tbody></table>` so the HTML parser preserves the structure.
+
+Reference implementation:
+
+- HTMX “load more” chunk: `rental_scheduler/templates/rental_scheduler/partials/job_list_table_chunk.html`
+- Selector used by the shared footer: `rental_scheduler/templates/rental_scheduler/partials/job_list_pagination_footer.html` (`hx-select="#job-list-chunk-wrapper > tr"`)
+
 ## Guardrails against drift
 
 - **Hard-coded URL guard**: `tests/test_no_hardcoded_urls.py`

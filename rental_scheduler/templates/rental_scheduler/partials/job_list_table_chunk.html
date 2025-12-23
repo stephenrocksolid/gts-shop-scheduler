@@ -2,39 +2,84 @@
 
 {# Chunk template for HTMX load-more: appends rows to #job-table-body and updates pagination controls via OOB #}
 
-{# Wrap in tbody so HTMX can parse the response; we'll use hx-select to extract only the rows #}
+{# IMPORTANT: Wrap rows in a <table> to ensure HTML parsing retains <tbody>/<tr> in fragment responses. #}
+{# HTMX will still extract only the <tr> elements via hx-select="#job-list-chunk-wrapper > tr". #}
+<table>
 <tbody id="job-list-chunk-wrapper">
-{# Optional section header if crossing boundary from upcoming to past #}
-{% if date_filter == 'all' and current_sort == 'smart' and prev_is_past_event == 0 and first_row_is_past %}
-    <tr class="bg-gray-100 border-t-2 border-gray-300">
-        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
-            Past Events
-        </td>
-    </tr>
-{% endif %}
-
-{# Job rows to append #}
-{% for job in jobs %}
-    {# Only insert section header if this is the first row and we're crossing boundary #}
-    {% if date_filter == 'all' and current_sort == 'smart' %}
-        {% if forloop.first and prev_is_past_event == 0 and job.is_past_event %}
-            {# Header already emitted above, skip #}
-        {% elif not forloop.first %}
-            {# Check if we're crossing boundary mid-chunk #}
-            {% ifchanged job.is_past_event %}
-                {% if job.is_past_event %}
-                    <tr class="bg-gray-100 border-t-2 border-gray-300">
-                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
-                            Past Events
-                        </td>
-                    </tr>
-                {% endif %}
-            {% endifchanged %}
-        {% endif %}
+{% if is_series_collapsed and standard_sections %}
+    {# Series-collapsed mode: render from standard_sections #}
+    {# Note: JS will dedupe series headers that already exist in DOM #}
+    
+    {# Optional section header if crossing boundary from upcoming to past #}
+    {% if date_filter == 'all' and prev_is_past_event == 0 and standard_sections.past and not standard_sections.upcoming %}
+        <tr class="bg-gray-100 border-t-2 border-gray-300">
+            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                Past Events
+            </td>
+        </tr>
     {% endif %}
-    {% include 'rental_scheduler/partials/job_row.html' with job=job %}
-{% endfor %}
+    
+    {# Render upcoming rows if present #}
+    {% for row in standard_sections.upcoming %}
+        {% if row.type == 'series' %}
+            {% include 'rental_scheduler/partials/series_header_row_job_list.html' with series=row.series %}
+        {% else %}
+            {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+        {% endif %}
+    {% endfor %}
+    
+    {# Section header if we have both upcoming and past in this chunk #}
+    {% if standard_sections.upcoming and standard_sections.past and date_filter == 'all' %}
+        <tr class="bg-gray-100 border-t-2 border-gray-300">
+            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                Past Events
+            </td>
+        </tr>
+    {% endif %}
+    
+    {# Render past rows if present #}
+    {% for row in standard_sections.past %}
+        {% if row.type == 'series' %}
+            {% include 'rental_scheduler/partials/series_header_row_job_list.html' with series=row.series %}
+        {% else %}
+            {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+        {% endif %}
+    {% endfor %}
+{% else %}
+    {# Legacy mode: render individual job rows #}
+    {# Optional section header if crossing boundary from upcoming to past #}
+    {% if date_filter == 'all' and current_sort == 'smart' and prev_is_past_event == 0 and first_row_is_past %}
+        <tr class="bg-gray-100 border-t-2 border-gray-300">
+            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                Past Events
+            </td>
+        </tr>
+    {% endif %}
+
+    {# Job rows to append #}
+    {% for job in jobs %}
+        {# Only insert section header if this is the first row and we're crossing boundary #}
+        {% if date_filter == 'all' and current_sort == 'smart' %}
+            {% if forloop.first and prev_is_past_event == 0 and job.is_past_event %}
+                {# Header already emitted above, skip #}
+            {% elif not forloop.first %}
+                {# Check if we're crossing boundary mid-chunk #}
+                {% ifchanged job.is_past_event %}
+                    {% if job.is_past_event %}
+                        <tr class="bg-gray-100 border-t-2 border-gray-300">
+                            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                                Past Events
+                            </td>
+                        </tr>
+                    {% endif %}
+                {% endifchanged %}
+            {% endif %}
+        {% endif %}
+        {% include 'rental_scheduler/partials/job_row.html' with job=job %}
+    {% endfor %}
+{% endif %}
 </tbody>
+</table>
 
 {# Out-of-band update for entire pagination footer - processed BEFORE hx-select filtering #}
 {% include 'rental_scheduler/partials/job_list_pagination_footer.html' with oob=True %}

@@ -263,21 +263,7 @@
                 return;
             }
 
-            // Handle expand/collapse button for forever series
-            var expandBtn = e.target.closest('.expand-occurrences-btn');
-            if (expandBtn) {
-                e.stopPropagation();
-                handleExpandOccurrences(expandBtn);
-                return;
-            }
-
-            // Handle "Show more" button
-            var showMoreBtn = e.target.closest('.show-more-occurrences-btn');
-            if (showMoreBtn) {
-                e.stopPropagation();
-                handleShowMoreOccurrences(showMoreBtn);
-                return;
-            }
+            // Note: .expand-occurrences-btn is no longer used - series headers handle expansion now
 
             var row = e.target.closest('.job-row');
             if (!row) return;
@@ -337,125 +323,49 @@
     }
 
     // ========================================================================
-    // FOREVER SERIES EXPAND/COLLAPSE
+    // HTMX DEDUPE FOR SERIES HEADERS
     // ========================================================================
 
     /**
-     * Handle expand button click to fetch and show virtual occurrences
+     * After HTMX appends new rows (load-more), dedupe series header rows.
+     * If a series header already exists in the DOM for the same (parent_id, scope),
+     * remove the duplicate that was just appended.
      */
-    function handleExpandOccurrences(btn) {
-        const parentId = btn.getAttribute('data-parent-id');
-        const isExpanded = btn.getAttribute('data-expanded') === 'true';
+    function initHtmxSeriesHeaderDedupe() {
+        document.body.addEventListener('htmx:afterSwap', function(e) {
+            // Only care about swaps into #job-table-body or #job-table-container
+            var target = e.detail.target;
+            if (!target) return;
+            if (!target.id || (target.id !== 'job-table-body' && target.id !== 'job-table-container')) {
+                // Check if target is inside our container
+                if (!target.closest('#job-table-container')) return;
+            }
 
-        if (isExpanded) {
-            // Collapse: remove virtual occurrence rows
-            collapseOccurrences(parentId, btn);
-        } else {
-            // Expand: fetch and insert virtual occurrence rows
-            expandOccurrences(parentId, btn, 5);
-        }
-    }
+            // Find all series header rows and dedupe
+            var allHeaders = document.querySelectorAll('#job-table-container .series-header-row');
+            var seen = {};
 
-    /**
-     * Expand to show virtual occurrences for a parent
-     */
-    function expandOccurrences(parentId, btn, count) {
-        const icon = btn.querySelector('.expand-icon');
-        const label = btn.querySelector('.expand-label');
-        
-        // Show loading state
-        btn.disabled = true;
-        if (icon) icon.style.opacity = '0.5';
+            allHeaders.forEach(function(header) {
+                var seriesId = header.getAttribute('data-series-id');
+                var scope = header.getAttribute('data-scope');
+                var key = seriesId + '-' + scope;
 
-        const previewUrl = GTS.urls.recurrencePreview + '?parent_id=' + parentId + '&count=' + count;
-        
-        fetch(previewUrl, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-            .then(function(response) {
-                if (!response.ok) {
-                    return response.text().then(function(text) {
-                        throw new Error('Failed to fetch occurrences: ' + text);
-                    });
+                if (seen[key]) {
+                    // Duplicate - remove the later one (the one just appended)
+                    header.remove();
+                } else {
+                    seen[key] = header;
                 }
-                return response.text();
-            })
-            .then(function(html) {
-                // Find the parent row
-                const parentRow = document.getElementById('job-row-' + parentId);
-                if (!parentRow) return;
-
-                // Remove any existing virtual rows for this parent
-                removeVirtualRows(parentId);
-
-                // Insert new rows after parent
-                parentRow.insertAdjacentHTML('afterend', html);
-
-                // Update button state
-                btn.setAttribute('data-expanded', 'true');
-                btn.setAttribute('aria-expanded', 'true');
-                if (label) label.textContent = 'Hide upcoming';
-                if (icon) {
-                    icon.style.transform = 'rotate(180deg)';
-                    icon.style.opacity = '1';
-                }
-                btn.title = 'Hide occurrences';
-            })
-            .catch(function(error) {
-                console.error('Error fetching occurrences:', error);
-                if (window.showToast) {
-                    window.showToast('Failed to load occurrences', 'error');
-                }
-            })
-            .finally(function() {
-                btn.disabled = false;
-                if (icon) icon.style.opacity = '1';
             });
-    }
-
-    /**
-     * Collapse (hide) virtual occurrences for a parent
-     */
-    function collapseOccurrences(parentId, btn) {
-        removeVirtualRows(parentId);
-
-        const icon = btn.querySelector('.expand-icon');
-        const label = btn.querySelector('.expand-label');
-        btn.setAttribute('data-expanded', 'false');
-        btn.setAttribute('aria-expanded', 'false');
-        if (label) label.textContent = 'Show upcoming';
-        if (icon) {
-            icon.style.transform = 'rotate(0deg)';
-        }
-        btn.title = 'Show upcoming occurrences';
-    }
-
-    /**
-     * Remove all virtual occurrence rows for a given parent
-     */
-    function removeVirtualRows(parentId) {
-        const virtualRows = document.querySelectorAll(
-            '.virtual-occurrence-row[data-parent-row-id="job-row-' + parentId + '"]'
-        );
-        virtualRows.forEach(function(row) {
-            row.remove();
         });
     }
 
-    /**
-     * Handle "Show more" button click
-     */
-    function handleShowMoreOccurrences(btn) {
-        const parentId = btn.getAttribute('data-parent-id');
-        const currentCount = parseInt(btn.getAttribute('data-current-count'), 10) || 5;
-        const newCount = currentCount + 5;
+    // Initialize dedupe listener
+    initHtmxSeriesHeaderDedupe();
 
-        // Find the expand button to reuse its expand logic
-        const expandBtn = document.querySelector('.expand-occurrences-btn[data-parent-id="' + parentId + '"]');
-        if (expandBtn) {
-            expandOccurrences(parentId, expandBtn, newCount);
-        }
-    }
+    // ========================================================================
+    // VIRTUAL ROW CLICK HANDLER
+    // ========================================================================
 
     /**
      * Handle click on a virtual occurrence row (materialize + open)

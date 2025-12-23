@@ -176,8 +176,45 @@
                                 {% endif %}
                             {% endfor %}
                         {% endif %}
+                    {% elif is_series_collapsed and standard_sections %}
+                        {# Standard mode with series collapsed into headers #}
+                        {# Render Upcoming section if it has rows #}
+                        {% if standard_sections.upcoming %}
+                            {% if date_filter == 'all' %}
+                                <tr class="bg-blue-50 border-t-2 border-blue-200">
+                                    <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
+                                        Upcoming Events
+                                    </td>
+                                </tr>
+                            {% endif %}
+                            {% for row in standard_sections.upcoming %}
+                                {% if row.type == 'series' %}
+                                    {% include 'rental_scheduler/partials/series_header_row_job_list.html' with series=row.series %}
+                                {% else %}
+                                    {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                        
+                        {# Render Past section if it has rows #}
+                        {% if standard_sections.past %}
+                            {% if date_filter == 'all' %}
+                                <tr class="bg-gray-100 border-t-2 border-gray-300">
+                                    <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                                        Past Events
+                                    </td>
+                                </tr>
+                            {% endif %}
+                            {% for row in standard_sections.past %}
+                                {% if row.type == 'series' %}
+                                    {% include 'rental_scheduler/partials/series_header_row_job_list.html' with series=row.series %}
+                                {% else %}
+                                    {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
                     {% else %}
-                        {# Standard mode: render individual job rows #}
+                        {# Fallback: Standard mode without series collapsing (legacy) #}
                         {% for job in jobs %}
                             {% if date_filter == 'all' and current_sort == 'smart' %}
                                 {% if forloop.first %}

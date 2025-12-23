@@ -716,7 +716,11 @@ def recurrence_preview_occurrences(request):
     from django.shortcuts import render
     from django.utils import timezone
     from datetime import timedelta
-    from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
+    from rental_scheduler.utils.recurrence import (
+        is_forever_series,
+        generate_occurrences_in_window,
+        compute_occurrence_number,
+    )
     from rental_scheduler.utils.phone import format_phone
     
     MAX_PREVIEW_COUNT = 200
@@ -827,7 +831,11 @@ def series_occurrences_api(request):
     from datetime import timedelta
     import re
     
-    from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
+    from rental_scheduler.utils.recurrence import (
+        is_forever_series,
+        generate_occurrences_in_window,
+        compute_occurrence_number,
+    )
     from rental_scheduler.utils.phone import format_phone
     
     MAX_COUNT = 50
@@ -941,10 +949,15 @@ def series_occurrences_api(request):
     materialized_entries = []
     for job in materialized_queryset:
         if job_matches_search(job, tokens):
+            # Add series position number so UI can consistently label occurrences.
+            # Parent is always #1; instances are computed based on recurrence_original_start.
+            original_start = job.recurrence_original_start or job.start_dt
+            occurrence_number = compute_occurrence_number(parent, original_start)
             materialized_entries.append({
                 'kind': 'materialized',
                 'start_dt': job.start_dt,
                 'job': job,
+                'occurrence_number': occurrence_number,
             })
     
     # For forever series in upcoming scope, also generate virtual occurrences

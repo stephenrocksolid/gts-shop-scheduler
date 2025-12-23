@@ -223,9 +223,9 @@ def test_job_list_table_partial_htmx_returns_chunk(api_client, calendar):
 
     content = response.content.decode("utf-8")
 
-    # Chunk wraps rows in tbody to prevent HTMX parse errors
+    # Chunk wraps rows in a table/tbody so HTML parsing retains <tbody>/<tr> in fragment responses
     # OOB footer swaps are processed before hx-select filtering
-    assert content.lstrip().startswith("<tbody"), "Chunk should start with <tbody> wrapper"
+    assert content.lstrip().startswith("<table"), "Chunk should start with <table> wrapper"
     
     # Should have the chunk wrapper for hx-select
     assert 'id="job-list-chunk-wrapper"' in content
@@ -244,6 +244,18 @@ def test_job_list_table_partial_htmx_returns_chunk(api_client, calendar):
     assert 'hx-swap-oob="true"' in content
     assert "job-list-status" in content
     # NOTE: Page indicator removed - we use append-only mode now
+
+    # Regression: response must be valid-parsed HTML such that hx-select can actually match rows.
+    # Browsers drop/reparent invalid top-level table nodes (e.g. bare <tbody>), causing HTMX to append 0 rows.
+    import html5lib
+    doc = html5lib.parse(content, treebuilder="etree")
+    # html5lib uses namespaced tags in etree; match by id attribute.
+    chunk_wrappers = [el for el in doc.iter() if el.attrib.get("id") == "job-list-chunk-wrapper"]
+    assert chunk_wrappers, "Parsed HTML should contain #job-list-chunk-wrapper"
+    # Ensure at least one <tr> descendant exists under the wrapper.
+    wrapper = chunk_wrappers[0]
+    tr_descendants = [el for el in wrapper.iter() if el.tag.endswith("tr")]
+    assert len(tr_descendants) > 0, "Parsed chunk wrapper should contain <tr> descendants"
 
 
 @pytest.mark.django_db
@@ -632,3 +644,225 @@ def test_job_list_view_full_page_footer_has_values(client, calendar):
     assert start_num == 1, f"Page 1 start should be 1, got {start_num}"
     assert end_num == 25, f"Page 1 end should be 25, got {end_num}"
     assert total_num == 30, f"Total should be 30, got {total_num}"
+
+
+# ========================================================================
+# STANDARD MODE SERIES COLLAPSING TESTS
+# ========================================================================
+
+@pytest.mark.django_db
+def test_standard_mode_collapses_series_into_header_row(api_client, calendar):
+    """
+    Standard mode (no search) should collapse recurring series into series header rows.
+    The parent and instance should NOT appear as individual job rows.
+    """
+    now = timezone.now()
+    
+    # Create a recurring parent with a materialized instance
+    parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Recurring Parent",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={'type': 'weekly', 'interval': 1, 'end': 'never'},
+    )
+    
+    # Materialized instance
+    instance = Job.objects.create(
+        calendar=calendar,
+        business_name="Recurring Parent",  # Same name
+        start_dt=now + timedelta(days=8),  # 1 week later
+        end_dt=now + timedelta(days=8, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_parent=parent,
+        recurrence_original_start=now + timedelta(days=8),
+    )
+    
+    url = reverse("rental_scheduler:job_list_table_partial")
+    response = api_client.get(url, {"date_filter": "future"})
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should have a series header row for this series
+    assert 'series-header-row' in content, "Should render series header row"
+    assert f'data-series-id="{parent.id}"' in content, "Header should have parent ID"
+    
+    # Should NOT have individual job-row entries for parent or instance
+    # (they're collapsed under the header)
+    assert f'id="job-row-{parent.id}"' not in content, "Parent should not appear as individual row"
+    assert f'id="job-row-{instance.id}"' not in content, "Instance should not appear as individual row"
+
+
+@pytest.mark.django_db
+def test_all_events_creates_upcoming_and_past_headers_for_same_series(api_client, calendar):
+    """
+    With date_filter=all, if a series has both past and upcoming occurrences,
+    both section headers should appear (with separate series header rows per scope).
+    """
+    now = timezone.now()
+    
+    # Create recurring parent (starts in the past)
+    parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Split Series",
+        start_dt=now - timedelta(days=7),  # Past
+        end_dt=now - timedelta(days=7) + timedelta(hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={'type': 'weekly', 'interval': 1, 'end': 'never'},
+    )
+    
+    # Materialized instance in the past
+    past_instance = Job.objects.create(
+        calendar=calendar,
+        business_name="Split Series",
+        start_dt=now - timedelta(days=14),
+        end_dt=now - timedelta(days=14) + timedelta(hours=2),
+        all_day=False,
+        status="completed",
+        recurrence_parent=parent,
+        recurrence_original_start=now - timedelta(days=14),
+    )
+    
+    # Materialized instance in the future
+    future_instance = Job.objects.create(
+        calendar=calendar,
+        business_name="Split Series",
+        start_dt=now + timedelta(days=7),
+        end_dt=now + timedelta(days=7) + timedelta(hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_parent=parent,
+        recurrence_original_start=now + timedelta(days=7),
+    )
+    
+    url = reverse("rental_scheduler:job_list_table_partial")
+    response = api_client.get(url, {"date_filter": "all"})
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should have "Upcoming Events" section
+    assert 'Upcoming Events' in content, "Should have Upcoming Events section"
+    # Should have "Past Events" section
+    assert 'Past Events' in content, "Should have Past Events section"
+    
+    # Should have series header for upcoming scope
+    assert f'data-series-id="{parent.id}"' in content
+    assert 'data-scope="upcoming"' in content, "Should have upcoming scope header"
+    assert 'data-scope="past"' in content, "Should have past scope header"
+
+
+@pytest.mark.django_db
+def test_standard_mode_non_recurring_jobs_rendered_normally(api_client, calendar):
+    """
+    Non-recurring jobs should still render as normal job rows (not collapsed).
+    """
+    now = timezone.now()
+    
+    # Create a non-recurring job
+    job = Job.objects.create(
+        calendar=calendar,
+        business_name="Regular Job",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=2),
+        all_day=False,
+        status="uncompleted",
+    )
+    
+    url = reverse("rental_scheduler:job_list_table_partial")
+    response = api_client.get(url, {"date_filter": "future"})
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should have a normal job row for the non-recurring job
+    assert f'id="job-row-{job.id}"' in content, "Non-recurring job should appear as job row"
+    assert "Regular Job" in content
+    
+    # Should NOT have a series header for this job
+    assert f'data-series-id="{job.id}"' not in content, "Non-recurring job should not have series header"
+
+
+@pytest.mark.django_db
+def test_series_occurrences_api_includes_materialized_and_virtual(api_client, calendar):
+    """
+    The series_occurrences_api should return both materialized and virtual occurrences.
+    
+    Regression test to ensure expansion shows all types of occurrences.
+    """
+    now = timezone.now()
+    
+    # Create a forever recurring parent
+    parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Forever Series",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={'type': 'weekly', 'interval': 1, 'end': 'never'},
+    )
+    
+    # Create one materialized instance
+    instance = Job.objects.create(
+        calendar=calendar,
+        business_name="Forever Series",
+        start_dt=now + timedelta(days=8),
+        end_dt=now + timedelta(days=8, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_parent=parent,
+        recurrence_original_start=now + timedelta(days=8),
+    )
+    
+    url = reverse("rental_scheduler:series_occurrences_api")
+    response = api_client.get(url, {
+        "parent_id": parent.id,
+        "scope": "upcoming",
+        "count": 5,
+        "offset": 0,
+    })
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should have at least one materialized row (the parent or instance)
+    assert 'data-job-id="' in content, "Should include materialized occurrence rows"
+    
+    # Should have at least one virtual row (since this is a forever series)
+    assert 'data-virtual="1"' in content, "Should include virtual occurrence rows"
+
+
+@pytest.mark.django_db
+def test_past_filter_only_shows_past_section(api_client, calendar):
+    """
+    With date_filter=past, only the past section should appear (no Upcoming header).
+    """
+    now = timezone.now()
+    
+    # Create a past job
+    job = Job.objects.create(
+        calendar=calendar,
+        business_name="Past Job",
+        start_dt=now - timedelta(days=5),
+        end_dt=now - timedelta(days=5) + timedelta(hours=2),
+        all_day=False,
+        status="completed",
+    )
+    
+    url = reverse("rental_scheduler:job_list_table_partial")
+    response = api_client.get(url, {"date_filter": "past"})
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should NOT have "Upcoming Events" section
+    assert 'Upcoming Events' not in content, "Should not have Upcoming Events section for past filter"
+    
+    # Should have the past job
+    assert "Past Job" in content
