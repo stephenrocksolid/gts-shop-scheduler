@@ -1302,7 +1302,11 @@
                 window.JobPanel.isSwitchingJobs = true;
 
                 self.saveForm((result) => {
-                  window.JobPanel.isSwitchingJobs = false;
+                  // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                  // This prevents the race condition where the flag is reset before HTMX checks it
+                  setTimeout(() => {
+                    window.JobPanel.isSwitchingJobs = false;
+                  }, 0);
 
                   if (result.successful) {
                     // Clear unsaved state on success
@@ -1334,7 +1338,11 @@
               window.JobPanel.isSwitchingJobs = true;
 
               self.saveForm((result) => {
-                window.JobPanel.isSwitchingJobs = false;
+                // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                // This prevents the race condition where the flag is reset before HTMX checks it
+                setTimeout(() => {
+                  window.JobPanel.isSwitchingJobs = false;
+                }, 0);
                 workspaceMinimizeBtn.disabled = false;
                 workspaceMinimizeBtn.innerHTML = originalBtnContent;
 
@@ -1558,7 +1566,11 @@
               if (isDirty) {
                 window.JobPanel.isSwitchingJobs = true;
                 self.saveForm((result) => {
-                  window.JobPanel.isSwitchingJobs = false;
+                  // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                  // This prevents the race condition where the flag is reset before HTMX checks it
+                  setTimeout(() => {
+                    window.JobPanel.isSwitchingJobs = false;
+                  }, 0);
                   if (result.successful) {
                     if (window.JobWorkspace.clearUnsaved) {
                       window.JobWorkspace.clearUnsaved(jobId);
@@ -1577,9 +1589,11 @@
             } else {
               // NEW JOB: Must save first to get an ID, then minimize
               window.JobPanel.isSwitchingJobs = true;
-
               self.saveForm((result) => {
-                window.JobPanel.isSwitchingJobs = false;
+                // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                setTimeout(() => {
+                  window.JobPanel.isSwitchingJobs = false;
+                }, 0);
 
                 if (result.successful && result.jobId) {
                   // Success: add to workspace and minimize
