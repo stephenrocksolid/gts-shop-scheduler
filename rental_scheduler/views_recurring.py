@@ -476,15 +476,15 @@ def job_cancel_future_api(request, pk):
 @csrf_protect
 def job_delete_api_recurring(request, pk):
     """
-    Delete a job with scope support for recurring events.
+    Soft delete a job with scope support for recurring events.
     
     POST /api/jobs/<pk>/delete-recurring/
     Body: {"delete_scope": "this_only" | "this_and_future" | "all"}
     
     Scopes:
-    - this_only: Delete only this job (default)
-    - all: Delete entire series (parent + all instances)
-    - this_and_future: Delete this and all future instances
+    - this_only: Soft delete only this job (default)
+    - all: Soft delete entire series (parent + all instances)
+    - this_and_future: Soft delete this and all future instances, truncate recurrence generation
     """
     try:
         job = get_object_or_404(Job, pk=pk)
@@ -502,46 +502,82 @@ def job_delete_api_recurring(request, pk):
         deleted_count = 0
         
         if scope == 'all':
-            # Delete entire series
+            # Soft delete entire series
             parent = job if job.is_recurring_parent else job.recurrence_parent
             if parent:
-                # Count instances before deleting
-                deleted_count = parent.recurrence_instances.count()
-                # Delete parent (CASCADE will delete instances)
-                parent.delete()
-                deleted_count += 1  # Include parent
+                # Count non-deleted instances before deleting
+                deleted_count = parent.recurrence_instances.filter(is_deleted=False).count()
+                # Soft delete all instances
+                parent.recurrence_instances.filter(is_deleted=False).update(is_deleted=True)
+                # Soft delete parent
+                if not parent.is_deleted:
+                    parent.is_deleted = True
+                    parent.save(update_fields=['is_deleted'])
+                    deleted_count += 1  # Include parent
             else:
-                job.delete()
-                deleted_count = 1
+                # Non-recurring job
+                if not job.is_deleted:
+                    job.is_deleted = True
+                    job.save(update_fields=['is_deleted'])
+                    deleted_count = 1
                 
         elif scope in ('this_and_future', 'future'):
             # Delete this and all future instances
             if job.is_recurring_instance:
                 parent = job.recurrence_parent
                 if parent:
-                    # Delete current and future instances
-                    deleted_count = parent.delete_recurring_instances(
+                    # Soft delete current and future instances
+                    from datetime import timedelta
+                    from rental_scheduler.utils.recurrence import delete_recurring_instances
+                    deleted_count = delete_recurring_instances(
+                        parent,
                         after_date=job.recurrence_original_start
                     )
+                    
+                    # Truncate virtual occurrences by setting end_recurrence_date
+                    # Set to day before the deleted boundary
+                    truncate_date = job.recurrence_original_start.date() - timedelta(days=1)
+                    parent.end_recurrence_date = truncate_date
+                    parent.save(update_fields=['end_recurrence_date'])
                 else:
-                    job.delete()
-                    deleted_count = 1
+                    # Orphaned instance - just soft delete it
+                    if not job.is_deleted:
+                        job.is_deleted = True
+                        job.save(update_fields=['is_deleted'])
+                        deleted_count = 1
+                        
             elif job.is_recurring_parent:
-                # If this is the parent, delete all instances
-                deleted_count = job.recurrence_instances.count()
-                job.recurrence_instances.all().delete()
-                job.recurrence_rule = None
-                job.save()
+                # If this is the parent, delete all instances and truncate at parent date
+                deleted_count = job.recurrence_instances.filter(is_deleted=False).count()
+                job.recurrence_instances.filter(is_deleted=False).update(is_deleted=True)
+                
+                # Truncate recurrence generation so it ends after the parent occurrence
+                job.end_recurrence_date = job.start_dt.date()
+                job.save(update_fields=['end_recurrence_date'])
+                # Keep parent itself not deleted
             else:
-                job.delete()
-                deleted_count = 1
+                # Non-recurring job
+                if not job.is_deleted:
+                    job.is_deleted = True
+                    job.save(update_fields=['is_deleted'])
+                    deleted_count = 1
                 
         else:  # scope == 'this_only'
-            job.delete()
-            deleted_count = 1
+            # Guard: Don't allow deleting only the parent (would orphan the series)
+            if job.is_recurring_parent and job.recurrence_instances.exists():
+                return JsonResponse({
+                    'status': 'error',
+                    'error': 'Cannot delete only the series template. Choose to delete the entire series or delete this and future events.'
+                }, status=400)
+            
+            # Soft delete single job
+            if not job.is_deleted:
+                job.is_deleted = True
+                job.save(update_fields=['is_deleted'])
+                deleted_count = 1
         
         return JsonResponse({
-            'status': 'success',
+            'success': True,
             'deleted_count': deleted_count,
             'scope': scope,
         })

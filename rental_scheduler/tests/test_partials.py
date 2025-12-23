@@ -44,6 +44,16 @@ class TestJobCreatePartial:
         assert 'name="start_dt"' in content
         assert 'name="business_name"' in content
     
+    def test_new_job_form_preselects_default_calendar(self, api_client, calendar):
+        """GET /jobs/new/partial/ without calendar param should preselect first active calendar."""
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url)
+        
+        assert response.status_code == 200
+        # Access form from context to verify calendar is preselected
+        form = response.context['form']
+        assert form['calendar'].value() == calendar.id, f"Expected calendar {calendar.id}, got {form['calendar'].value()}"
+    
     def test_edit_job_form_renders(self, api_client, job):
         """GET /jobs/new/partial/?edit=<id> should return 200 and show job data."""
         url = reverse('rental_scheduler:job_create_partial')
@@ -139,6 +149,16 @@ class TestCallReminderCreatePartial:
         
         # Form should render successfully
         assert 'name="reminder_date"' in content
+    
+    def test_call_reminder_form_preselects_default_calendar(self, api_client, calendar):
+        """GET /call-reminders/new/partial/ without calendar param should preselect first active calendar."""
+        url = reverse('rental_scheduler:call_reminder_create_partial')
+        response = api_client.get(url, {'date': '2026-01-12'})
+        
+        assert response.status_code == 200
+        # Access form from context to verify calendar is preselected
+        form = response.context['form']
+        assert form['calendar'].value() == calendar.id, f"Expected calendar {calendar.id}, got {form['calendar'].value()}"
 
 
 @pytest.mark.django_db

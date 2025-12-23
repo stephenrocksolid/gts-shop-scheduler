@@ -126,17 +126,28 @@ This cancels all recurring instances on or after the specified date.
 
 ---
 
-### 4. Delete with Scope
+### 4. Delete with Scope (Soft Delete)
 
-**Endpoint:** `DELETE /api/jobs/<id>/delete-recurring/?scope=<scope>`
+**Endpoint:** `POST /api/jobs/<id>/delete-recurring/`
 
-**Query Parameters:**
-- `scope`: One of `"this_only"`, `"all"`, or `"this_and_future"`
+**Request Body:**
+```json
+{
+  "delete_scope": "this_only"
+}
+```
 
-**Scopes:**
-- `this_only`: Delete only this job (default)
-- `all`: Delete entire series (parent + all instances)
-- `this_and_future`: Delete this and all future instances
+**Delete Scopes:**
+- `"this_only"`: Soft delete only this job (default). **Note:** Deleting only the parent is rejected with 400 error if instances exist.
+- `"this_and_future"`: Soft delete this and all future instances. Also truncates `end_recurrence_date` to prevent virtual occurrences from being generated beyond the deleted boundary.
+  - For instances: Sets parent's `end_recurrence_date` to day before the deleted instance
+  - For parent: Deletes all instances and sets `end_recurrence_date` to parent's start date (keeps parent itself)
+- `"all"`: Soft delete entire series (parent + all instances)
+
+**Important:** This endpoint uses **soft delete** (`is_deleted=True`) instead of hard delete to:
+- Prevent cascading deletes of related objects (WorkOrders, CallReminders)
+- Keep deleted occurrences in DB so calendar feed can avoid re-emitting them as virtual occurrences
+- Maintain consistency with the rest of the app's delete behavior
 
 **Response:**
 ```json
@@ -147,15 +158,21 @@ This cancels all recurring instances on or after the specified date.
 }
 ```
 
-**Alternative (POST body scope):**
-
-The backend also accepts a POST body for scope selection:
-
-`POST /api/jobs/<id>/delete-recurring/` with JSON body:
-
+**Error Response (attempting to delete parent only):**
 ```json
-{ "delete_scope": "this_only" }
+{
+  "status": "error",
+  "error": "Cannot delete only the series template. Choose to delete the entire series or delete this and future events."
+}
 ```
+
+**Legacy Support:**
+
+The backend also accepts DELETE method with query parameter:
+
+`DELETE /api/jobs/<id>/delete-recurring/?scope=<scope>`
+
+However, POST with JSON body is preferred for consistency.
 
 ---
 
@@ -332,22 +349,53 @@ function cancelFutureRecurrences(jobId, fromDate) {
 
 ### Deleting with Scope
 
+**Recommended Implementation (with modal):**
+
+The app includes a built-in recurring delete modal in `job_form_partial.js` that:
+- Automatically detects recurring jobs from the form DOM
+- Shows appropriate options for instances vs. parent
+- Uses user-friendly copy (no internal terms)
+- Handles all scope logic
+
+```javascript
+// Automatic detection and modal - already implemented in job_form_partial.js
+function deleteJob(jobId) {
+    var recurrenceState = detectRecurrenceState();
+    
+    if (recurrenceState.isRecurring) {
+        showRecurringDeleteModal(jobId, recurrenceState.isInstance);
+    } else {
+        // Simple confirm for non-recurring jobs
+        if (confirm('Are you sure you want to delete this job?')) {
+            fetch(GTS.urls.jobDelete(jobId), { method: 'POST', ... });
+        }
+    }
+}
+```
+
+**Manual Implementation (if needed):**
+
 ```javascript
 function deleteWithScope(jobId, scope) {
-    if (!confirm(`Delete ${scope === 'all' ? 'entire series' : scope}?`)) {
-        return;
-    }
-    
-    fetch(`/api/jobs/${jobId}/delete-recurring/?scope=${scope}`, {
-        method: 'DELETE',
-        headers: {
-            'X-CSRFToken': getCsrfToken(),
-        }
+    fetch(GTS.urls.jobDeleteRecurring(jobId), {
+        method: 'POST',
+        headers: GTS.csrf.headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ delete_scope: scope })
     })
     .then(response => response.json())
     .then(data => {
-        alert(`Deleted ${data.deleted_count} job(s)`);
-        calendar.refetchEvents();
+        if (data.success) {
+            GTS.showToast(`Deleted ${data.deleted_count} event(s)`, 'success');
+            if (window.jobCalendar && window.jobCalendar.calendar) {
+                window.jobCalendar.calendar.refetchEvents();
+            }
+        } else {
+            GTS.showToast('Failed to delete: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting job:', error);
+        GTS.showToast('Error deleting job', 'error');
     });
 }
 ```

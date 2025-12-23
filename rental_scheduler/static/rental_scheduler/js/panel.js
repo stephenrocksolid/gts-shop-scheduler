@@ -1886,6 +1886,114 @@
   // Convenience alias for immediate use (re-evaluated each call for late-loading config)
   const DATE_GUARDRAILS = getGuardrails();
 
+  // ==========================================================================
+  // ONE-TIME WARNING TRACKING (BOUNDED MAP + TTL)
+  // Replaces unbounded per-job localStorage keys with a single JSON map.
+  // Format: { schemaVersion: 1, entries: { "job:123": timestamp, "temp:xxx": timestamp } }
+  // TTL: 90 days. Cap: 500 entries (oldest removed first).
+  // ==========================================================================
+  const WARNING_MAP_KEY = 'gts-job-initial-save-attempted';
+  const WARNING_MAP_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+  const WARNING_MAP_MAX_ENTRIES = 500;
+
+  /**
+   * Load the warning map from localStorage
+   * @returns {Object} - { schemaVersion: 1, entries: { key: timestamp } }
+   */
+  function loadWarningMap() {
+    try {
+      const raw = localStorage.getItem(WARNING_MAP_KEY);
+      if (!raw) return { schemaVersion: 1, entries: {} };
+      const data = JSON.parse(raw);
+      if (!data || typeof data.entries !== 'object') {
+        return { schemaVersion: 1, entries: {} };
+      }
+      return { schemaVersion: data.schemaVersion || 1, entries: data.entries || {} };
+    } catch (e) {
+      return { schemaVersion: 1, entries: {} };
+    }
+  }
+
+  /**
+   * Save the warning map to localStorage
+   * @param {Object} map - { schemaVersion: 1, entries: { key: timestamp } }
+   */
+  function saveWarningMap(map) {
+    try {
+      localStorage.setItem(WARNING_MAP_KEY, JSON.stringify(map));
+    } catch (e) {
+      console.warn('JobPanel: Error saving warning map', e);
+    }
+  }
+
+  /**
+   * Clean up old entries from the warning map (TTL + cap)
+   * @param {Object} map - The warning map
+   * @returns {Object} - Cleaned map
+   */
+  function cleanupWarningMap(map) {
+    const now = Date.now();
+    const entries = map.entries || {};
+    const cutoff = now - WARNING_MAP_TTL_MS;
+
+    // Remove expired entries
+    const valid = {};
+    for (const [key, ts] of Object.entries(entries)) {
+      if (typeof ts === 'number' && ts > cutoff) {
+        valid[key] = ts;
+      }
+    }
+
+    // If still over cap, remove oldest entries
+    const keys = Object.keys(valid);
+    if (keys.length > WARNING_MAP_MAX_ENTRIES) {
+      // Sort by timestamp (oldest first) and keep only newest
+      keys.sort((a, b) => valid[a] - valid[b]);
+      const toRemove = keys.slice(0, keys.length - WARNING_MAP_MAX_ENTRIES);
+      toRemove.forEach(k => delete valid[k]);
+    }
+
+    return { schemaVersion: 1, entries: valid };
+  }
+
+  /**
+   * Migrate legacy per-job warning keys to the new map format.
+   * Called once on load to clean up old unbounded keys.
+   */
+  function migrateLegacyWarningKeys() {
+    try {
+      const map = loadWarningMap();
+      const keysToRemove = [];
+
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('gts-job-initial-save-attempted:')) {
+          // Extract the job/temp key
+          const warningKey = key.replace('gts-job-initial-save-attempted:', '');
+          if (warningKey && warningKey !== 'gts-job-initial-save-attempted') {
+            // Only migrate if value was 'true'
+            if (localStorage.getItem(key) === 'true') {
+              // Use current time as timestamp (we don't know when it was set)
+              map.entries[warningKey] = Date.now();
+            }
+            keysToRemove.push(key);
+          }
+        }
+      }
+
+      if (keysToRemove.length > 0) {
+        console.log('JobPanel: Migrating', keysToRemove.length, 'legacy warning keys to bounded map');
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+        saveWarningMap(cleanupWarningMap(map));
+      }
+    } catch (e) {
+      console.warn('JobPanel: Error migrating legacy warning keys', e);
+    }
+  }
+
+  // Run migration on load
+  migrateLegacyWarningKeys();
+
   /**
    * Get or create a stable key for tracking one-time warnings per job.
    * Returns "job:<id>" for existing jobs, or "temp:<random>" for new jobs.
@@ -1907,14 +2015,17 @@
    * Check if the initial save warning has already been shown for this job.
    */
   function hasShownInitialWarning(warningKey) {
-    const key = `gts-job-initial-save-attempted:${warningKey}`;
-    if (window.GTS && window.GTS.storage) {
-      return GTS.storage.getBool(key, true); // Default to true if storage fails
-    }
     try {
-      return localStorage.getItem(key) === 'true';
-    } catch (e) {
+      const map = loadWarningMap();
+      const ts = map.entries[warningKey];
+      if (!ts) return false;
+      // Check TTL
+      if (Date.now() - ts > WARNING_MAP_TTL_MS) {
+        return false; // Expired
+      }
       return true;
+    } catch (e) {
+      return true; // Default to true on error (skip warning)
     }
   }
 
@@ -1922,13 +2033,13 @@
    * Mark that the initial save warning has been shown for this job.
    */
   function markInitialWarningShown(warningKey) {
-    const key = `gts-job-initial-save-attempted:${warningKey}`;
-    if (window.GTS && window.GTS.storage) {
-      GTS.storage.setBool(key, true);
-    } else {
-      try {
-        localStorage.setItem(key, 'true');
-      } catch (e) { }
+    try {
+      let map = loadWarningMap();
+      map.entries[warningKey] = Date.now();
+      map = cleanupWarningMap(map);
+      saveWarningMap(map);
+    } catch (e) {
+      console.warn('JobPanel: Error marking warning shown', e);
     }
   }
 
@@ -1940,23 +2051,19 @@
     if (!form.dataset.tempWarningKey) return;
     const tempKey = form.dataset.tempWarningKey;
     const jobKey = `job:${jobId}`;
-    const tempStorageKey = `gts-job-initial-save-attempted:${tempKey}`;
-    const jobStorageKey = `gts-job-initial-save-attempted:${jobKey}`;
 
-    if (window.GTS && window.GTS.storage) {
-      if (GTS.storage.getBool(tempStorageKey, false)) {
-        GTS.storage.setBool(jobStorageKey, true);
+    try {
+      const map = loadWarningMap();
+      // If temp key exists, move it to job key
+      if (map.entries[tempKey]) {
+        map.entries[jobKey] = map.entries[tempKey];
+        delete map.entries[tempKey];
+        saveWarningMap(map);
       }
-      GTS.storage.remove(tempStorageKey);
-    } else {
-      try {
-        const wasShown = localStorage.getItem(tempStorageKey);
-        if (wasShown === 'true') {
-          localStorage.setItem(jobStorageKey, 'true');
-        }
-        localStorage.removeItem(tempStorageKey);
-      } catch (e) { }
+    } catch (e) {
+      console.warn('JobPanel: Error migrating warning key', e);
     }
+
     // Update the form's key reference
     delete form.dataset.tempWarningKey;
   }

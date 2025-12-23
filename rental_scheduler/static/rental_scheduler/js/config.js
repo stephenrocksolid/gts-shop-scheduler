@@ -33,10 +33,13 @@
                     return envMeta.content;
                 }
 
-                // Check localStorage override
-                const envOverride = localStorage.getItem('rental_env');
-                if (envOverride) {
-                    return envOverride;
+                // Legacy cleanup: remove deprecated localStorage overrides (rental_env, rental_debug)
+                // These were hidden debug settings with no UI to clear them.
+                try {
+                    localStorage.removeItem('rental_env');
+                    localStorage.removeItem('rental_debug');
+                } catch (e) {
+                    // Ignore storage errors
                 }
 
                 // Auto-detect based on hostname
@@ -347,7 +350,8 @@
              * @returns {boolean} True if debugging should be enabled
              */
             isDebugEnabled() {
-                return this.isDevelopment() || localStorage.getItem('rental_debug') === 'true';
+                // Debug mode is now purely based on environment detection (no localStorage override)
+                return this.isDevelopment();
             }
 
             /**

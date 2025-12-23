@@ -142,6 +142,20 @@
     };
 
     /**
+     * Get job delete recurring API URL
+     * @param {string|number} jobId
+     * @returns {string}
+     */
+    GTS.urls.jobDeleteRecurring = function(jobId) {
+        var template = GTS.urls.jobDeleteRecurringTemplate;
+        if (!template) {
+            console.error('[GTS.urls] jobDeleteRecurringTemplate not configured');
+            return '';
+        }
+        return GTS.urls.interpolate(template, { job_id: jobId });
+    };
+
+    /**
      * Get job create/edit partial URL
      * @param {Object} [queryParams] - Optional query params (e.g. { edit: jobId } or { date: '2025-01-01' })
      * @returns {string}

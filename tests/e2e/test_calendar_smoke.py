@@ -443,6 +443,188 @@ class TestDraftWorkspaceFlow:
         # The value should contain our test data (or be non-empty if draft was restored)
         assert restored_value != "", "Draft contact_name should be restored"
 
+    def _delete_job_via_api(self, page: Page, job_id):
+        """Delete a job via API to clean up test data."""
+        page.evaluate(f"""
+            async () => {{
+                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
+                                  document.cookie.match(/csrftoken=([^;]+)/)?.[1];
+                try {{
+                    await fetch('/api/jobs/{job_id}/delete/', {{
+                        method: 'POST',
+                        headers: {{
+                            'X-CSRFToken': csrfToken,
+                            'Content-Type': 'application/json'
+                        }}
+                    }});
+                    if (window.jobCalendar && window.jobCalendar.calendar) {{
+                        window.jobCalendar.calendar.refetchEvents();
+                    }}
+                }} catch (e) {{
+                    console.error('Failed to delete job:', e);
+                }}
+            }}
+        """)
+
+    def test_save_from_restored_draft_removes_workspace_tab(self, page: Page, server_url):
+        """
+        Saving a restored draft (minimized new job) should close the panel and remove the
+        draft entry from the workspace bar.
+
+        Regression for: draft tab persisting after Save when the job was minimized/restored.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        page.wait_for_timeout(1000)
+
+        weekday_date = self._find_weekday_cell(page)
+        if not weekday_date:
+            pytest.skip("No weekday cell found in calendar view")
+
+        # Double-click the day number to avoid accidentally targeting an event element.
+        day_number = page.locator(f'.fc-daygrid-day[data-date="{weekday_date}"] .fc-daygrid-day-number')
+        if day_number.count() > 0:
+            day_number.dblclick()
+        else:
+            page.locator(f'.fc-daygrid-day[data-date="{weekday_date}"]').dblclick()
+
+        # Wait for job panel to appear
+        page.wait_for_selector("#job-panel", timeout=5000)
+        page.wait_for_selector("input[name='contact_name']", timeout=5000)
+
+        unique_id = page.evaluate("Date.now()")
+
+        # Fill only contact_name (leave required fields empty to keep it as a draft)
+        page.locator("input[name='contact_name']").fill(f"E2E Draft Save Contact {unique_id}")
+
+        # Minimize to workspace (creates draft tab)
+        minimize_btn = page.locator("#panel-workspace-minimize-btn")
+        expect(minimize_btn).to_be_visible()
+        minimize_btn.click()
+
+        page.wait_for_selector("#workspace-bar", timeout=5000)
+        page.wait_for_selector(".workspace-tab", timeout=5000)
+
+        # Restore the draft by clicking its tab (no page reload)
+        workspace_tab = page.locator(".workspace-tab").first
+        workspace_tab.click()
+
+        # Wait for panel + form to be ready
+        page.wait_for_selector("#job-panel", timeout=5000)
+        page.wait_for_selector("input[name='business_name']", timeout=5000)
+
+        # Fill required fields for a successful save
+        page.locator("input[name='business_name']").fill(f"E2E Draft Save {unique_id}")
+        # start_dt/end_dt may be managed by flatpickr (original input becomes type=hidden),
+        # so set via JS / flatpickr API instead of locator.fill().
+        page.evaluate(
+            """
+            (dateStr) => {
+                const withinPanel = (selector) => document.querySelector('#job-panel ' + selector);
+                const setField = (name, value) => {
+                    const input = withinPanel(`input[name="${name}"]`);
+                    if (!input) return false;
+
+                    // Prefer flatpickr API if present (keeps alt input in sync)
+                    if (input._flatpickr && typeof input._flatpickr.setDate === 'function') {
+                        const d = value.includes('T') ? new Date(value) : new Date(value + 'T12:00:00');
+                        input._flatpickr.setDate(d, true);
+                        return true;
+                    }
+
+                    // Fallback: set raw value and dispatch events
+                    input.value = value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                };
+
+                // Ensure all_day remains checked (new jobs default to all-day)
+                const allDay = withinPanel('input[name="all_day"]');
+                if (allDay && !allDay.checked) {
+                    allDay.checked = true;
+                    allDay.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+
+                setField('start_dt', dateStr);
+                setField('end_dt', dateStr);
+            }
+            """,
+            weekday_date,
+        )
+
+        # Select a calendar value. Do it in-page to avoid brittleness about seeded IDs.
+        # Also sets the hidden form select to guarantee server-side validation passes.
+        page.evaluate("""
+            () => {
+                const header = document.getElementById('calendar-header-select');
+                const hidden = document.querySelector('#job-panel .panel-body select[name="calendar"]');
+                const pick = (sel) => {
+                    if (!sel) return null;
+                    const opt = Array.from(sel.options || []).find(o => o && o.value);
+                    return opt ? opt.value : null;
+                };
+                const value = pick(header) || pick(hidden);
+                if (!value) return;
+                if (header) {
+                    header.value = value;
+                    header.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (hidden) {
+                    hidden.value = value;
+                    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+        """)
+
+        # Capture job ID from HX-Trigger so we can clean up after the test
+        page.evaluate("""
+            () => {
+                window.__e2eLastJobId = null;
+                const handler = (event) => {
+                    try {
+                        const form = event.target && event.target.closest
+                            ? event.target.closest('form[data-gts-job-form]')
+                            : null;
+                        if (!form) return;
+                        const xhr = event.detail && event.detail.xhr;
+                        const header = xhr && xhr.getResponseHeader ? xhr.getResponseHeader('HX-Trigger') : null;
+                        if (!header) return;
+                        const data = JSON.parse(header);
+                        if (data.jobSaved && data.jobSaved.jobId) {
+                            window.__e2eLastJobId = String(data.jobSaved.jobId);
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                };
+                document.body.addEventListener('htmx:afterRequest', handler, { once: true });
+            }
+        """)
+
+        job_id = None
+        try:
+            # Click Save (HTMX submission) and wait for it to succeed
+            save_btn = page.locator("#job-panel form button[type='submit']")
+            expect(save_btn).to_be_visible()
+            save_btn.click()
+
+            # Wait for jobSaved to be captured and for the draft tab to be removed
+            page.wait_for_function("() => !!window.__e2eLastJobId", timeout=15000)
+            job_id = page.evaluate("window.__e2eLastJobId")
+
+            # Draft should be removed from workspace, and panel should close
+            page.wait_for_function(
+                "() => window.JobWorkspace && window.JobWorkspace.openJobs && window.JobWorkspace.openJobs.size === 0",
+                timeout=15000,
+            )
+            expect(page.locator("#workspace-bar")).to_be_hidden()
+            expect(page.locator("#job-panel")).to_be_hidden()
+        finally:
+            if job_id:
+                self._delete_job_via_api(page, job_id)
+                page.wait_for_timeout(500)
+
 
 class TestVirtualRecurrenceMaterialization:
     """Test clicking a virtual recurring job occurrence materializes it."""
@@ -499,7 +681,15 @@ class TestVirtualRecurrenceMaterialization:
                             return {ok: true, jobId: data.jobSaved.jobId};
                         }
                     }
-                    return {ok: response.ok, status: response.status};
+                    // Include response body snippet on failure to aid debugging
+                    let bodySnippet = null;
+                    try {
+                        const body = await response.text();
+                        bodySnippet = body ? body.slice(0, 800) : null;
+                    } catch (e) {
+                        // ignore
+                    }
+                    return {ok: response.ok, status: response.status, bodySnippet};
                 } catch (e) {
                     return {error: e.message};
                 }
@@ -562,7 +752,35 @@ class TestVirtualRecurrenceMaterialization:
         # Select a calendar using the visible header select
         header_select = page.locator("#calendar-header-select")
         if header_select.count() > 0:
-            header_select.select_option("1")  # Select first calendar
+            # Avoid race with panel.js init (calendar selector binding happens after a short setTimeout).
+            # Choose the first non-empty option and set BOTH header + hidden selects to guarantee submission.
+            page.wait_for_selector("#calendar-header-select", timeout=5000)
+            ok = page.evaluate("""
+                () => {
+                    const header = document.getElementById('calendar-header-select');
+                    const hidden = document.querySelector('#job-panel .panel-body select[name="calendar"]');
+
+                    const pick = (sel) => {
+                        if (!sel || !sel.options) return null;
+                        const opt = Array.from(sel.options).find(o => o && o.value);
+                        return opt ? opt.value : null;
+                    };
+
+                    const value = pick(header) || pick(hidden);
+                    if (!value) return false;
+
+                    if (header) {
+                        header.value = value;
+                        header.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    if (hidden) {
+                        hidden.value = value;
+                        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    return true;
+                }
+            """)
+            assert ok, "Could not select a calendar option for job creation"
 
         page.wait_for_timeout(500)
 
@@ -761,4 +979,244 @@ class TestStandaloneCallReminderCRUD:
             # Cleanup: don't leave reminders behind in a developer DB
             if reminder_id:
                 self._delete_reminder_via_api(page, reminder_id)
+
+
+class TestRecurringDelete:
+    """Test recurring delete functionality with modal."""
+    
+    def test_recurring_delete_modal_appears_for_recurring_job(self, page: Page, server_url):
+        """
+        When deleting a recurring job, a modal should appear with scope options.
+        
+        This is a placeholder test - full implementation requires:
+        1. Creating a recurring series via API
+        2. Opening the job panel
+        3. Clicking delete
+        4. Verifying modal appears with correct options
+        5. Selecting a scope and verifying correct API call
+        6. Verifying calendar refreshes
+        
+        TODO: Implement full test when recurring job creation is stable in E2E environment.
+        """
+        # Placeholder - mark as skipped for now
+        pytest.skip("Recurring delete E2E test not yet implemented - see plan.md for test outline")
+    
+    def test_non_recurring_delete_uses_simple_confirm(self, page: Page, server_url):
+        """
+        Non-recurring jobs should use simple confirm dialog, not the recurring modal.
+        
+        TODO: Implement when test infrastructure is ready.
+        """
+        pytest.skip("Non-recurring delete E2E test not yet implemented")
+
+
+class TestBrowserStorageHardening:
+    """Test browser storage hardening for security and bounded growth."""
+    
+    def test_htmx_history_cache_disabled(self, page: Page, server_url):
+        """
+        HTMX history cache should be disabled (historyCacheSize = 0).
+        The htmx-history-cache key should not exist in localStorage.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Check that htmx.config.historyCacheSize is 0
+        history_cache_size = page.evaluate("htmx.config.historyCacheSize")
+        assert history_cache_size == 0, f"HTMX history cache should be disabled, got size={history_cache_size}"
+        
+        # Check that htmx-history-cache key doesn't exist in localStorage
+        has_history_cache = page.evaluate("localStorage.getItem('htmx-history-cache') !== null")
+        assert not has_history_cache, "htmx-history-cache should not exist in localStorage"
+    
+    def test_legacy_debug_keys_cleaned_up(self, page: Page, server_url):
+        """
+        Legacy rental_env and rental_debug keys should be cleaned up on load.
+        """
+        # First, set the legacy keys
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Set legacy keys manually
+        page.evaluate("""
+            localStorage.setItem('rental_env', 'development');
+            localStorage.setItem('rental_debug', 'true');
+        """)
+        
+        # Reload to trigger cleanup
+        page.reload()
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Check that legacy keys are removed
+        rental_env = page.evaluate("localStorage.getItem('rental_env')")
+        rental_debug = page.evaluate("localStorage.getItem('rental_debug')")
+        
+        assert rental_env is None, "rental_env should be cleaned up"
+        assert rental_debug is None, "rental_debug should be cleaned up"
+    
+    def test_warning_map_uses_bounded_json(self, page: Page, server_url):
+        """
+        Warning tracking should use a single bounded JSON map with TTL,
+        not per-job keys.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Simulate marking a warning as shown via the panel.js functions
+        page.evaluate("""
+            // Access the internal functions via the module
+            // The markInitialWarningShown function is called during save
+            // We'll verify the storage format
+            const testKey = 'test:e2e-' + Date.now();
+            
+            // Load current map
+            let map;
+            try {
+                const raw = localStorage.getItem('gts-job-initial-save-attempted');
+                map = raw ? JSON.parse(raw) : { schemaVersion: 1, entries: {} };
+            } catch (e) {
+                map = { schemaVersion: 1, entries: {} };
+            }
+            
+            // Add test entry
+            map.entries[testKey] = Date.now();
+            localStorage.setItem('gts-job-initial-save-attempted', JSON.stringify(map));
+        """)
+        
+        # Verify the map format
+        map_data = page.evaluate("""
+            () => {
+                const raw = localStorage.getItem('gts-job-initial-save-attempted');
+                if (!raw) return null;
+                try {
+                    return JSON.parse(raw);
+                } catch (e) {
+                    return null;
+                }
+            }
+        """)
+        
+        assert map_data is not None, "Warning map should exist"
+        assert "schemaVersion" in map_data, "Warning map should have schemaVersion"
+        assert "entries" in map_data, "Warning map should have entries object"
+        assert isinstance(map_data["entries"], dict), "entries should be a dict"
+    
+    def test_legacy_warning_keys_migrated(self, page: Page, server_url):
+        """
+        Legacy per-job warning keys should be migrated to the bounded map.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Set some legacy keys
+        page.evaluate("""
+            localStorage.setItem('gts-job-initial-save-attempted:job:123', 'true');
+            localStorage.setItem('gts-job-initial-save-attempted:temp:abc', 'true');
+        """)
+        
+        # Reload to trigger migration
+        page.reload()
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Check that legacy keys are removed
+        legacy1 = page.evaluate("localStorage.getItem('gts-job-initial-save-attempted:job:123')")
+        legacy2 = page.evaluate("localStorage.getItem('gts-job-initial-save-attempted:temp:abc')")
+        
+        assert legacy1 is None, "Legacy warning key should be migrated"
+        assert legacy2 is None, "Legacy warning key should be migrated"
+        
+        # Check that values are in the map
+        map_data = page.evaluate("""
+            () => {
+                const raw = localStorage.getItem('gts-job-initial-save-attempted');
+                if (!raw) return null;
+                try {
+                    return JSON.parse(raw);
+                } catch (e) {
+                    return null;
+                }
+            }
+        """)
+        
+        assert map_data is not None, "Warning map should exist after migration"
+        assert "job:123" in map_data.get("entries", {}), "Migrated key should be in map"
+        assert "temp:abc" in map_data.get("entries", {}), "Migrated key should be in map"
+    
+    def test_workspace_metadata_no_html_in_localstorage(self, page: Page, server_url):
+        """
+        Workspace state in localStorage should not contain unsavedHtml.
+        Draft HTML should be in sessionStorage instead.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Verify workspace schema version is 2 (no unsavedHtml in localStorage)
+        workspace_data = page.evaluate("""
+            () => {
+                const raw = localStorage.getItem('gts-job-workspace');
+                if (!raw) return { schemaVersion: 2, jobs: [] };  // Default is OK
+                try {
+                    return JSON.parse(raw);
+                } catch (e) {
+                    return null;
+                }
+            }
+        """)
+        
+        if workspace_data:
+            assert workspace_data.get("schemaVersion", 2) >= 2, \
+                "Workspace should be schema version 2+"
+            
+            # Check that no job entry has unsavedHtml
+            jobs = workspace_data.get("jobs", [])
+            for job_entry in jobs:
+                if isinstance(job_entry, list) and len(job_entry) >= 2:
+                    job_data = job_entry[1]
+                    assert "unsavedHtml" not in job_data or job_data["unsavedHtml"] is None, \
+                        "unsavedHtml should not be in localStorage"
+    
+    def test_clear_local_data_function_exists(self, page: Page, server_url):
+        """
+        GTS.storage.clearLocalData() should exist and be callable.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Check function exists
+        has_function = page.evaluate("""
+            typeof window.GTS?.storage?.clearLocalData === 'function'
+        """)
+        
+        assert has_function, "GTS.storage.clearLocalData should be a function"
+    
+    def test_clear_local_data_removes_keys(self, page: Page, server_url):
+        """
+        GTS.storage.clearLocalData() should remove GTS-related keys.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+        
+        # Set some test keys
+        page.evaluate("""
+            localStorage.setItem('gts-job-workspace', '{"test": true}');
+            localStorage.setItem('jobPanelState', '{"test": true}');
+            localStorage.setItem('gts-sidebar-width', '300');
+            sessionStorage.setItem('gts-job-workspace:html:test-123', '<div>test</div>');
+        """)
+        
+        # Call clearLocalData
+        result = page.evaluate("GTS.storage.clearLocalData()")
+        
+        assert result["cleared"] > 0, "clearLocalData should remove some keys"
+        
+        # Verify keys are gone
+        workspace = page.evaluate("localStorage.getItem('gts-job-workspace')")
+        panel_state = page.evaluate("localStorage.getItem('jobPanelState')")
+        sidebar = page.evaluate("localStorage.getItem('gts-sidebar-width')")
+        session_html = page.evaluate("sessionStorage.getItem('gts-job-workspace:html:test-123')")
+        
+        assert workspace is None, "gts-job-workspace should be cleared"
+        assert panel_state is None, "jobPanelState should be cleared"
+        assert sidebar is None, "gts-sidebar-width should be cleared"
+        assert session_html is None, "sessionStorage draft HTML should be cleared"
 

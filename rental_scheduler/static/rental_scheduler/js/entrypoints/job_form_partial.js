@@ -57,9 +57,17 @@
                     // Close panel/workspace tab unless we're switching jobs
                     if (window.JobPanel && !window.JobPanel.isSwitchingJobs) {
                         const currentJobId = window.JobPanel.currentJobId;
+                        const currentDraftId = window.JobPanel.currentDraftId;
+
+                        // Prefer closing by real job ID if present in workspace
                         if (currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob && window.JobWorkspace.hasJob(currentJobId)) {
                             window.JobWorkspace.closeJob(currentJobId);
+                        } else if (currentDraftId && window.JobWorkspace && window.JobWorkspace.hasJob && window.JobWorkspace.hasJob(currentDraftId)) {
+                            // Draft (minimized new job) flow: close/remove the draft tab on successful save
+                            window.JobWorkspace.closeJob(currentDraftId);
+                            window.JobPanel.currentDraftId = null;
                         } else {
+                            // Fallback: just close the panel
                             window.JobPanel.close(true); // true = skip unsaved check
                         }
                     }
@@ -460,31 +468,204 @@
             }
 
             /**
-             * Delete job via API
+             * Detect recurrence state from the job form DOM
+             * @returns {Object} { isRecurring, isInstance, isParent }
+             */
+            function detectRecurrenceState() {
+                var recurCheckbox = document.querySelector('#job-panel #recurrence-enabled');
+                if (!recurCheckbox) {
+                    return { isRecurring: false, isInstance: false, isParent: false };
+                }
+                
+                var isRecurring = recurCheckbox.checked === true;
+                var isInstance = isRecurring && recurCheckbox.disabled === true;
+                var isParent = isRecurring && recurCheckbox.disabled !== true;
+                
+                return { isRecurring: isRecurring, isInstance: isInstance, isParent: isParent };
+            }
+
+            /**
+             * Show recurring delete modal
+             * @param {string} jobId
+             * @param {boolean} isInstance - true if deleting an instance, false if deleting parent
+             */
+            function showRecurringDeleteModal(jobId, isInstance) {
+                // Create overlay
+                var overlay = document.createElement('div');
+                overlay.id = 'recurring-delete-overlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+                
+                // Create dialog
+                var dialog = document.createElement('div');
+                dialog.style.cssText = 'background:white;border-radius:8px;padding:24px;max-width:500px;width:90%;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);';
+                
+                // Build content based on whether it's an instance or parent
+                var title, body, buttons;
+                
+                if (isInstance) {
+                    title = 'Delete recurring event?';
+                    body = '<p class="text-gray-700 mb-2">This event is part of a series. What would you like to delete?</p><p class="text-sm text-gray-500">Past events won\'t be deleted.</p>';
+                    buttons = [
+                        { text: 'Cancel', scope: null, className: 'bg-gray-100 hover:bg-gray-200 text-gray-800' },
+                        { text: 'Delete this event only', scope: 'this_only', className: 'bg-red-600 hover:bg-red-700 text-white' },
+                        { text: 'Delete this and future events', scope: 'this_and_future', className: 'bg-red-600 hover:bg-red-700 text-white' }
+                    ];
+                } else {
+                    title = 'Delete recurring series?';
+                    body = '<p class="text-gray-700 mb-2">This is the series template. Choose what should happen:</p>';
+                    buttons = [
+                        { text: 'Cancel', scope: null, className: 'bg-gray-100 hover:bg-gray-200 text-gray-800' },
+                        { text: 'Keep this event, delete future events', scope: 'this_and_future', className: 'bg-red-600 hover:bg-red-700 text-white' },
+                        { text: 'Delete entire series', scope: 'all', className: 'bg-red-600 hover:bg-red-700 text-white' }
+                    ];
+                }
+                
+                // Check for unsaved changes
+                var hasUnsavedChanges = window.JobPanel && window.JobPanel.hasUnsavedChanges
+                    ? (typeof window.JobPanel.hasUnsavedChanges === 'function'
+                        ? window.JobPanel.hasUnsavedChanges()
+                        : false)
+                    : false;
+                
+                if (hasUnsavedChanges) {
+                    body += '<p class="text-sm text-yellow-600 mt-3 font-medium">⚠️ You have unsaved changes. Deleting will discard them.</p>';
+                }
+                
+                // Build HTML
+                dialog.innerHTML = '<h2 class="text-xl font-semibold mb-4 text-gray-900">' + title + '</h2>' +
+                    '<div class="mb-6">' + body + '</div>' +
+                    '<div id="recurring-delete-buttons" class="flex flex-col gap-2"></div>';
+                
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+                
+                // Add buttons
+                var buttonsContainer = dialog.querySelector('#recurring-delete-buttons');
+                buttons.forEach(function(btnConfig, index) {
+                    var btn = document.createElement('button');
+                    btn.textContent = btnConfig.text;
+                    btn.className = 'px-4 py-2 rounded font-medium transition-colors ' + btnConfig.className;
+                    btn.setAttribute('data-scope', btnConfig.scope || '');
+                    
+                    btn.addEventListener('click', function() {
+                        if (btnConfig.scope) {
+                            performRecurringDelete(jobId, btnConfig.scope);
+                        }
+                        closeRecurringDeleteModal();
+                    });
+                    
+                    buttonsContainer.appendChild(btn);
+                    
+                    // Focus first button (Cancel)
+                    if (index === 0) {
+                        setTimeout(function() { btn.focus(); }, 50);
+                    }
+                });
+                
+                // ESC to close
+                var escHandler = function(e) {
+                    if (e.key === 'Escape') {
+                        closeRecurringDeleteModal();
+                        document.removeEventListener('keydown', escHandler);
+                    }
+                };
+                document.addEventListener('keydown', escHandler);
+                
+                // Click overlay to close
+                overlay.addEventListener('click', function(e) {
+                    if (e.target === overlay) {
+                        closeRecurringDeleteModal();
+                    }
+                });
+            }
+
+            /**
+             * Close recurring delete modal
+             */
+            function closeRecurringDeleteModal() {
+                var overlay = document.getElementById('recurring-delete-overlay');
+                if (overlay) {
+                    overlay.remove();
+                }
+            }
+
+            /**
+             * Perform recurring delete with the specified scope
+             * @param {string} jobId
+             * @param {string} scope - 'this_only', 'this_and_future', or 'all'
+             */
+            function performRecurringDelete(jobId, scope) {
+                fetch(GTS.urls.jobDeleteRecurring(jobId), {
+                    method: 'POST',
+                    headers: GTS.csrf.headers({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ delete_scope: scope })
+                })
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            var count = data.deleted_count || 0;
+                            var message = count === 1 ? 'Deleted 1 event' : 'Deleted ' + count + ' events';
+                            GTS.showToast(message, 'success');
+                            
+                            // Close panel
+                            if (window.JobPanel) {
+                                window.JobPanel.close(true); // true = skip unsaved check
+                            }
+                            
+                            // Refresh calendar
+                            if (window.jobCalendar && window.jobCalendar.calendar) {
+                                window.jobCalendar.calendar.refetchEvents();
+                            }
+                        } else {
+                            console.error('Failed to delete job:', data.error);
+                            GTS.showToast('Failed to delete: ' + (data.error || 'Unknown error'), 'error');
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error('Error deleting job:', error);
+                        GTS.showToast('Error deleting job', 'error');
+                    });
+            }
+
+            /**
+             * Delete job via API (handles both recurring and non-recurring)
              */
             function deleteJob(jobId) {
-                if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
-                    fetch(GTS.urls.jobDelete(jobId), {
-                        method: 'POST',
-                        headers: GTS.csrf.headers({ 'Content-Type': 'application/json' })
-                    })
-                        .then(function(response) { return response.json(); })
-                        .then(function(data) {
-                            if (data.success) {
-                                // Close panel and refresh calendar
-                                if (window.JobPanel) {
-                                    window.JobPanel.close();
-                                }
-                                if (window.jobCalendar && window.jobCalendar.calendar) {
-                                    window.jobCalendar.calendar.refetchEvents();
-                                }
-                            } else {
-                                console.error('Failed to delete job:', data.error);
-                            }
+                // Detect if this is a recurring job
+                var recurrenceState = detectRecurrenceState();
+                
+                if (recurrenceState.isRecurring) {
+                    // Show recurring delete modal
+                    showRecurringDeleteModal(jobId, recurrenceState.isInstance);
+                } else {
+                    // Non-recurring job - use simple confirm
+                    if (confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
+                        fetch(GTS.urls.jobDelete(jobId), {
+                            method: 'POST',
+                            headers: GTS.csrf.headers({ 'Content-Type': 'application/json' })
                         })
-                        .catch(function(error) {
-                            console.error('Error deleting job:', error);
-                        });
+                            .then(function(response) { return response.json(); })
+                            .then(function(data) {
+                                if (data.success) {
+                                    GTS.showToast('Job deleted', 'success');
+                                    
+                                    // Close panel and refresh calendar
+                                    if (window.JobPanel) {
+                                        window.JobPanel.close();
+                                    }
+                                    if (window.jobCalendar && window.jobCalendar.calendar) {
+                                        window.jobCalendar.calendar.refetchEvents();
+                                    }
+                                } else {
+                                    console.error('Failed to delete job:', data.error);
+                                    GTS.showToast('Failed to delete job', 'error');
+                                }
+                            })
+                            .catch(function(error) {
+                                console.error('Error deleting job:', error);
+                                GTS.showToast('Error deleting job', 'error');
+                            });
+                    }
                 }
             }
 

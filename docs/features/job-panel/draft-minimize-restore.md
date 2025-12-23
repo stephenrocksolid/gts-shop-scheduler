@@ -104,10 +104,16 @@ Defined/loaded globally from `rental_scheduler/templates/base.html`:
 
 - Captures a **form-state-preserving HTML snapshot**:
   - `GTS.htmlState.serializeDraftHtml(panelBody)`
-- Stores that HTML in workspace state:
+- Stores that HTML in **sessionStorage** (tab-scoped, clears on browser close):
   - `JobWorkspace.createDraft(..., html)` for new drafts
   - or `JobWorkspace.markUnsaved(id, html)` for unsaved edits
+  - Key format: `gts-job-workspace:html:<jobId>`
+- Stores metadata in **localStorage** (persists across sessions):
+  - `gts-job-workspace` contains tab list with customer names, colors, flags
+  - No sensitive HTML content in localStorage
 - Closes the panel UI (without navigating away)
+
+**Security note (v1.1+)**: Draft HTML is stored in sessionStorage to prevent sensitive customer data from persisting across browser restarts. If the browser/tab is closed, drafts are lost but the workspace metadata remains (tabs will show "Draft expired" message).
 
 Important: **draft restore uses `innerHTML` injection**, so any `<script>` tags inside the cached HTML will **not execute** on restore. This is why `JobPanel.showContent(html)` must re-run initializers.
 

@@ -32,6 +32,8 @@
 
         <!-- HTMX -->
         <script src="{% static 'rental_scheduler/js/htmx.min.js' %}"></script>
+        <!-- HTMX Config (disable history cache, clear existing cache) -->
+        <script src="{% static 'rental_scheduler/js/shared/htmx_config.js' %}"></script>
     
         <link href="{% static 'rental_scheduler/css/styles.css' %}"
               rel="stylesheet">
@@ -163,6 +165,7 @@
             GTS.urls.jobDetailApiTemplate = "{% url 'rental_scheduler:job_detail_api' pk=0 %}".replace('/0/', '/{job_id}/');
             GTS.urls.jobUpdateStatusTemplate = "{% url 'rental_scheduler:update_job_status' job_id=0 %}".replace('/0/', '/{job_id}/');
             GTS.urls.jobDeleteTemplate = "{% url 'rental_scheduler:delete_job_api' job_id=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.jobDeleteRecurringTemplate = "{% url 'rental_scheduler:job_delete_api_recurring' pk=0 %}".replace('/0/', '/{job_id}/');
 
             // Recurrence API
             GTS.urls.materializeOccurrence = "{% url 'rental_scheduler:materialize_occurrence_api' %}";

@@ -132,10 +132,14 @@
 
         /**
          * Clean up old event cache entries
+         * Enhanced: Also removes expired entries (TTL-based) opportunistically
          */
         proto._cleanupEventCache = function(currentKey) {
             try {
                 var cacheKeys = [];
+                var now = Date.now();
+                var maxAge = 5 * 60 * 1000; // 5 minutes TTL
+
                 for (var i = 0; i < localStorage.length; i++) {
                     var key = localStorage.key(i);
                     if (key && key.startsWith('cal-events-cache:') && key !== currentKey) {
@@ -143,24 +147,48 @@
                     }
                 }
 
-                // Keep only the 4 most recent (plus current = 5 total)
-                if (cacheKeys.length > 4) {
-                    // Sort by timestamp (oldest first)
-                    cacheKeys.sort(function(a, b) {
-                        try {
-                            var aData = JSON.parse(localStorage.getItem(a) || '{}');
-                            var bData = JSON.parse(localStorage.getItem(b) || '{}');
-                            return (aData.timestamp || 0) - (bData.timestamp || 0);
-                        } catch (e) {
-                            return 0;
+                // First pass: remove any expired entries (older than TTL)
+                var expiredKeys = [];
+                var validKeys = [];
+
+                cacheKeys.forEach(function(k) {
+                    try {
+                        var data = JSON.parse(localStorage.getItem(k) || '{}');
+                        var timestamp = data.timestamp || 0;
+                        if (now - timestamp > maxAge) {
+                            expiredKeys.push(k);
+                        } else {
+                            validKeys.push({ key: k, timestamp: timestamp });
                         }
+                    } catch (e) {
+                        // Can't parse, treat as expired
+                        expiredKeys.push(k);
+                    }
+                });
+
+                // Remove expired entries
+                expiredKeys.forEach(function(k) {
+                    localStorage.removeItem(k);
+                });
+
+                // Second pass: if still over the limit, remove oldest valid entries
+                // Keep only the 4 most recent (plus current = 5 total)
+                if (validKeys.length > 4) {
+                    // Sort by timestamp (oldest first)
+                    validKeys.sort(function(a, b) {
+                        return a.timestamp - b.timestamp;
                     });
 
                     // Remove oldest entries
-                    var toRemove = cacheKeys.slice(0, cacheKeys.length - 4);
-                    toRemove.forEach(function(k) {
-                        localStorage.removeItem(k);
+                    var toRemove = validKeys.slice(0, validKeys.length - 4);
+                    toRemove.forEach(function(item) {
+                        localStorage.removeItem(item.key);
                     });
+                }
+
+                // Log cleanup if any entries were removed
+                if (expiredKeys.length > 0) {
+                    console.debug('[PERF] Cache cleanup: removed ' + expiredKeys.length + ' expired entries');
                 }
             } catch (e) {
                 // Ignore cleanup errors

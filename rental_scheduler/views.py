@@ -1614,6 +1614,12 @@ def call_reminder_create_partial(request):
         except (ValueError, TypeError):
             pass
     
+    # Fallback: if no calendar was set, select the first active calendar as default
+    if 'calendar' not in initial:
+        default_calendar = Calendar.objects.filter(is_active=True).first()
+        if default_calendar:
+            initial['calendar'] = default_calendar.id
+    
     form = CallReminderForm(initial=initial)
     
     return render(request, 'rental_scheduler/call_reminders/_call_reminder_form_partial.html', {
@@ -2098,6 +2104,12 @@ def job_create_partial(request):
                     initial['calendar'] = calendar
             except (ValueError, TypeError):
                 pass  # Invalid calendar ID, ignore
+        
+        # Fallback: if no calendar was set, select the first active calendar as default
+        if 'calendar' not in initial:
+            default_calendar = Calendar.objects.filter(is_active=True).first()
+            if default_calendar:
+                initial['calendar'] = default_calendar
         
         form = JobForm(initial=initial)
     

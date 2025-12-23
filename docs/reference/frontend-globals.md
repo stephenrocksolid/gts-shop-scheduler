@@ -75,6 +75,15 @@ Important cross-component usage:
 
 The bulk of calendar behavior is implemented via mixins under `static/.../js/calendar/*.js`.
 
+## `window.GTS.urls` (URL templates)
+
+Injected by Django in `base.html`. See `docs/reference/urls-and-routing.md` for full list.
+
+### Recent additions (Dec 2025)
+
+- `GTS.urls.jobDeleteRecurringTemplate` → `/api/jobs/{job_id}/delete-recurring/` (template)
+- `GTS.urls.jobDeleteRecurring(jobId)` → helper function (in `urls.js`)
+
 ## Legacy globals (kept for compatibility)
 
 `base.html` also provides:

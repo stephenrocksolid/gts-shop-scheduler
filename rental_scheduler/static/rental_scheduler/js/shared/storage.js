@@ -144,6 +144,85 @@
         }
     }
 
+    /**
+     * Remove all keys with a given prefix from a storage object.
+     * @param {Storage} storage - localStorage or sessionStorage
+     * @param {string} prefix - The prefix to match
+     * @returns {number} - Number of keys removed
+     */
+    function removeByPrefix(storage, prefix) {
+        if (!storage || !prefix) return 0;
+        try {
+            var keysToRemove = [];
+            for (var i = 0; i < storage.length; i++) {
+                var key = storage.key(i);
+                if (key && key.startsWith(prefix)) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(function(k) {
+                storage.removeItem(k);
+            });
+            return keysToRemove.length;
+        } catch (e) {
+            console.warn('GTS.storage.removeByPrefix: Error removing keys', e);
+            return 0;
+        }
+    }
+
+    /**
+     * Clear all GTS-related local data (for "reset" functionality).
+     * Clears workspace, warning map, calendar caches, panel state, prefs, and legacy keys.
+     * @returns {Object} - { cleared: number, errors: string[] }
+     */
+    function clearLocalData() {
+        var cleared = 0;
+        var errors = [];
+
+        try {
+            // localStorage keys to remove
+            var lsKeys = [
+                'gts-job-workspace',
+                'gts-job-initial-save-attempted',
+                'jobPanelState',
+                'gts-sidebar-width',
+                'job-list-filters',
+                'gts-calendar-current-date',
+                'gts-calendar-search-open',
+                'gts-calendar-today-sidebar-open',
+                'gts-calendar-filters',
+                'gts-selected-calendars',
+                'gts-default-calendar',
+                'htmx-history-cache',
+                'rental_env',
+                'rental_debug'
+            ];
+
+            lsKeys.forEach(function(k) {
+                try {
+                    if (localStorage.getItem(k) !== null) {
+                        localStorage.removeItem(k);
+                        cleared++;
+                    }
+                } catch (e) {
+                    errors.push('localStorage:' + k);
+                }
+            });
+
+            // Remove localStorage keys by prefix
+            cleared += removeByPrefix(localStorage, 'cal-events-cache:');
+            cleared += removeByPrefix(localStorage, 'gts-job-initial-save-attempted:'); // Legacy
+
+            // sessionStorage keys by prefix (draft HTML)
+            cleared += removeByPrefix(sessionStorage, 'gts-job-workspace:html:');
+
+        } catch (e) {
+            errors.push('general:' + e.message);
+        }
+
+        return { cleared: cleared, errors: errors };
+    }
+
     // Expose the storage module
     GTS.storage = {
         getRaw: getRaw,
@@ -152,7 +231,9 @@
         getJson: getJson,
         setJson: setJson,
         getBool: getBool,
-        setBool: setBool
+        setBool: setBool,
+        removeByPrefix: removeByPrefix,
+        clearLocalData: clearLocalData
     };
 
 })();

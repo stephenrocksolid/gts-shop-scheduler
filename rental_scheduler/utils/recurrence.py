@@ -278,7 +278,7 @@ def create_recurring_instances(parent_job, count=None, until_date=None):
 
 def delete_recurring_instances(parent_job, after_date=None):
     """
-    Delete all recurring instances of a parent job.
+    Soft delete all recurring instances of a parent job.
     
     Args:
         parent_job: Parent Job instance
@@ -289,15 +289,15 @@ def delete_recurring_instances(parent_job, after_date=None):
     """
     from rental_scheduler.models import Job
     
-    queryset = Job.objects.filter(recurrence_parent=parent_job)
+    queryset = Job.objects.filter(recurrence_parent=parent_job, is_deleted=False)
     
     if after_date:
         queryset = queryset.filter(recurrence_original_start__gte=after_date)
         
     count = queryset.count()
-    queryset.delete()
+    queryset.update(is_deleted=True)
     
-    logger.info(f"Deleted {count} recurring instances for job {parent_job.id}")
+    logger.info(f"Soft deleted {count} recurring instances for job {parent_job.id}")
     return count
 
 

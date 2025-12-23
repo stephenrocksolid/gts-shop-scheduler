@@ -33,12 +33,14 @@ The repo enforces this with:
   - `jobDetailApiTemplate` (expects `{job_id}`)
   - `jobUpdateStatusTemplate` (expects `{job_id}`)
   - `jobDeleteTemplate` (expects `{job_id}`)
+  - `jobDeleteRecurringTemplate` (expects `{job_id}`) - added Dec 2025 for recurring delete
   - call reminder templates, print templates, etc.
 
 `shared/urls.js` wraps these into convenient functions, e.g.:
 
 - `GTS.urls.jobCreatePartial({ edit: jobId })`
 - `GTS.urls.jobDetailApi(jobId)`
+- `GTS.urls.jobDeleteRecurring(jobId)` - added Dec 2025
 
 ## How to add a new backend endpoint that JS will call
 
