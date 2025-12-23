@@ -180,6 +180,13 @@ However, POST with JSON body is preferred for consistency.
 
 The calendar feed can include **virtual** occurrences for never-ending series. This endpoint creates (or returns) the real `Job` row for a specific occurrence.
 
+**How virtual occurrences work:**
+
+- Forever series (with `recurrence_rule.end === 'never'`) don't pre-generate all instances as DB rows
+- Instead, the calendar feed generates `virtual_job` and `virtual_call_reminder` events on-the-fly for the requested date window
+- Virtual occurrences work correctly for windows far into the future (4+ years ahead) thanks to a fast-forward optimization
+- When a user clicks on a virtual occurrence, the frontend calls this endpoint to "materialize" it into a real Job row
+
 **Endpoint:** `POST /api/recurrence/materialize/`
 
 **Request Body:**
@@ -203,7 +210,38 @@ The calendar feed can include **virtual** occurrences for never-ending series. T
 
 ---
 
-### 6. Get Calendar Data (Updated)
+### 6. Preview Upcoming Occurrences (Forever Series)
+
+Returns an HTML fragment containing the next N virtual occurrences for a forever recurring series. Used by the Jobs list and Calendar Search Panel to show expandable preview rows.
+
+**Endpoint:** `GET /api/recurrence/preview/`
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `parent_id` | int | Yes | ID of the forever recurring parent job |
+| `count` | int | No | Number of occurrences to return (default: 5, max: 20) |
+
+**Response:** HTML fragment containing `<tr>` elements for each virtual occurrence.
+
+Each virtual occurrence row includes:
+
+- `data-virtual="1"` - Marks the row as a virtual occurrence
+- `data-recurrence-parent-id` - The parent job ID
+- `data-recurrence-original-start` - ISO datetime for the occurrence start
+- `data-parent-row-id` - Reference to the parent row for JS manipulation
+
+If more occurrences exist beyond the requested count, a "Show 5 more" button row is included.
+
+**Error Responses:**
+
+- `400` - Missing `parent_id`, job is not a forever series, or job is an instance (not a parent)
+- `404` - Job not found
+
+---
+
+### 7. Get Calendar Data (Updated)
 
 **Endpoint:** `GET /api/job-calendar-data/`
 

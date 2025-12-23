@@ -500,18 +500,101 @@ def is_forever_series(parent_job):
     return not has_count and not has_until
 
 
-def generate_occurrences_in_window(parent_job, window_start, window_end, safety_cap=200):
+def _fast_forward_to_window(parent_start, window_start, recurrence_type, interval):
+    """
+    Calculate the first occurrence on or after window_start by fast-forwarding.
+    
+    For daily/weekly recurrences, we can compute this directly using integer math.
+    For monthly/yearly, we use month/year calculation but stay conservative to preserve
+    the correct weekday pattern (e.g., "3rd Friday of month").
+    
+    Args:
+        parent_start: datetime - the parent job's start datetime
+        window_start: date - the start of the window we need to reach
+        recurrence_type: str - 'daily', 'weekly', 'monthly', or 'yearly'
+        interval: int - the interval between occurrences
+        
+    Returns:
+        tuple: (fast_forward_start: datetime, occurrence_number: int)
+               The datetime of the occurrence at or before window_start,
+               and the occurrence number (0 = parent)
+    """
+    parent_date = parent_start.date()
+    
+    # If parent is already at or after window_start, no fast-forward needed
+    if parent_date >= window_start:
+        return parent_start, 0
+    
+    days_to_window = (window_start - parent_date).days
+    
+    if recurrence_type == 'daily':
+        # Calculate how many intervals to jump
+        # We want the occurrence just before or at window_start
+        intervals_to_jump = days_to_window // interval
+        if intervals_to_jump > 0:
+            new_start = parent_start + timedelta(days=intervals_to_jump * interval)
+            return new_start, intervals_to_jump
+        return parent_start, 0
+        
+    elif recurrence_type == 'weekly':
+        # Calculate weeks to jump
+        weeks_to_window = days_to_window // 7
+        intervals_to_jump = weeks_to_window // interval
+        if intervals_to_jump > 0:
+            new_start = parent_start + timedelta(weeks=intervals_to_jump * interval)
+            return new_start, intervals_to_jump
+        return parent_start, 0
+        
+    elif recurrence_type == 'monthly':
+        # For monthly, we need to be more careful because the pattern is
+        # "nth weekday of month" not "same date each month".
+        # Calculate the number of whole months to jump.
+        # We use year/month difference rather than days to preserve the pattern.
+        parent_year = parent_start.year
+        parent_month = parent_start.month
+        window_year = window_start.year
+        window_month = window_start.month
+        
+        # Total months difference
+        months_diff = (window_year - parent_year) * 12 + (window_month - parent_month)
+        
+        # How many intervals fit in that difference (conservative: subtract 1)
+        intervals_to_jump = max(0, (months_diff // interval) - 1)
+        
+        if intervals_to_jump > 0:
+            # Jump forward in months - the loop will recalculate the correct weekday
+            new_start = parent_start + relativedelta(months=intervals_to_jump * interval)
+            return new_start, intervals_to_jump
+        return parent_start, 0
+        
+    elif recurrence_type == 'yearly':
+        # Calculate years to window
+        years_diff = window_start.year - parent_start.year
+        intervals_to_jump = max(0, (years_diff // interval) - 1)  # Conservative
+        if intervals_to_jump > 0:
+            new_start = parent_start + relativedelta(years=intervals_to_jump * interval)
+            return new_start, intervals_to_jump
+        return parent_start, 0
+        
+    return parent_start, 0
+
+
+def generate_occurrences_in_window(parent_job, window_start, window_end, safety_cap=200, max_iterations=2000):
     """
     Generate occurrence datetimes for a recurring parent within a date window.
     
     This is used for "forever" series where we don't store instances in the DB,
     but instead generate them on-the-fly for calendar display.
     
+    OPTIMIZED: Uses fast-forward to jump close to window_start for distant windows,
+    avoiding thousands of sequential steps for far-future date ranges.
+    
     Args:
         parent_job: Parent Job with recurrence_rule set
         window_start: Start date (date object) of the window
         window_end: End date (date object) of the window
-        safety_cap: Maximum occurrences to generate per call (prevents runaway)
+        safety_cap: Maximum occurrences to generate per call (prevents runaway output)
+        max_iterations: Maximum loop iterations (prevents runaway loops)
         
     Returns:
         List of dicts with occurrence info:
@@ -568,11 +651,9 @@ def generate_occurrences_in_window(parent_job, window_start, window_end, safety_
     duration = parent_end - parent_start
     
     occurrences = []
-    current_start = parent_start
-    occurrence_number = 0  # 0 = parent itself
     
     # Check if parent falls within window
-    if window_start <= current_start.date() <= window_end:
+    if window_start <= parent_start.date() <= window_end:
         occurrences.append({
             'start_dt': parent_start,
             'end_dt': parent_end,
@@ -580,8 +661,18 @@ def generate_occurrences_in_window(parent_job, window_start, window_end, safety_
             'is_parent': True,
         })
     
-    # Generate forward from parent
-    while len(occurrences) < safety_cap:
+    # Fast-forward to near the window start to avoid stepping through years of dates
+    current_start, occurrence_number = _fast_forward_to_window(
+        parent_start, window_start, recurrence_type, interval
+    )
+    
+    # Track iterations to prevent runaway loops
+    iteration_count = 0
+    
+    # Generate forward from the fast-forwarded position
+    while len(occurrences) < safety_cap and iteration_count < max_iterations:
+        iteration_count += 1
+        
         # Calculate next occurrence
         if recurrence_type == 'monthly':
             original_weekday = current_start.weekday()
@@ -650,6 +741,14 @@ def generate_occurrences_in_window(parent_job, window_start, window_end, safety_
             })
         
         current_start = next_start
+    
+    # Log if we hit iteration limit (shouldn't happen in normal use)
+    if iteration_count >= max_iterations:
+        logger.warning(
+            f"generate_occurrences_in_window hit max_iterations ({max_iterations}) for "
+            f"parent_job={parent_job.id}, window={window_start} to {window_end}, "
+            f"recurrence_type={recurrence_type}, interval={interval}"
+        )
     
     return occurrences
 

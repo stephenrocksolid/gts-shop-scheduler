@@ -632,12 +632,34 @@
                     GTS.markElInitialized(searchResults, 'search_row_handlers');
 
                     searchResults.addEventListener('click', function(e) {
+                        // Handle expand/collapse button for forever series
+                        const expandBtn = e.target.closest('.expand-occurrences-btn');
+                        if (expandBtn) {
+                            e.stopPropagation();
+                            handleExpandOccurrences(expandBtn, searchResults);
+                            return;
+                        }
+
+                        // Handle "Show more" button
+                        const showMoreBtn = e.target.closest('.show-more-occurrences-btn');
+                        if (showMoreBtn) {
+                            e.stopPropagation();
+                            handleShowMoreOccurrences(showMoreBtn, searchResults);
+                            return;
+                        }
+
                         const row = e.target.closest('.job-row');
                         if (!row) return;
 
                         // Don't navigate if user clicked on an action link or button
                         if (e.target.tagName === 'A' || e.target.closest('a') ||
                             e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                            return;
+                        }
+
+                        // Check if this is a virtual occurrence row
+                        if (row.getAttribute('data-virtual') === '1') {
+                            handleVirtualRowClick(row);
                             return;
                         }
 
@@ -662,6 +684,176 @@
                         }
                     });
                 }
+            }
+
+            /**
+             * Handle expand button click to fetch and show virtual occurrences
+             */
+            function handleExpandOccurrences(btn, container) {
+                const parentId = btn.getAttribute('data-parent-id');
+                const isExpanded = btn.getAttribute('data-expanded') === 'true';
+
+                if (isExpanded) {
+                    collapseOccurrences(parentId, btn, container);
+                } else {
+                    expandOccurrences(parentId, btn, 5, container);
+                }
+            }
+
+            /**
+             * Expand to show virtual occurrences for a parent
+             */
+            function expandOccurrences(parentId, btn, count, container) {
+                const icon = btn.querySelector('.expand-icon');
+                
+                btn.disabled = true;
+                if (icon) icon.style.opacity = '0.5';
+
+                const previewUrl = GTS.urls.recurrencePreview + '?parent_id=' + parentId + '&count=' + count;
+                
+                fetch(previewUrl, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                    .then(function(response) {
+                        if (!response.ok) throw new Error('Failed to fetch occurrences');
+                        return response.text();
+                    })
+                    .then(function(html) {
+                        const parentRow = container.querySelector('#job-row-' + parentId);
+                        if (!parentRow) return;
+
+                        removeVirtualRows(parentId, container);
+                        parentRow.insertAdjacentHTML('afterend', html);
+
+                        btn.setAttribute('data-expanded', 'true');
+                        if (icon) {
+                            icon.style.transform = 'rotate(180deg)';
+                            icon.style.opacity = '1';
+                        }
+                        btn.title = 'Hide occurrences';
+                    })
+                    .catch(function(error) {
+                        console.error('Error fetching occurrences:', error);
+                    })
+                    .finally(function() {
+                        btn.disabled = false;
+                        if (icon) icon.style.opacity = '1';
+                    });
+            }
+
+            /**
+             * Collapse (hide) virtual occurrences for a parent
+             */
+            function collapseOccurrences(parentId, btn, container) {
+                removeVirtualRows(parentId, container);
+
+                const icon = btn.querySelector('.expand-icon');
+                btn.setAttribute('data-expanded', 'false');
+                if (icon) {
+                    icon.style.transform = 'rotate(0deg)';
+                }
+                btn.title = 'Show upcoming occurrences';
+            }
+
+            /**
+             * Remove all virtual occurrence rows for a given parent
+             */
+            function removeVirtualRows(parentId, container) {
+                const virtualRows = container.querySelectorAll(
+                    '.virtual-occurrence-row[data-parent-row-id="job-row-' + parentId + '"]'
+                );
+                virtualRows.forEach(function(row) {
+                    row.remove();
+                });
+            }
+
+            /**
+             * Handle "Show more" button click
+             */
+            function handleShowMoreOccurrences(btn, container) {
+                const parentId = btn.getAttribute('data-parent-id');
+                const currentCount = parseInt(btn.getAttribute('data-current-count'), 10) || 5;
+                const newCount = currentCount + 5;
+
+                const expandBtn = container.querySelector('.expand-occurrences-btn[data-parent-id="' + parentId + '"]');
+                if (expandBtn) {
+                    expandOccurrences(parentId, expandBtn, newCount, container);
+                }
+            }
+
+            /**
+             * Handle click on a virtual occurrence row (materialize + open)
+             */
+            function handleVirtualRowClick(row) {
+                const parentId = row.getAttribute('data-recurrence-parent-id');
+                const originalStart = row.getAttribute('data-recurrence-original-start');
+
+                if (!parentId || !originalStart) {
+                    console.error('Missing parent_id or original_start for virtual row');
+                    return;
+                }
+
+                row.style.opacity = '0.6';
+                row.style.pointerEvents = 'none';
+
+                var csrfToken = '';
+                var csrfEl = document.querySelector('[name=csrfmiddlewaretoken]');
+                if (csrfEl) {
+                    csrfToken = csrfEl.value;
+                } else {
+                    var cookies = document.cookie.split(';');
+                    for (var i = 0; i < cookies.length; i++) {
+                        var cookie = cookies[i].trim();
+                        if (cookie.startsWith('csrftoken=')) {
+                            csrfToken = cookie.substring(10);
+                            break;
+                        }
+                    }
+                }
+
+                fetch(GTS.urls.materializeOccurrence, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({
+                        parent_id: parseInt(parentId, 10),
+                        original_start: originalStart
+                    })
+                })
+                    .then(function(response) {
+                        if (!response.ok) {
+                            return response.json().then(function(data) {
+                                throw new Error(data.error || 'Failed to materialize occurrence');
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(function(data) {
+                        var jobId = data.job_id;
+
+                        if (window.JobWorkspace) {
+                            window.JobWorkspace.openJob(jobId, {
+                                customerName: 'Job',
+                                trailerColor: '',
+                                calendarColor: '#3B82F6'
+                            });
+                        } else if (window.JobPanel) {
+                            window.JobPanel.setTitle('Edit Job');
+                            window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
+                        }
+
+                        if (data.created) {
+                            row.remove();
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error('Error materializing virtual occurrence:', error);
+                        row.style.opacity = '1';
+                        row.style.pointerEvents = '';
+                    });
             }
         });
     }

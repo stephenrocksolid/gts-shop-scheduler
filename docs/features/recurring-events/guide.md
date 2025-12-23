@@ -307,7 +307,9 @@ if (job.is_recurring_instance) {
 
 ### Virtual occurrences (forever series)
 
-For “forever” series, the calendar feed may emit **virtual** events (not backed by a real `Job` row yet):
+For "forever" series (those with `recurrence_rule.end === 'never'`), the calendar feed emits **virtual** events (not backed by a real `Job` row yet). These are generated on-the-fly for any calendar date window, including windows far into the future (4+ years ahead).
+
+Virtual event types:
 
 - `extendedProps.type === 'virtual_job'`
 - `extendedProps.type === 'virtual_call_reminder'`
@@ -319,6 +321,30 @@ Virtual events include:
 - `extendedProps.is_virtual === true`
 
 The frontend materializes them via `POST /api/recurrence/materialize/` and then opens the resulting real job.
+
+**Performance Note:** The virtual occurrence generator uses a fast-forward algorithm to efficiently handle distant future windows without iterating through years of dates. It also has iteration guardrails (max 2000 iterations per parent) to prevent runaway loops.
+
+### Jobs list / Search behavior
+
+When using the Jobs List page or the Calendar Search Panel with future-looking date filters (`future`, `two_years`, or `custom` with a future range):
+
+- **Forever recurring parents** are included in the results, even if their original `start_dt` is in the past
+- These parents are displayed with an **∞ badge** (e.g., "∞ Weekly") to indicate they're forever series
+- Users can click on the parent row to view/edit the series template
+
+This ensures forever series remain discoverable when searching for future events.
+
+### Expandable preview of upcoming occurrences
+
+Forever series rows in the Jobs list and Calendar Search Panel include an **expand button** (chevron icon) that reveals the next 5 upcoming virtual occurrences:
+
+- Click the expand button to show virtual occurrence rows
+- Virtual rows are styled with a subtle indigo background and a "↻" icon to indicate they are not yet real jobs
+- **Click any virtual row** to materialize it into a real Job and open it for editing
+- Use the **"Show 5 more"** button to load additional occurrences
+- Click the expand button again to collapse/hide the virtual rows
+
+Virtual occurrences are generated on-the-fly via `GET /api/recurrence/preview/?parent_id=X&count=N`. Clicking a virtual row calls `POST /api/recurrence/materialize/` to create the real Job before opening it.
 
 ## Best Practices
 

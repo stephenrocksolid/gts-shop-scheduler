@@ -700,3 +700,100 @@ def materialize_occurrence_api(request):
         traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
 
+
+@require_http_methods(["GET"])
+def recurrence_preview_occurrences(request):
+    """
+    Return HTML fragment with the next N virtual occurrences for a forever recurring parent.
+    
+    Query params:
+        parent_id: int - ID of the recurring parent job
+        count: int - Number of occurrences to preview (default 5, max 20)
+    
+    Returns HTML rows suitable for insertion into a job table.
+    """
+    from django.shortcuts import render
+    from django.utils import timezone
+    from datetime import timedelta
+    from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
+    from rental_scheduler.utils.phone import format_phone
+    
+    parent_id = request.GET.get('parent_id')
+    count = request.GET.get('count', '5')
+    
+    if not parent_id:
+        return JsonResponse({'error': 'parent_id is required'}, status=400)
+    
+    try:
+        parent_id = int(parent_id)
+        count = min(int(count), 20)  # Cap at 20 to prevent abuse
+    except ValueError:
+        return JsonResponse({'error': 'Invalid parent_id or count'}, status=400)
+    
+    try:
+        parent = Job.objects.select_related('calendar').get(pk=parent_id, is_deleted=False)
+    except Job.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+    
+    # Verify this is a forever recurring parent
+    if parent.recurrence_parent is not None:
+        return JsonResponse({'error': 'This is a recurring instance, not a parent'}, status=400)
+    
+    if not is_forever_series(parent):
+        return JsonResponse({'error': 'This job is not a forever recurring series'}, status=400)
+    
+    # Generate upcoming occurrences starting from today
+    today = timezone.localdate()
+    # Look ahead enough to get the requested count (generous window based on recurrence type)
+    rule = parent.recurrence_rule or {}
+    recurrence_type = rule.get('type', 'monthly')
+    interval = rule.get('interval', 1)
+    
+    # Calculate a reasonable window based on recurrence type
+    if recurrence_type == 'daily':
+        window_days = count * interval + 30
+    elif recurrence_type == 'weekly':
+        window_days = count * interval * 7 + 30
+    elif recurrence_type == 'monthly':
+        window_days = count * interval * 31 + 60
+    else:  # yearly
+        window_days = count * interval * 366 + 60
+    
+    window_end = today + timedelta(days=window_days)
+    
+    # Generate occurrences
+    occurrences = generate_occurrences_in_window(
+        parent,
+        today,
+        window_end,
+        safety_cap=count + 5  # A few extra in case some are materialized
+    )
+    
+    # Get already-materialized instance starts for this parent
+    materialized_starts = set(
+        Job.objects.filter(
+            recurrence_parent=parent
+        ).values_list('recurrence_original_start', flat=True)
+    )
+    
+    # Filter out parent and already-materialized occurrences
+    virtual_occurrences = []
+    for occ in occurrences:
+        if occ.get('is_parent'):
+            continue
+        if occ['start_dt'] in materialized_starts:
+            continue
+        virtual_occurrences.append(occ)
+        if len(virtual_occurrences) >= count:
+            break
+    
+    # Build context for template
+    context = {
+        'parent': parent,
+        'occurrences': virtual_occurrences,
+        'count': count,
+        'has_more': len(occurrences) > len(virtual_occurrences) + 1,  # +1 for parent
+        'format_phone': format_phone,
+    }
+    
+    return render(request, 'rental_scheduler/partials/virtual_occurrence_rows.html', context)

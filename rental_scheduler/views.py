@@ -333,32 +333,73 @@ class JobListView(ListView):
             queryset = queryset.filter(calendar_id__in=calendars)
         
         # Date filter
+        # For future-looking filters, we also include "forever" recurring parents
+        # whose start_dt may be in the past but have occurrences in the future
         date_filter = self.request.GET.get('date_filter', 'all')
+        self._includes_forever_parents = False  # Track for template context
+        
+        # Build a filter for forever recurring parents (for OR-combining with date filters)
+        # Forever parents: have recurrence_rule with end='never' or no count/until_date,
+        # and no recurrence_parent (they are the parent themselves)
+        forever_parent_filter = (
+            models.Q(recurrence_parent__isnull=True) &
+            models.Q(recurrence_rule__isnull=False) &
+            (
+                models.Q(recurrence_rule__end='never') |
+                (
+                    models.Q(recurrence_rule__count__isnull=True) &
+                    models.Q(recurrence_rule__until_date__isnull=True)
+                )
+            )
+        )
+        
         if date_filter == 'custom':
             start_date = self.request.GET.get('start_date')
             end_date = self.request.GET.get('end_date')
+            date_range_filter = models.Q()
+            has_future_component = False
+            
             if start_date:
                 try:
                     start_date_obj = timezone.datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.get_current_timezone())
-                    queryset = queryset.filter(start_dt__gte=start_date_obj)
+                    date_range_filter &= models.Q(start_dt__gte=start_date_obj)
+                    if start_date_obj > timezone.now():
+                        has_future_component = True
                 except ValueError:
                     pass
             if end_date:
                 try:
                     end_date_obj = timezone.datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.get_current_timezone())
-                    queryset = queryset.filter(start_dt__lte=end_date_obj)
+                    date_range_filter &= models.Q(start_dt__lte=end_date_obj)
                 except ValueError:
                     pass
+            
+            # If filtering for a future range, also include forever parents
+            if has_future_component and date_range_filter:
+                queryset = queryset.filter(date_range_filter | forever_parent_filter)
+                self._includes_forever_parents = True
+            elif date_range_filter:
+                queryset = queryset.filter(date_range_filter)
+                
         elif date_filter == 'future':
             now = timezone.now()
-            queryset = queryset.filter(start_dt__gte=now)
+            # Include forever parents since they have future occurrences
+            queryset = queryset.filter(
+                models.Q(start_dt__gte=now) | forever_parent_filter
+            )
+            self._includes_forever_parents = True
         elif date_filter == 'past':
             now = timezone.now()
             queryset = queryset.filter(start_dt__lt=now)
         elif date_filter == 'two_years':
             now = timezone.now()
             two_years_from_now = now + timedelta(days=730)  # 2 years = 730 days
-            queryset = queryset.filter(start_dt__gte=now, start_dt__lte=two_years_from_now)
+            # Include forever parents since they have occurrences in this range
+            queryset = queryset.filter(
+                (models.Q(start_dt__gte=now) & models.Q(start_dt__lte=two_years_from_now)) |
+                forever_parent_filter
+            )
+            self._includes_forever_parents = True
         
         # Unified search across multiple fields with punctuation-insensitive matching
         # and smart fallback (strict AND first, then broaden to OR if no results)
@@ -489,6 +530,10 @@ class JobListView(ListView):
         
         # Add search widened flag (True if fallback to OR matching was used)
         context['search_widened'] = getattr(self, '_search_widened', False)
+        
+        # Add flag indicating if forever recurring parents were included
+        # (used to show appropriate badge/info in templates)
+        context['includes_forever_parents'] = getattr(self, '_includes_forever_parents', False)
         
         return context
 
@@ -746,11 +791,18 @@ def get_job_calendar_data(request):
                 try:
                     from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
                     
+                    # Build filter datetime for cheap parent exclusion
+                    # (series starting after the window can't contribute)
+                    filter_end_for_parent = timezone.make_aware(
+                        datetime.combine(request_end_date + timedelta(days=1), datetime.min.time())
+                    )
+                    
                     # Find "forever" recurring parents
                     forever_parents_qs = Job.objects.select_related('calendar').filter(
                         is_deleted=False,
                         recurrence_parent__isnull=True,
                         recurrence_rule__isnull=False,
+                        start_dt__lt=filter_end_for_parent,  # Parent must start before window ends
                     ).exclude(status='canceled')
                     
                     if pg_calendar_ids:
@@ -769,13 +821,20 @@ def get_job_calendar_data(request):
                         if not is_forever_series(parent):
                             continue
                         
-                        materialized_starts = set(
-                            Job.objects.filter(recurrence_parent=parent).values_list('recurrence_original_start', flat=True)
-                        )
-                        
-                        occurrences = generate_occurrences_in_window(
-                            parent, request_start_date, request_end_date, safety_cap=100
-                        )
+                        try:
+                            materialized_starts = set(
+                                Job.objects.filter(recurrence_parent=parent).values_list('recurrence_original_start', flat=True)
+                            )
+                            
+                            occurrences = generate_occurrences_in_window(
+                                parent, request_start_date, request_end_date, safety_cap=100
+                            )
+                        except Exception as parent_err:
+                            logger.error(
+                                f"Error generating virtual occurrences for parent job {parent.id} "
+                                f"(window: {request_start_date} to {request_end_date}): {parent_err}"
+                            )
+                            continue
                         
                         for occ in occurrences:
                             if occ.get('is_parent') or occ['start_dt'] in materialized_starts:
@@ -1334,12 +1393,19 @@ def get_job_calendar_data(request):
                         except ValueError:
                             pass
                 
+                # Build filter datetime for cheap parent exclusion
+                # (series starting after the window can't contribute)
+                filter_end_for_parent = timezone.make_aware(
+                    datetime.combine(request_end_date + timedelta(days=1), datetime.min.time())
+                )
+                
                 # Find "forever" recurring parents that could have occurrences in the window
                 # A forever series has recurrence_rule with end='never' or no count/until_date
                 forever_parents_qs = Job.objects.select_related('calendar').filter(
                     is_deleted=False,
                     recurrence_parent__isnull=True,  # Only parents
                     recurrence_rule__isnull=False,   # Has a recurrence rule
+                    start_dt__lt=filter_end_for_parent,  # Parent must start before window ends
                 ).exclude(
                     status='canceled'
                 )
@@ -1365,20 +1431,27 @@ def get_job_calendar_data(request):
                     if not is_forever_series(parent):
                         continue
                     
-                    # Get already-materialized instance starts for this parent (including soft-deleted)
-                    materialized_starts = set(
-                        Job.objects.filter(
-                            recurrence_parent=parent
-                        ).values_list('recurrence_original_start', flat=True)
-                    )
-                    
-                    # Generate virtual occurrences in the window
-                    occurrences = generate_occurrences_in_window(
-                        parent,
-                        request_start_date,
-                        request_end_date,
-                        safety_cap=100  # Limit per parent per request
-                    )
+                    try:
+                        # Get already-materialized instance starts for this parent (including soft-deleted)
+                        materialized_starts = set(
+                            Job.objects.filter(
+                                recurrence_parent=parent
+                            ).values_list('recurrence_original_start', flat=True)
+                        )
+                        
+                        # Generate virtual occurrences in the window
+                        occurrences = generate_occurrences_in_window(
+                            parent,
+                            request_start_date,
+                            request_end_date,
+                            safety_cap=100  # Limit per parent per request
+                        )
+                    except Exception as parent_err:
+                        logger.error(
+                            f"Error generating virtual occurrences for parent job {parent.id} "
+                            f"(window: {request_start_date} to {request_end_date}): {parent_err}"
+                        )
+                        continue
                     
                     for occ in occurrences:
                         # Skip parent occurrence (already in real jobs query) and materialized ones

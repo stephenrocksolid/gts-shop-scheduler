@@ -243,12 +243,34 @@
 
         // Use event delegation for clicks
         jobTableContainer.addEventListener('click', function(e) {
+            // Handle expand/collapse button for forever series
+            const expandBtn = e.target.closest('.expand-occurrences-btn');
+            if (expandBtn) {
+                e.stopPropagation();
+                handleExpandOccurrences(expandBtn);
+                return;
+            }
+
+            // Handle "Show more" button
+            const showMoreBtn = e.target.closest('.show-more-occurrences-btn');
+            if (showMoreBtn) {
+                e.stopPropagation();
+                handleShowMoreOccurrences(showMoreBtn);
+                return;
+            }
+
             const row = e.target.closest('.job-row');
             if (!row) return;
 
             // Don't navigate if user clicked on an action link or button
             if (e.target.tagName === 'A' || e.target.closest('a') ||
                 e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                return;
+            }
+
+            // Check if this is a virtual occurrence row
+            if (row.getAttribute('data-virtual') === '1') {
+                handleVirtualRowClick(row);
                 return;
             }
 
@@ -275,6 +297,213 @@
                 row.style.backgroundColor = '';
             }
         });
+    }
+
+    // ========================================================================
+    // FOREVER SERIES EXPAND/COLLAPSE
+    // ========================================================================
+
+    /**
+     * Handle expand button click to fetch and show virtual occurrences
+     */
+    function handleExpandOccurrences(btn) {
+        const parentId = btn.getAttribute('data-parent-id');
+        const isExpanded = btn.getAttribute('data-expanded') === 'true';
+
+        if (isExpanded) {
+            // Collapse: remove virtual occurrence rows
+            collapseOccurrences(parentId, btn);
+        } else {
+            // Expand: fetch and insert virtual occurrence rows
+            expandOccurrences(parentId, btn, 5);
+        }
+    }
+
+    /**
+     * Expand to show virtual occurrences for a parent
+     */
+    function expandOccurrences(parentId, btn, count) {
+        const icon = btn.querySelector('.expand-icon');
+        
+        // Show loading state
+        btn.disabled = true;
+        if (icon) icon.style.opacity = '0.5';
+
+        const previewUrl = GTS.urls.recurrencePreview + '?parent_id=' + parentId + '&count=' + count;
+        console.log('Fetching preview:', previewUrl);
+        
+        fetch(previewUrl, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+            .then(function(response) {
+                console.log('Preview response status:', response.status);
+                if (!response.ok) {
+                    return response.text().then(function(text) {
+                        console.error('Preview error response:', text);
+                        throw new Error('Failed to fetch occurrences: ' + text);
+                    });
+                }
+                return response.text();
+            })
+            .then(function(html) {
+                console.log('Preview HTML length:', html.length, 'first 200 chars:', html.substring(0, 200));
+                
+                // Find the parent row
+                const parentRow = document.getElementById('job-row-' + parentId);
+                console.log('Parent row found:', !!parentRow, 'id=job-row-' + parentId);
+                if (!parentRow) return;
+
+                // Remove any existing virtual rows for this parent
+                removeVirtualRows(parentId);
+
+                // Insert new rows after parent
+                parentRow.insertAdjacentHTML('afterend', html);
+                console.log('Inserted HTML after parent row');
+
+                // Update button state
+                btn.setAttribute('data-expanded', 'true');
+                if (icon) {
+                    icon.style.transform = 'rotate(180deg)';
+                    icon.style.opacity = '1';
+                }
+                btn.title = 'Hide occurrences';
+            })
+            .catch(function(error) {
+                console.error('Error fetching occurrences:', error);
+                if (window.showToast) {
+                    window.showToast('Failed to load occurrences', 'error');
+                }
+            })
+            .finally(function() {
+                btn.disabled = false;
+                if (icon) icon.style.opacity = '1';
+            });
+    }
+
+    /**
+     * Collapse (hide) virtual occurrences for a parent
+     */
+    function collapseOccurrences(parentId, btn) {
+        removeVirtualRows(parentId);
+
+        const icon = btn.querySelector('.expand-icon');
+        btn.setAttribute('data-expanded', 'false');
+        if (icon) {
+            icon.style.transform = 'rotate(0deg)';
+        }
+        btn.title = 'Show upcoming occurrences';
+    }
+
+    /**
+     * Remove all virtual occurrence rows for a given parent
+     */
+    function removeVirtualRows(parentId) {
+        const virtualRows = document.querySelectorAll(
+            '.virtual-occurrence-row[data-parent-row-id="job-row-' + parentId + '"]'
+        );
+        virtualRows.forEach(function(row) {
+            row.remove();
+        });
+    }
+
+    /**
+     * Handle "Show more" button click
+     */
+    function handleShowMoreOccurrences(btn) {
+        const parentId = btn.getAttribute('data-parent-id');
+        const currentCount = parseInt(btn.getAttribute('data-current-count'), 10) || 5;
+        const newCount = currentCount + 5;
+
+        // Find the expand button to reuse its expand logic
+        const expandBtn = document.querySelector('.expand-occurrences-btn[data-parent-id="' + parentId + '"]');
+        if (expandBtn) {
+            expandOccurrences(parentId, expandBtn, newCount);
+        }
+    }
+
+    /**
+     * Handle click on a virtual occurrence row (materialize + open)
+     */
+    function handleVirtualRowClick(row) {
+        const parentId = row.getAttribute('data-recurrence-parent-id');
+        const originalStart = row.getAttribute('data-recurrence-original-start');
+
+        if (!parentId || !originalStart) {
+            console.error('Missing parent_id or original_start for virtual row');
+            return;
+        }
+
+        // Show loading indicator on the row
+        row.style.opacity = '0.6';
+        row.style.pointerEvents = 'none';
+
+        // Get CSRF token
+        var csrfToken = '';
+        var csrfEl = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (csrfEl) {
+            csrfToken = csrfEl.value;
+        } else {
+            // Try cookie
+            var cookies = document.cookie.split(';');
+            for (var i = 0; i < cookies.length; i++) {
+                var cookie = cookies[i].trim();
+                if (cookie.startsWith('csrftoken=')) {
+                    csrfToken = cookie.substring(10);
+                    break;
+                }
+            }
+        }
+
+        fetch(GTS.urls.materializeOccurrence, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+                parent_id: parseInt(parentId, 10),
+                original_start: originalStart
+            })
+        })
+            .then(function(response) {
+                if (!response.ok) {
+                    return response.json().then(function(data) {
+                        throw new Error(data.error || 'Failed to materialize occurrence');
+                    });
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                var jobId = data.job_id;
+                console.log('Materialized occurrence, job ID:', jobId, 'created:', data.created);
+
+                // Open the real job
+                if (window.JobWorkspace) {
+                    window.JobWorkspace.openJob(jobId, {
+                        customerName: 'Job',
+                        trailerColor: '',
+                        calendarColor: '#3B82F6'
+                    });
+                } else if (window.JobPanel) {
+                    window.JobPanel.setTitle('Edit Job');
+                    window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
+                }
+
+                // If materialization created a new row, optionally refresh the parent's expanded view
+                if (data.created) {
+                    // Remove the virtual row since it's now real
+                    row.remove();
+                }
+            })
+            .catch(function(error) {
+                console.error('Error materializing virtual occurrence:', error);
+                if (window.showToast) {
+                    window.showToast('Failed to open occurrence: ' + error.message, 'error');
+                }
+                row.style.opacity = '1';
+                row.style.pointerEvents = '';
+            });
     }
 
     // ========================================================================

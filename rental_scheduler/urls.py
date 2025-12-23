@@ -49,6 +49,7 @@ from .views_recurring import (
     job_cancel_future_api,
     job_delete_api_recurring,
     materialize_occurrence_api,
+    recurrence_preview_occurrences,
 )
 from . import error_views
 
@@ -72,6 +73,7 @@ urlpatterns = [
     path('api/jobs/<int:pk>/cancel-future/', job_cancel_future_api, name='job_cancel_future_api'),
     path('api/jobs/<int:pk>/delete-recurring/', job_delete_api_recurring, name='job_delete_api_recurring'),
     path('api/recurrence/materialize/', materialize_occurrence_api, name='materialize_occurrence_api'),
+    path('api/recurrence/preview/', recurrence_preview_occurrences, name='recurrence_preview_occurrences'),
     
     # Calendar Management URLs
     path('calendars/', CalendarListView.as_view(), name='calendar_list'),
