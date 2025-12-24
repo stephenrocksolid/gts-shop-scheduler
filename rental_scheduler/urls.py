@@ -16,6 +16,7 @@ from .views import (
     CalendarUpdateView,
     CalendarDeleteView,
     JobListView,
+    JobListTablePartialView,
     JobDeleteView,
     JobPrintWOView,
     JobPrintWOCustomerView,
@@ -48,6 +49,8 @@ from .views_recurring import (
     job_cancel_future_api,
     job_delete_api_recurring,
     materialize_occurrence_api,
+    recurrence_preview_occurrences,
+    series_occurrences_api,
 )
 from . import error_views
 
@@ -71,6 +74,8 @@ urlpatterns = [
     path('api/jobs/<int:pk>/cancel-future/', job_cancel_future_api, name='job_cancel_future_api'),
     path('api/jobs/<int:pk>/delete-recurring/', job_delete_api_recurring, name='job_delete_api_recurring'),
     path('api/recurrence/materialize/', materialize_occurrence_api, name='materialize_occurrence_api'),
+    path('api/recurrence/preview/', recurrence_preview_occurrences, name='recurrence_preview_occurrences'),
+    path('api/recurrence/series-occurrences/', series_occurrences_api, name='series_occurrences_api'),
     
     # Calendar Management URLs
     path('calendars/', CalendarListView.as_view(), name='calendar_list'),
@@ -80,6 +85,7 @@ urlpatterns = [
     
     # Job URLs
     path('jobs/', JobListView.as_view(), name='job_list'),
+    path('jobs/partial/table/', JobListTablePartialView.as_view(), name='job_list_table_partial'),
     path('jobs/import/', calendar_import, name='calendar_import'),
     path('jobs/import/history/', import_history, name='import_history'),
     path('jobs/import/<str:batch_id>/revert/', revert_import, name='revert_import'),

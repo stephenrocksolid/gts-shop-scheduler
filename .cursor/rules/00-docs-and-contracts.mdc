@@ -1,0 +1,18 @@
+---
+alwaysApply: true
+---
+
+## Canonical docs
+
+- Start here: `docs/README.md`
+- Frontend architecture: `docs/architecture/frontend.md`
+- Backend architecture: `docs/architecture/backend.md`
+- URL strategy: `docs/reference/urls-and-routing.md`
+- Frontend globals/contracts: `docs/reference/frontend-globals.md`
+
+## Rules (keep the repo from drifting)
+
+- If you change a **contract** (URLs, JS globals, event schemas, storage keys), update the relevant doc(s) in the same change.
+- Prefer **links to code** over duplicating long code blocks in docs.
+- Archive planning docs under `docs/archive/` instead of keeping them in repo root.
+

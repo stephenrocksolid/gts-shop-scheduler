@@ -4,6 +4,7 @@ These will replace/augment the existing job create/update/delete endpoints.
 """
 
 import json
+from django.db import models
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_protect
@@ -476,15 +477,15 @@ def job_cancel_future_api(request, pk):
 @csrf_protect
 def job_delete_api_recurring(request, pk):
     """
-    Delete a job with scope support for recurring events.
+    Soft delete a job with scope support for recurring events.
     
     POST /api/jobs/<pk>/delete-recurring/
     Body: {"delete_scope": "this_only" | "this_and_future" | "all"}
     
     Scopes:
-    - this_only: Delete only this job (default)
-    - all: Delete entire series (parent + all instances)
-    - this_and_future: Delete this and all future instances
+    - this_only: Soft delete only this job (default)
+    - all: Soft delete entire series (parent + all instances)
+    - this_and_future: Soft delete this and all future instances, truncate recurrence generation
     """
     try:
         job = get_object_or_404(Job, pk=pk)
@@ -502,46 +503,82 @@ def job_delete_api_recurring(request, pk):
         deleted_count = 0
         
         if scope == 'all':
-            # Delete entire series
+            # Soft delete entire series
             parent = job if job.is_recurring_parent else job.recurrence_parent
             if parent:
-                # Count instances before deleting
-                deleted_count = parent.recurrence_instances.count()
-                # Delete parent (CASCADE will delete instances)
-                parent.delete()
-                deleted_count += 1  # Include parent
+                # Count non-deleted instances before deleting
+                deleted_count = parent.recurrence_instances.filter(is_deleted=False).count()
+                # Soft delete all instances
+                parent.recurrence_instances.filter(is_deleted=False).update(is_deleted=True)
+                # Soft delete parent
+                if not parent.is_deleted:
+                    parent.is_deleted = True
+                    parent.save(update_fields=['is_deleted'])
+                    deleted_count += 1  # Include parent
             else:
-                job.delete()
-                deleted_count = 1
+                # Non-recurring job
+                if not job.is_deleted:
+                    job.is_deleted = True
+                    job.save(update_fields=['is_deleted'])
+                    deleted_count = 1
                 
         elif scope in ('this_and_future', 'future'):
             # Delete this and all future instances
             if job.is_recurring_instance:
                 parent = job.recurrence_parent
                 if parent:
-                    # Delete current and future instances
-                    deleted_count = parent.delete_recurring_instances(
+                    # Soft delete current and future instances
+                    from datetime import timedelta
+                    from rental_scheduler.utils.recurrence import delete_recurring_instances
+                    deleted_count = delete_recurring_instances(
+                        parent,
                         after_date=job.recurrence_original_start
                     )
+                    
+                    # Truncate virtual occurrences by setting end_recurrence_date
+                    # Set to day before the deleted boundary
+                    truncate_date = job.recurrence_original_start.date() - timedelta(days=1)
+                    parent.end_recurrence_date = truncate_date
+                    parent.save(update_fields=['end_recurrence_date'])
                 else:
-                    job.delete()
-                    deleted_count = 1
+                    # Orphaned instance - just soft delete it
+                    if not job.is_deleted:
+                        job.is_deleted = True
+                        job.save(update_fields=['is_deleted'])
+                        deleted_count = 1
+                        
             elif job.is_recurring_parent:
-                # If this is the parent, delete all instances
-                deleted_count = job.recurrence_instances.count()
-                job.recurrence_instances.all().delete()
-                job.recurrence_rule = None
-                job.save()
+                # If this is the parent, delete all instances and truncate at parent date
+                deleted_count = job.recurrence_instances.filter(is_deleted=False).count()
+                job.recurrence_instances.filter(is_deleted=False).update(is_deleted=True)
+                
+                # Truncate recurrence generation so it ends after the parent occurrence
+                job.end_recurrence_date = job.start_dt.date()
+                job.save(update_fields=['end_recurrence_date'])
+                # Keep parent itself not deleted
             else:
-                job.delete()
-                deleted_count = 1
+                # Non-recurring job
+                if not job.is_deleted:
+                    job.is_deleted = True
+                    job.save(update_fields=['is_deleted'])
+                    deleted_count = 1
                 
         else:  # scope == 'this_only'
-            job.delete()
-            deleted_count = 1
+            # Guard: Don't allow deleting only the parent (would orphan the series)
+            if job.is_recurring_parent and job.recurrence_instances.exists():
+                return JsonResponse({
+                    'status': 'error',
+                    'error': 'Cannot delete only the series template. Choose to delete the entire series or delete this and future events.'
+                }, status=400)
+            
+            # Soft delete single job
+            if not job.is_deleted:
+                job.is_deleted = True
+                job.save(update_fields=['is_deleted'])
+                deleted_count = 1
         
         return JsonResponse({
-            'status': 'success',
+            'success': True,
             'deleted_count': deleted_count,
             'scope': scope,
         })
@@ -664,3 +701,349 @@ def materialize_occurrence_api(request):
         traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
 
+
+@require_http_methods(["GET"])
+def recurrence_preview_occurrences(request):
+    """
+    Return HTML fragment with the next N virtual occurrences for a forever recurring parent.
+    
+    Query params:
+        parent_id: int - ID of the recurring parent job
+        count: int - Number of occurrences to preview (default 5, max 200)
+    
+    Returns HTML rows suitable for insertion into a job table.
+    """
+    from django.shortcuts import render
+    from django.utils import timezone
+    from datetime import timedelta
+    from rental_scheduler.utils.recurrence import (
+        is_forever_series,
+        generate_occurrences_in_window,
+        compute_occurrence_number,
+    )
+    from rental_scheduler.utils.phone import format_phone
+    
+    MAX_PREVIEW_COUNT = 200
+    
+    parent_id = request.GET.get('parent_id')
+    count = request.GET.get('count', '5')
+    
+    if not parent_id:
+        return JsonResponse({'error': 'parent_id is required'}, status=400)
+    
+    try:
+        parent_id = int(parent_id)
+        count = min(int(count), MAX_PREVIEW_COUNT)  # Cap at 200 to prevent abuse
+    except ValueError:
+        return JsonResponse({'error': 'Invalid parent_id or count'}, status=400)
+    
+    try:
+        parent = Job.objects.select_related('calendar').get(pk=parent_id, is_deleted=False)
+    except Job.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+    
+    # Verify this is a forever recurring parent
+    if parent.recurrence_parent is not None:
+        return JsonResponse({'error': 'This is a recurring instance, not a parent'}, status=400)
+    
+    if not is_forever_series(parent):
+        return JsonResponse({'error': 'This job is not a forever recurring series'}, status=400)
+    
+    # Generate upcoming occurrences starting from today
+    today = timezone.localdate()
+    # Look ahead enough to get the requested count (generous window based on recurrence type)
+    rule = parent.recurrence_rule or {}
+    recurrence_type = rule.get('type', 'monthly')
+    interval = rule.get('interval', 1)
+    
+    # Calculate a reasonable window based on recurrence type
+    if recurrence_type == 'daily':
+        window_days = count * interval + 30
+    elif recurrence_type == 'weekly':
+        window_days = count * interval * 7 + 30
+    elif recurrence_type == 'monthly':
+        window_days = count * interval * 31 + 60
+    else:  # yearly
+        window_days = count * interval * 366 + 60
+    
+    window_end = today + timedelta(days=window_days)
+    
+    # Generate occurrences
+    occurrences = generate_occurrences_in_window(
+        parent,
+        today,
+        window_end,
+        safety_cap=count + 10  # A few extra in case some are materialized
+    )
+    
+    # Get already-materialized instance starts for this parent
+    materialized_starts = set(
+        Job.objects.filter(
+            recurrence_parent=parent
+        ).values_list('recurrence_original_start', flat=True)
+    )
+    
+    # Filter out parent and already-materialized occurrences
+    virtual_occurrences = []
+    for occ in occurrences:
+        if occ.get('is_parent'):
+            continue
+        if occ['start_dt'] in materialized_starts:
+            continue
+        virtual_occurrences.append(occ)
+        if len(virtual_occurrences) >= count:
+            break
+    
+    # For forever series, show "more" button until we hit the max
+    has_more = count < MAX_PREVIEW_COUNT
+    
+    # Build context for template
+    context = {
+        'parent': parent,
+        'occurrences': virtual_occurrences,
+        'count': count,
+        'has_more': has_more,
+        'format_phone': format_phone,
+    }
+    
+    return render(request, 'rental_scheduler/partials/virtual_occurrence_rows.html', context)
+
+
+@require_http_methods(["GET"])
+def series_occurrences_api(request):
+    """
+    Return HTML fragment with materialized + virtual occurrences for a recurring series,
+    filtered by search query and scope (upcoming/past).
+    
+    Query params:
+        parent_id: int - ID of the recurring parent job
+        scope: str - 'upcoming' or 'past'
+        search: str - Search query to filter occurrences
+        count: int - Number of occurrences to return (default 5, max 50)
+        offset: int - Offset for pagination in the combined list (default 0)
+        
+    Returns HTML rows suitable for insertion after a series header row.
+    The rows are sorted chronologically (ascending for upcoming, descending for past)
+    with materialized and virtual occurrences interleaved by start_dt.
+    """
+    from django.shortcuts import render
+    from django.utils import timezone
+    from datetime import timedelta
+    import re
+    
+    from rental_scheduler.utils.recurrence import (
+        is_forever_series,
+        generate_occurrences_in_window,
+        compute_occurrence_number,
+    )
+    from rental_scheduler.utils.phone import format_phone
+    
+    MAX_COUNT = 50
+    
+    parent_id = request.GET.get('parent_id')
+    scope = request.GET.get('scope', 'upcoming')
+    search_query = request.GET.get('search', '').strip()
+    count = request.GET.get('count', '5')
+    offset = request.GET.get('offset', '0')
+    
+    if not parent_id:
+        return JsonResponse({'error': 'parent_id is required'}, status=400)
+    
+    if scope not in ('upcoming', 'past'):
+        return JsonResponse({'error': 'scope must be "upcoming" or "past"'}, status=400)
+    
+    try:
+        parent_id = int(parent_id)
+        count = min(int(count), MAX_COUNT)
+        offset = int(offset)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid parent_id, count, or offset'}, status=400)
+    
+    try:
+        parent = Job.objects.select_related('calendar').get(pk=parent_id, is_deleted=False)
+    except Job.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+    
+    # Verify this is a recurring parent
+    if parent.recurrence_parent is not None:
+        return JsonResponse({'error': 'This is a recurring instance, not a parent'}, status=400)
+    
+    if not parent.recurrence_rule:
+        return JsonResponse({'error': 'This job is not a recurring parent'}, status=400)
+    
+    now = timezone.now()
+    
+    # Tokenize search query for filtering
+    def tokenize_search(query):
+        """Extract alphanumeric tokens from search query."""
+        raw_tokens = re.split(r'[^a-zA-Z0-9]+', query.lower())
+        tokens = []
+        for tok in raw_tokens:
+            if not tok or len(tok) == 1:
+                continue
+            if tok.isdigit() and len(tok) < 3:
+                continue
+            tokens.append(tok)
+        return tokens
+    
+    def job_matches_search(job, tokens):
+        """Check if a job matches all search tokens."""
+        if not tokens:
+            return True
+        
+        # Build searchable text blob
+        search_blob = '|'.join([
+            str(job.business_name or ''),
+            str(job.contact_name or ''),
+            str(job.phone or ''),
+            str(job.address_line1 or ''),
+            str(job.address_line2 or ''),
+            str(job.city or ''),
+            str(job.state or ''),
+            str(job.trailer_color or ''),
+            str(job.trailer_serial or ''),
+            str(job.trailer_details or ''),
+            str(job.notes or ''),
+            str(job.repair_notes or ''),
+        ]).lower()
+        
+        # Remove punctuation for matching
+        for char in '.,-()\'"/\\ +':
+            search_blob = search_blob.replace(char, '')
+        
+        # Check all tokens are present
+        return all(token in search_blob for token in tokens)
+    
+    tokens = tokenize_search(search_query)
+    parent_matches_search = job_matches_search(parent, tokens)
+    
+    # How many total combined entries do we need to fetch to serve this page?
+    # We need offset + count + 1 (the +1 to check has_more)
+    needed = offset + count + 1
+    
+    # -------------------------------------------------------------------------
+    # Build combined occurrence list (materialized + virtual), sorted by start_dt
+    # -------------------------------------------------------------------------
+    
+    # Query materialized occurrences (parent + instances)
+    materialized_queryset = Job.objects.select_related('calendar').filter(
+        is_deleted=False
+    ).filter(
+        # Parent or its instances
+        models.Q(pk=parent_id) | models.Q(recurrence_parent_id=parent_id)
+    )
+    
+    # Filter by scope
+    if scope == 'upcoming':
+        materialized_queryset = materialized_queryset.filter(start_dt__gte=now)
+    else:  # past
+        materialized_queryset = materialized_queryset.filter(start_dt__lt=now)
+    
+    # Order appropriately for merging
+    if scope == 'upcoming':
+        materialized_queryset = materialized_queryset.order_by('start_dt')
+    else:
+        materialized_queryset = materialized_queryset.order_by('-start_dt')
+    
+    # Filter by search tokens and build materialized entries
+    materialized_entries = []
+    for job in materialized_queryset:
+        if job_matches_search(job, tokens):
+            # Add series position number so UI can consistently label occurrences.
+            # Parent is always #1; instances are computed based on recurrence_original_start.
+            original_start = job.recurrence_original_start or job.start_dt
+            occurrence_number = compute_occurrence_number(parent, original_start)
+            materialized_entries.append({
+                'kind': 'materialized',
+                'start_dt': job.start_dt,
+                'job': job,
+                'occurrence_number': occurrence_number,
+            })
+    
+    # For forever series in upcoming scope, also generate virtual occurrences
+    virtual_entries = []
+    
+    if is_forever_series(parent) and scope == 'upcoming' and parent_matches_search:
+        # Get materialized instance starts to exclude (compare by recurrence_original_start)
+        materialized_starts = set(
+            Job.objects.filter(
+                recurrence_parent=parent
+            ).values_list('recurrence_original_start', flat=True)
+        )
+        # Also include the parent's start
+        materialized_starts.add(parent.start_dt)
+        
+        # Generate enough virtual occurrences to potentially fill the combined list
+        # We need to generate more than 'needed' to account for ones that might be
+        # materialized and thus excluded
+        today = timezone.localdate()
+        rule = parent.recurrence_rule or {}
+        recurrence_type = rule.get('type', 'monthly')
+        interval = rule.get('interval', 1)
+        
+        # Calculate window based on recurrence type - generous to ensure enough
+        gen_count = needed + len(materialized_entries) + 20
+        if recurrence_type == 'daily':
+            window_days = gen_count * interval + 30
+        elif recurrence_type == 'weekly':
+            window_days = gen_count * interval * 7 + 30
+        elif recurrence_type == 'monthly':
+            window_days = gen_count * interval * 31 + 60
+        else:  # yearly
+            window_days = gen_count * interval * 366 + 60
+        
+        window_end = today + timedelta(days=window_days)
+        
+        occurrences = generate_occurrences_in_window(
+            parent,
+            today,
+            window_end,
+            safety_cap=gen_count
+        )
+        
+        # Filter out parent and already-materialized, build virtual entries
+        for occ in occurrences:
+            if occ.get('is_parent'):
+                continue
+            if occ['start_dt'] in materialized_starts:
+                continue
+            virtual_entries.append({
+                'kind': 'virtual',
+                'start_dt': occ['start_dt'],
+                'occ': occ,
+            })
+    
+    # -------------------------------------------------------------------------
+    # Merge materialized + virtual into a single sorted list
+    # -------------------------------------------------------------------------
+    
+    if scope == 'upcoming':
+        # Ascending by start_dt
+        combined = sorted(
+            materialized_entries + virtual_entries,
+            key=lambda x: x['start_dt']
+        )
+    else:
+        # Past scope: descending by start_dt (no virtual for past)
+        combined = sorted(
+            materialized_entries,
+            key=lambda x: x['start_dt'],
+            reverse=True
+        )
+    
+    # Apply combined offset/limit
+    has_more = len(combined) > offset + count
+    occurrence_rows = combined[offset:offset + count]
+    
+    context = {
+        'parent': parent,
+        'parent_id': parent_id,
+        'scope': scope,
+        'occurrence_rows': occurrence_rows,
+        'offset': offset + count,
+        'has_more': has_more,
+        'search_query': search_query,
+        'format_phone': format_phone,
+    }
+    
+    return render(request, 'rental_scheduler/partials/series_occurrence_rows.html', context)

@@ -308,3 +308,80 @@ def test_job_list_search_single_token_no_fallback(api_client, calendar):
     assert response.context.get("search_widened") is False
 
 
+@pytest.mark.django_db
+def test_job_list_future_filter_includes_forever_parents(api_client, calendar):
+    """Future date filter should include forever recurring parents even if their start_dt is in the past."""
+    url = reverse("rental_scheduler:job_list")
+    now = timezone.now()
+
+    # Forever parent that started in the past (but has future occurrences)
+    forever_parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Forever Series",
+        start_dt=now - timedelta(days=30),  # Started in the past
+        end_dt=now - timedelta(days=30) + timedelta(hours=1),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={"type": "weekly", "interval": 1, "end": "never"},
+    )
+
+    # Regular job in the future
+    future_job = Job.objects.create(
+        calendar=calendar,
+        business_name="Future Job",
+        start_dt=now + timedelta(days=10),
+        end_dt=now + timedelta(days=10, hours=1),
+        all_day=False,
+        status="uncompleted",
+    )
+
+    # Regular job in the past (should not appear)
+    past_job = Job.objects.create(
+        calendar=calendar,
+        business_name="Past Job",
+        start_dt=now - timedelta(days=5),
+        end_dt=now - timedelta(days=5) + timedelta(hours=1),
+        all_day=False,
+        status="uncompleted",
+    )
+
+    response = api_client.get(url, {"date_filter": "future"})
+    assert response.status_code == 200
+
+    jobs = list(response.context["jobs"])
+    # Forever parent should be included (has future occurrences)
+    assert forever_parent in jobs
+    # Future job should be included
+    assert future_job in jobs
+    # Past job should NOT be included
+    assert past_job not in jobs
+    # Context should indicate forever parents were included
+    assert response.context.get("includes_forever_parents") is True
+
+
+@pytest.mark.django_db
+def test_job_list_two_years_filter_includes_forever_parents(api_client, calendar):
+    """Two years filter should include forever recurring parents."""
+    url = reverse("rental_scheduler:job_list")
+    now = timezone.now()
+
+    # Forever parent that started in the past
+    forever_parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Forever Monthly Series",
+        start_dt=now - timedelta(days=60),
+        end_dt=now - timedelta(days=60) + timedelta(hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={"type": "monthly", "interval": 1, "end": "never"},
+    )
+
+    response = api_client.get(url, {"date_filter": "two_years"})
+    assert response.status_code == 200
+
+    jobs = list(response.context["jobs"])
+    # Forever parent should be included
+    assert forever_parent in jobs
+    assert response.context.get("includes_forever_parents") is True
+
+

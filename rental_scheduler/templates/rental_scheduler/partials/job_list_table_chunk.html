@@ -1,0 +1,54 @@
+{% load static %}
+
+{# Chunk template for HTMX load-more: appends rows to #job-table-body and updates pagination controls via OOB #}
+
+{# IMPORTANT: Wrap rows in a <table> to ensure HTML parsing retains <tbody>/<tr> in fragment responses. #}
+{# HTMX will still extract only the <tr> elements via hx-select="#job-list-chunk-wrapper > tr". #}
+<table>
+<tbody id="job-list-chunk-wrapper">
+{% if job_sections %}
+    {# Unified rendering path for both search and standard modes #}
+    {# Note: JS will dedupe series headers that already exist in DOM #}
+    
+    {# Optional section header if crossing boundary from upcoming to past #}
+    {% if date_filter == 'all' and prev_is_past_event == 0 and job_sections.past and not job_sections.upcoming %}
+        <tr class="bg-gray-100 border-t-2 border-gray-300">
+            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                Past Events
+            </td>
+        </tr>
+    {% endif %}
+    
+    {# Render upcoming rows if present #}
+    {% for row in job_sections.upcoming %}
+        {% if row.type == 'series' %}
+            {% include 'rental_scheduler/partials/series_header_row.html' with series=row.series %}
+        {% else %}
+            {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+        {% endif %}
+    {% endfor %}
+    
+    {# Section header if we have both upcoming and past in this chunk #}
+    {% if job_sections.upcoming and job_sections.past and date_filter == 'all' %}
+        <tr class="bg-gray-100 border-t-2 border-gray-300">
+            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                Past Events
+            </td>
+        </tr>
+    {% endif %}
+    
+    {# Render past rows if present #}
+    {% for row in job_sections.past %}
+        {% if row.type == 'series' %}
+            {% include 'rental_scheduler/partials/series_header_row.html' with series=row.series %}
+        {% else %}
+            {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
+</tbody>
+</table>
+
+{# Out-of-band update for entire pagination footer - processed BEFORE hx-select filtering #}
+{% include 'rental_scheduler/partials/job_list_pagination_footer.html' with oob=True %}
+

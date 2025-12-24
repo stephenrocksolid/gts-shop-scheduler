@@ -104,6 +104,7 @@ This doc captures:
 - `window.RentalConfig` (defined in `config.js`)
 - `window.JobPanel` (defined in `panel.js`)
 - `window.JobWorkspace` (defined in `workspace.js`)
+- `window.GTS.urls` (defined in `base.html` + `shared/urls.js`) — canonical URL registry
 
 **Key architectural note**
 Because panel + workspace are global, *every page* shares state and side-effects. This is powerful, but it also means:
@@ -133,8 +134,7 @@ Because panel + workspace are global, *every page* shares state and side-effects
 
 **Inputs / data dependencies**
 - `window.calendarConfig` injected by `calendar.html`, including:
-  - `eventsUrl` (expected: `/api/job-calendar-data/`)
-  - `jobCreateUrl` (expected: `/jobs/new/partial/`)
+  - `urls` object (Phase 5): `calendarEvents`, `jobCreatePartial`, `jobList`, `calendarList`, `jobUpdateStatus`, `jobDetailApi`, `materializeOccurrence`, `callReminderCreatePartial`, `jobCallReminderUpdate`, `markCallReminderComplete`, `callReminderUpdate`, `callReminderDelete`
   - `guardrails` (server constants for panel validation)
   - `calendars` list (id, name, color)
   - `statusChoices`
@@ -160,28 +160,30 @@ Because panel + workspace are global, *every page* shares state and side-effects
 - Client event cache:
   - `cal-events-cache:<start>:<end>:<calendarIds>:<status>:<search>` (5-minute TTL, keep last ~5 keys)
 
-**Endpoints touched**
+**Endpoints touched** (all sourced from `GTS.urls` as of Phase 5)
 - Events feed:
-  - `GET window.calendarConfig.eventsUrl` → `/api/job-calendar-data/`
+  - `GET GTS.urls.calendarEvents` → `/api/job-calendar-data/`
+- Search panel (Phase 6):
+  - `GET GTS.urls.jobListTablePartial` → `/jobs/partial/table/` (table fragment for search results)
 - Panel partials:
-  - `GET /jobs/new/partial/?date=YYYY-MM-DD` (new job)
-  - `GET /jobs/new/partial/?edit=<jobId>` (edit)
-  - `GET /call-reminders/new/partial/?date=YYYY-MM-DD` (new reminder)
+  - `GET GTS.urls.jobCreatePartial({ date: 'YYYY-MM-DD' })` (new job)
+  - `GET GTS.urls.jobCreatePartial({ edit: jobId })` (edit)
+  - `GET GTS.urls.callReminderCreatePartial({ date: 'YYYY-MM-DD' })` (new reminder)
 - Recurrence:
-  - `POST /api/recurrence/materialize/` (virtual occurrence → real job)
+  - `POST GTS.urls.materializeOccurrence()` (virtual occurrence → real job)
 - Call reminders:
-  - `POST /api/jobs/<jobId>/mark-call-reminder-complete/`
-  - `POST /jobs/<jobId>/call-reminder/update/`
-  - `POST /call-reminders/<reminderId>/update/`
-  - `POST /call-reminders/<reminderId>/delete/`
+  - `POST GTS.urls.markCallReminderComplete(jobId)`
+  - `POST GTS.urls.jobCallReminderUpdate(jobId)`
+  - `POST GTS.urls.callReminderUpdate(pk)`
+  - `POST GTS.urls.callReminderDelete(pk)`
 - Navigation:
-  - `/jobs/`, `/calendars/`
+  - `GTS.urls.jobList()`, `GTS.urls.calendarList()`
 
 **Known drift / cleanup targets (calendar)**
-- **Inline JS in `calendar.html` duplicates responsibilities** (sidebar resize, scroll prevention, search panel fetch/DOMParser flow). Move to a single owner.
+- **Inline JS in `calendar.html` duplicates responsibilities** (sidebar resize, scroll prevention, search panel fetch/DOMParser flow). Move to a single owner. ✅ Resolved in Phase 1.
 - **Duplicate FullCalendar config keys** (e.g. `datesSet` is declared twice in `job_calendar.js`, so one overrides the other).
 - **Dead/unused methods** exist (e.g. `showJobRowTooltip()` appears defined but not wired).
-- **Hard-coded URL bug risk**: `updateJobStatus()` uses `/rental_scheduler/api/...` even though the app is mounted at `/` (should rely on `calendarConfig.jobUpdateUrl` or `urls.py`-derived path).
+- ~~**Hard-coded URL bug risk**: `updateJobStatus()` uses `/rental_scheduler/api/...`~~ ✅ Resolved in Phase 5 — all URLs now use `GTS.urls.*`.
 
 ---
 
@@ -234,14 +236,10 @@ Because panel + workspace are global, *every page* shares state and side-effects
   - `window.JobPanel.currentDraftId`
   - `window.JobPanel.isSwitchingJobs` (used by job form validation to skip “human submit” checks)
 
-**Known drift / cleanup targets (panel)**
-- `panel.js` contains both a **vanilla implementation** and an **Alpine-compatible mode** (it checks for `typeof Alpine !== 'undefined'`).
-  - Alpine attributes exist in some templates (`x-data=...`) but Alpine is not loaded in `base.html`.
-  - Decide whether Alpine is actually part of the app. If not, remove the Alpine branch.
-- Panel resize is implemented twice:
-  - Inline script in `includes/panel.html` stores `gts-panel-width/height`
-  - Panel state in `panel.js` stores `jobPanelState`
-  - Consolidate into one source of truth.
+**Known drift / cleanup targets (panel)** ✅ RESOLVED IN PHASE 4
+- ~~`panel.js` contains both a **vanilla implementation** and an **Alpine-compatible mode**~~ → Alpine code removed; vanilla-only implementation.
+- ~~Alpine attributes exist in some templates (`x-data=...`)~~ → All Alpine directives removed from templates.
+- ~~Panel resize is implemented twice~~ → Consolidated into `panel.js`; legacy keys (`gts-panel-width/height`) are migrated to `jobPanelState` on first load.
 
 ---
 
@@ -263,9 +261,9 @@ Because panel + workspace are global, *every page* shares state and side-effects
 - Draft IDs are of form:
   - `draft-<timestamp>-<random>`
 
-**Backend endpoints used**
+**Backend endpoints used** (sourced from `GTS.urls` as of Phase 5)
 - Tooltip fetch:
-  - `GET /api/jobs/<jobId>/detail/`
+  - `GET GTS.urls.jobDetailApi(jobId)` → `/api/jobs/<jobId>/detail/`
 
 **Known drift / cleanup targets (workspace)**
 - Draft HTML sanitization exists here and in `panel.js` (duplication).
@@ -328,10 +326,10 @@ The partial intercepts `htmx:beforeRequest` to enforce required fields for user-
   - date filter radios
   - keyboard navigation
   - click-to-open JobPanel
-- The calendar search panel (`calendar.html`) performs a `fetch('/jobs/?...')`, then DOM-parses the HTML and extracts `#job-table-container`.
+- ~~The calendar search panel (`calendar.html`) performs a `fetch('/jobs/?...')`, then DOM-parses the HTML and extracts `#job-table-container`.~~ ✅ Resolved in Phase 6 — now uses dedicated partial endpoint.
 
 **Cleanup direction (without feature loss)**
-- Replace “fetch + DOMParser + extract” with a dedicated partial endpoint (server returns the table fragment directly).
+- ~~Replace "fetch + DOMParser + extract" with a dedicated partial endpoint (server returns the table fragment directly).~~ ✅ Done in Phase 6.
 - Share one implementation of dropdown + keyboard navigation between job list and calendar search.
 
 ---
@@ -340,10 +338,14 @@ The partial intercepts `htmx:beforeRequest` to enforce required fields for user-
 
 ### A) `window.calendarConfig` schema (calendar.html → JS)
 Minimal expected fields:
-- `eventsUrl: string`
-- `jobCreateUrl: string`
+- `csrfToken: string`
 - `guardrails: { minValidYear, maxValidYear, warnDaysInFuture, warnJobSpanDays, ... }`
 - `calendars: Array<{ id: number, name: string, color: string }>`
+- `statusChoices: Array`
+- `currentFilters: { calendar, status, search }`
+- `savedFilters: Object`
+
+**Note**: All URL endpoints are now sourced from `window.GTS.urls` (defined in `base.html`), not from `calendarConfig`.
 
 ### B) Events feed schema (backend → FullCalendar)
 FullCalendar expects `events` array with fields like:
@@ -419,36 +421,234 @@ Definition of Done:
 
 ---
 
-### Phase 1 — Extract inline JS out of templates (no behavior changes)
-**Goal**: make code movable and testable.
+#### Manual Smoke Checklist (Phase 0)
 
-- Move from templates into dedicated static files:
-  - `calendar.html` inline behaviors (sidebar resize, scroll prevention, search form submission)
-  - `_job_form_partial.html` inline behaviors (calendar select cloning, printing, required validation)
-  - `job_list.html` inline behaviors (dropdown + keyboard navigation)
+Use this checklist before any significant refactor to verify core UX flows still work. Run against a local dev server (`python manage.py runserver`).
 
-Definition of Done:
-- Template scripts are tiny (mostly `window.calendarConfig = ...` only).
+##### 1. Calendar Load
+- [ ] Navigate to `/` (calendar page)
+- [ ] **Expected**: 4-week month view is visible, no blocking JS errors in console
+- [ ] **Expected**: FullCalendar toolbar with navigation buttons is visible
+- [ ] **Expected**: Events (if any) render without errors
+
+##### 2. Search Panel
+- [ ] Click the search toggle button (magnifying glass or search icon in toolbar)
+- [ ] **Expected**: Search panel slides open (top area, ~50vh)
+- [ ] Reload the page
+- [ ] **Expected**: Search panel state persists (open if it was open)
+- [ ] Type a search query and press Enter
+- [ ] **Expected**: Results appear in the panel (or "no results" message)
+- [ ] Click a result row
+- [ ] **Expected**: Job opens in the floating job panel
+
+##### 3. Today Sidebar
+- [ ] Click the Today sidebar toggle (if closed)
+- [ ] **Expected**: Sidebar slides open on the right side
+- [ ] Drag the resize handle to change sidebar width
+- [ ] **Expected**: Width changes and is persisted after reload
+- [ ] Click an item in the Today list
+- [ ] **Expected**: Corresponding job opens in the job panel
+- [ ] Toggle sidebar closed, then reload
+- [ ] **Expected**: Sidebar stays closed (state persisted)
+
+##### 4. Job Panel (Floating Editor)
+- [ ] Click the "Add Job" button in the calendar toolbar
+- [ ] **Expected**: Floating job panel opens with a new job form
+- [ ] Drag the panel title bar
+- [ ] **Expected**: Panel moves with the cursor
+- [ ] Drag the panel resize handles (corners/edges)
+- [ ] **Expected**: Panel resizes; dimensions persist after reload
+- [ ] Click outside the panel (on the calendar background)
+- [ ] **Expected**: Panel closes (if no unsaved changes)
+
+##### 5. Workspace Tabs
+- [ ] Open a job in the panel (from calendar event or search)
+- [ ] Click the minimize button (↓ icon in panel header)
+- [ ] **Expected**: Job panel closes; a tab appears in the workspace bar at the bottom
+- [ ] Open another job (click different calendar event)
+- [ ] Minimize that job too
+- [ ] **Expected**: Two tabs visible in workspace bar
+- [ ] Click the first tab
+- [ ] **Expected**: First job reopens in the panel
+- [ ] Close a tab (X button on tab)
+- [ ] **Expected**: Tab disappears; if it was the active job, panel closes
+
+##### 6. Drafts (Unsaved Changes Persistence)
+- [ ] Click "Add Job" to create a new job
+- [ ] Fill in **only** `contact_name` (leave required fields like `business_name` empty)
+- [ ] Click the minimize button
+- [ ] **Expected**: A tab appears with an "unsaved dot" indicator
+- [ ] Reload the page
+- [ ] **Expected**: Draft tab persists in the workspace bar
+- [ ] Click the draft tab
+- [ ] **Expected**: Panel opens with the previously entered `contact_name` restored
+
+##### 7. Printing (Save-then-Print)
+- [ ] Open an existing job in the panel
+- [ ] Click one of the print buttons (Work Order, Customer WO, or Invoice)
+- [ ] **Expected**: Job is saved (if needed), then print dialog/preview appears
+- [ ] Cancel the print dialog
+- [ ] **Expected**: No errors; calendar remains functional
+
+##### 8. Recurring Virtual Occurrence (Materialize)
+- [ ] Create a job with recurrence enabled (weekly, end mode "never")
+- [ ] Save the job and close the panel
+- [ ] Navigate to a future date where a virtual occurrence should appear
+- [ ] **Expected**: Virtual occurrence event is visible (may have distinct styling)
+- [ ] Click the virtual occurrence
+- [ ] **Expected**: Loading indicator appears briefly
+- [ ] **Expected**: Job panel opens with the materialized job (now a real job with its own ID)
+- [ ] Close the panel and verify the event is now a regular job event
+
+##### 9. Call Reminders (Standalone)
+- [ ] Double-click a **Sunday** cell on the calendar
+- [ ] **Expected**: Call reminder creation form opens (not job form)
+- [ ] Fill in short notes and click "Create Call Reminder"
+- [ ] **Expected**: Reminder event appears on the calendar for that date
+- [ ] Click the reminder event
+- [ ] **Expected**: Call reminder panel opens with notes textarea and action buttons
+- [ ] Edit the notes and click "Save & Close"
+- [ ] Click the reminder event again
+- [ ] **Expected**: Updated notes are visible
+- [ ] Click "Complete" button
+- [ ] **Expected**: Reminder marked complete (may show checkmark or styling change)
+- [ ] Click "Delete" button (if available) and confirm
+- [ ] **Expected**: Reminder event disappears from calendar
 
 ---
 
-### Phase 2 — Create a shared “frontend library” module folder
+### Phase 1 — Extract inline JS out of templates (no behavior changes) ✅ COMPLETED
+
+**Goal**: make code movable and testable.
+
+**Status**: ✅ **COMPLETED** (2025-12-18)
+
+**What was done**:
+
+1. **Created `gts_init.js`** - Idempotent initialization helpers
+   - `GTS.initOnce(key, fn)` - Run once globally
+   - `GTS.markElInitialized(el, key)` / `GTS.isElInitialized(el, key)` - Element-level guards
+   - `GTS.onDomReady(fn)`, `GTS.onHtmxLoad(fn)`, `GTS.onHtmxAfterSwap(fn)` - DOM/HTMX hooks
+   - `GTS.getCookie()`, `GTS.showToast()` - Convenience wrappers
+
+2. **Created `entrypoints/calendar_page.js`** - Extracted from `calendar.html`
+   - Sidebar resize with localStorage persistence
+   - Scroll prevention and wheel routing
+   - Search panel behaviors (dropdown, form submit, keyboard navigation, row click)
+   - Popover repositioning
+
+3. **Created `entrypoints/jobs_list_page.js`** - Extracted from `job_list.html`
+   - Calendar dropdown with selection label
+   - Date filter radios with custom range visibility
+   - localStorage persistence (`job-list-filters`)
+   - Search navigation (Enter submits once, then cycles highlights)
+   - Event-delegated row click/hover handlers
+
+4. **Created `entrypoints/job_form_partial.js`** - Extracted from `_job_form_partial.html`
+   - After-request orchestration (replaced inline `hx-on::after-request`)
+   - Required-field validation interceptor
+   - Print flow (save-then-print + iframe)
+   - Status update / delete actions via event delegation
+   - Recurrence end-mode toggle
+
+5. **Created `entrypoints/panel_shell.js`** - Extracted from `includes/panel.html`
+   - Panel resize handles (right, bottom, corner)
+   - Persistence to localStorage (`gts-panel-width`, `gts-panel-height`)
+   - HTMX refresh binding
+
+**Template changes**:
+- `calendar.html`: Keeps only `window.calendarConfig = {...}` inline
+- `job_list.html`: Has only tiny config object (`window.jobListConfig`)
+- `_job_form_partial.html`: Uses `data-gts-job-form="1"` marker, minimal inline init
+- `includes/panel.html`: No inline JS
+
+**Files created**:
+- `rental_scheduler/static/rental_scheduler/js/gts_init.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/calendar_page.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/jobs_list_page.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/panel_shell.js`
+
+Definition of Done:
+- ✅ Template scripts are tiny (mostly `window.calendarConfig = ...` only).
+- ✅ No duplicate handlers after repeated open/close/swap actions (idempotent init).
+
+---
+
+### Phase 2 — Create a shared "frontend library" module folder ✅ COMPLETED
 **Goal**: stop duplicating helpers.
 
-Create shared modules (even without a bundler, we can do plain JS files loaded in order):
+**Status**: ✅ **COMPLETED** (2025-12-18)
+
+**What was done**:
+
+1. **Created shared module folder**: `rental_scheduler/static/rental_scheduler/js/shared/`
+
+2. **Created `shared/csrf.js`** - Single CSRF token getter
+   - `GTS.csrf.getToken(options?)` - Consistent precedence: meta tag → form hidden input → cookie
+   - `GTS.csrf.headers(extraHeaders?, options?)` - Build headers with CSRF token
+   - `GTS.getCookie(name)` - Back-compat alias
+
+3. **Created `shared/toast.js`** - Toast notification wrapper
+   - `GTS.toast.show(message, type, duration)` - Wraps window.showToast
+   - `GTS.toast.success/error/warning/info(message, duration?)` - Convenience methods
+   - `GTS.showToast(...)` - Back-compat alias
+
+4. **Created `shared/storage.js`** - Safe localStorage helpers
+   - `GTS.storage.getRaw/setRaw/remove(key)` - Raw string access
+   - `GTS.storage.getJson/setJson(key, value)` - JSON with try/catch
+   - `GTS.storage.getBool/setBool(key, value)` - Boolean helpers
+
+5. **Created `shared/dom.js`** - DOM utilities
+   - `GTS.dom.on(el, event, selector?, handler, options?)` - Direct/delegated binding
+   - `GTS.dom.closest(el, selector)` - Polyfill-safe closest
+   - `GTS.dom.stop(e)` - preventDefault + stopPropagation
+   - `GTS.dom.qs/qsa(selector, root?)` - Query shortcuts
+
+6. **Created `shared/html_state.js`** - Draft HTML serialization
+   - `GTS.htmlState.sanitizeDraftHtml(html)` - Trims whitespace in strict input values
+   - `GTS.htmlState.serializeDraftHtml(rootEl)` - Preserves checkbox/select/textarea state
+
+**Migrations completed**:
+- `panel.js`: Removed local sanitizeDraftHtml/serializeDraftHtml → delegates to GTS.htmlState
+- `workspace.js`: Removed local sanitizeDraftHtml → delegates to GTS.htmlState
+- `job_calendar.js`: Removed duplicate getCSRFToken methods → uses GTS.csrf.getToken
+- `job_calendar.js`: Updated showError/showSuccess/showToast → uses GTS.toast
+- `panel.js`: Updated all window.showToast calls → uses GTS.toast.*
+- `workspace.js`: Updated all window.showToast calls → uses GTS.toast.warning
+- `panel.js`: Updated CSRF token usage in saveForm fetch → uses GTS.csrf.headers
+- `job_form_partial.js`: Updated CSRF usage → uses GTS.csrf.headers/getToken
+- `panel.js`: Updated save/load + warning key functions → uses GTS.storage
+- `workspace.js`: Updated saveToStorage/loadFromStorage/clear → uses GTS.storage
+- `panel_shell.js`: Updated localStorage calls → uses GTS.storage.getRaw/setRaw
+- `calendar_page.js`: Updated localStorage calls → uses GTS.storage.getRaw/setRaw
+- `jobs_list_page.js`: Updated localStorage calls → uses GTS.storage.getJson/setJson
+- `base.html`: Updated htmx:configRequest → uses GTS.csrf.getToken with fallback
+- `gts_init.js`: Removed duplicate getCookie/showToast (now in shared modules)
+
+**Files created**:
+- `rental_scheduler/static/rental_scheduler/js/shared/csrf.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/toast.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/storage.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/dom.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/html_state.js`
+- `rental_scheduler/static/rental_scheduler/js/shared/urls.js` (added in Phase 5)
+
+Shared modules (plain JS files loaded in order):
 - `shared/csrf.js` (single CSRF getter)
 - `shared/toast.js` (wrap `window.showToast`)
 - `shared/storage.js` (namespaced localStorage helpers)
 - `shared/dom.js` (safe event binding, delegation helpers)
 - `shared/html_state.js` (serialize/sanitize draft HTML)
+- `shared/urls.js` (URL interpolation helper + convenience wrappers)
 
 Definition of Done:
-- Panel + workspace use the same serialize/sanitize code.
-- Calendar/panel/workspace use the same CSRF/toast helpers.
+- ✅ Panel + workspace use the same serialize/sanitize code.
+- ✅ Calendar/panel/workspace use the same CSRF/toast helpers.
 
 ---
 
-### Phase 3 — Split `job_calendar.js` into logical modules (keep `window.jobCalendar`)
+### Phase 3 — Split `job_calendar.js` into logical modules (keep `window.jobCalendar`) ✅ COMPLETED
 **Goal**: keep all features, but make the code navigable.
 
 Target decomposition (example):
@@ -467,42 +667,163 @@ Definition of Done:
 
 ---
 
-### Phase 4 — Panel cleanup (choose one implementation)
+### Phase 4 — Panel cleanup (choose one implementation) ✅ COMPLETED
 **Goal**: one panel implementation, one state store.
 
-- Decide whether Alpine is truly supported. If not:
-  - remove Alpine compatibility paths from `panel.js`
-  - remove leftover `x-data` usage or load Alpine intentionally
-- Consolidate panel persistence:
-  - pick **one**: `jobPanelState` OR `gts-panel-width/height` (prefer a single structured key)
-  - move resize logic into `panel.js` (not in template)
+**Status**: ✅ **COMPLETED** (2025-12-19)
+
+**What was done**:
+
+1. **Made `jobPanelState` the single source of truth for panel persistence**
+   - Updated `save()` to capture `w/h` from `#job-panel.offsetWidth/offsetHeight`
+   - Updated `load()` to migrate legacy `gts-panel-width/height` keys on first load
+   - After migration, legacy keys are removed to avoid drift
+   - Added `applyPanelDimensions()` helper to apply saved dimensions on init
+
+2. **Moved resize + refresh binding into `panel.js`**
+   - Ported resize logic (right, bottom, corner handles) from `panel_shell.js`
+   - Ported HTMX refresh binding from `panel_shell.js`
+   - Removed `panel_shell.js` load from `base.html`
+   - Deleted `rental_scheduler/static/rental_scheduler/js/entrypoints/panel_shell.js`
+   - Updated `includes/panel.html` comment to reference `panel.js`
+
+3. **Removed Alpine compatibility code from `panel.js`**
+   - Removed `isAlpineMode` variable
+   - Simplified `initPanel()` to use vanilla JS directly (no Alpine detection)
+   - Deleted the entire `window.jobPanel = function jobPanel() {...}` Alpine component factory (~400 lines)
+
+4. **Removed leftover Alpine directives from templates**
+   - `workorder_detail.html`: Replaced Alpine dropdown (`x-data`, `x-show`, `@click`) with vanilla JS click-toggle + click-away handler
+   - `components/modal.html`: Deleted unused file (no includes found in codebase)
+
+**Files modified**:
+- `rental_scheduler/static/rental_scheduler/js/panel.js` (major refactor)
+- `rental_scheduler/templates/base.html` (removed `panel_shell.js` load)
+- `rental_scheduler/templates/rental_scheduler/includes/panel.html` (updated comment)
+- `rental_scheduler/templates/rental_scheduler/workorders/workorder_detail.html` (replaced Alpine with vanilla JS)
+
+**Files deleted**:
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/panel_shell.js`
+- `rental_scheduler/templates/rental_scheduler/components/modal.html`
 
 Definition of Done:
-- One codepath for panel behavior.
-- One place to change panel persistence.
+- ✅ One codepath for panel behavior (vanilla JS only).
+- ✅ One place to change panel persistence (`jobPanelState` key only).
 
 ---
 
-### Phase 5 — Make URL usage consistent (stop hard-coded endpoints)
+### Phase 5 — Make URL usage consistent (stop hard-coded endpoints) ✅ COMPLETED
 **Goal**: URLs come from Django or one config object.
 
-- Prefer Django-injected URLs in `window.calendarConfig` for calendar-related endpoints.
-- For other pages, prefer adding small `data-*` attributes with URLs or injecting a `window.urls` object.
-- Remove hard-coded `/rental_scheduler/...` style paths.
+**Status**: ✅ **COMPLETED** (2025-12-22)
+
+**What was done**:
+
+1. **Created `shared/urls.js`** - URL interpolation helper and convenience wrappers
+   - `GTS.urls.interpolate(template, params)` - Replaces `{key}` placeholders and adds query params
+   - Convenience wrappers for all commonly used URLs (e.g., `GTS.urls.jobDetailApi(jobId)`)
+   - Throws console errors for missing required parameters
+
+2. **Updated `base.html`** to inject `window.GTS.urls` with Django-reversed URLs:
+   - Direct URLs: `jobList`, `calendarList`, `calendar`, `calendarEvents`, `materializeOccurrence`
+   - Base URLs (for query params): `jobCreatePartialBase`, `callReminderCreatePartialBase`
+   - Template URLs (with placeholders): `jobDetailApiTemplate`, `jobUpdateStatusTemplate`, `jobDeleteTemplate`, `callReminderUpdateTemplate`, `callReminderDeleteTemplate`, `jobCallReminderUpdateTemplate`, `markCallReminderCompleteTemplate`, `jobPrintWoTemplate`, `jobPrintWoCustomerTemplate`, `jobPrintInvoiceTemplate`
+
+3. **Updated `calendar.html`** - removed legacy URL properties:
+   - Removed `eventsUrl`, `jobUpdateUrl`, `jobDetailUrl`, `jobEditUrl`, `jobCreateUrl`
+   - All URLs now sourced exclusively from `GTS.urls`
+   - Also removed unused `jobListConfig` from `job_list.html`
+
+4. **Replaced hard-coded URLs in all calendar modules** (`calendar/*.js`):
+   - `core.js`: Navigation to `/jobs/` and `/calendars/` → `GTS.urls.jobList` / `calendarList`
+   - `events.js`: Removed hard-coded `/api/job-calendar-data/` fallback
+   - `job_actions.js`: Edit job partial + status update
+   - `tooltips.js`: Job detail API fetch
+   - `day_interactions.js`: New job/reminder creation URLs
+   - `recurrence_virtual.js`: Materialize API + edit job partial
+   - `call_reminders.js`: Complete/update/delete reminder endpoints
+
+5. **Replaced hard-coded URLs in globally loaded scripts**:
+   - `workspace.js`: Job partial loading + tooltip API fetch
+   - `job_form_partial.js`: Print URLs + status update + delete
+
+6. **Replaced hard-coded URLs in page entrypoints**:
+   - `calendar_page.js`: Search results fetch + open job in panel
+   - `jobs_list_page.js`: Removed hard-coded `/jobs/new/partial/` fallback
+
+7. **Added pytest guard test** (`tests/test_no_hardcoded_urls.py`):
+   - Scans all JS files for forbidden URL patterns
+   - Patterns include: `/api/`, `/jobs/`, `/calendars/`, `/call-reminders/`, `/rental_scheduler/`
+   - Allowlist for `GTS.urls.*` references (the canonical URL source)
+   - Can run standalone: `python tests/test_no_hardcoded_urls.py`
+
+**Files created**:
+- `rental_scheduler/static/rental_scheduler/js/shared/urls.js`
+- `tests/test_no_hardcoded_urls.py`
+
+**Files modified**:
+- `rental_scheduler/templates/base.html`
+- `rental_scheduler/templates/rental_scheduler/calendar.html`
+- `rental_scheduler/templates/rental_scheduler/jobs/job_list.html`
+- `rental_scheduler/static/rental_scheduler/js/calendar/core.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/events.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/job_actions.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/tooltips.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/day_interactions.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/recurrence_virtual.js`
+- `rental_scheduler/static/rental_scheduler/js/calendar/call_reminders.js`
+- `rental_scheduler/static/rental_scheduler/js/workspace.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/calendar_page.js`
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/jobs_list_page.js`
 
 Definition of Done:
-- No hard-coded app-prefix URLs in JS.
+- ✅ No hard-coded app-prefix URLs in JS (verified by guard test).
 
 ---
 
-### Phase 6 — Replace HTML scraping with partial endpoints (keep UX identical)
+### Phase 6 — Replace HTML scraping with partial endpoints (keep UX identical) ✅ COMPLETED
 **Goal**: remove `fetch('/jobs/?...') + DOMParser` patterns.
 
-- Create/route a server endpoint that returns only the job table fragment.
-- Calendar search panel should request that fragment directly.
+**Status**: ✅ **COMPLETED** (2025-12-22)
+
+**What was done**:
+
+1. **Created `JobListTablePartialView`** in `rental_scheduler/views.py`
+   - Inherits from `JobListView` (reuses all filtering/sorting/pagination logic)
+   - Returns only the table fragment (`partials/job_list_table.html`) instead of the full page
+   - Endpoint: `GET /jobs/partial/table/` → `name='job_list_table_partial'`
+
+2. **Added URL route** in `rental_scheduler/urls.py`
+   - `path('jobs/partial/table/', JobListTablePartialView.as_view(), name='job_list_table_partial')`
+
+3. **Exposed endpoint in `window.GTS.urls`** (`base.html`)
+   - Added `GTS.urls.jobListTablePartial` for use by calendar search
+
+4. **Updated calendar search** in `entrypoints/calendar_page.js`
+   - Changed fetch from `GTS.urls.jobList` to `GTS.urls.jobListTablePartial`
+   - Removed `DOMParser` usage — now injects HTML directly into `#search-results`
+   - All existing behaviors preserved (loading state, keyboard navigation, row click handlers)
+
+5. **Added unit tests** (`rental_scheduler/tests/test_job_list_table_partial.py`)
+   - Verifies endpoint returns 200
+   - Verifies response is a partial (no `<html>`, `<body>` wrapper)
+   - Verifies query params (search, calendars, date_filter) work correctly
+   - Verifies parity with full `JobListView`
+
+**Files created**:
+- `rental_scheduler/tests/test_job_list_table_partial.py`
+
+**Files modified**:
+- `rental_scheduler/views.py` (added `JobListTablePartialView`)
+- `rental_scheduler/urls.py` (added route)
+- `rental_scheduler/templates/base.html` (added `GTS.urls.jobListTablePartial`)
+- `rental_scheduler/static/rental_scheduler/js/entrypoints/calendar_page.js` (switched to partial endpoint)
 
 Definition of Done:
-- Search results are fetched as a purpose-built partial.
+- ✅ Search results are fetched as a purpose-built partial.
+- ✅ No remaining `DOMParser` usage for calendar search results.
+- ✅ UX is identical to before (same table markup, same row click behavior).
 
 ---
 
@@ -545,9 +866,9 @@ Keep `panel.js` + `workspace.js` facades initially, then shrink them to wrappers
 - `cal-events-cache:*` (per-view cached event payloads)
 
 ### Panel
-- `jobPanelState`
-- `gts-panel-width`
-- `gts-panel-height`
+- `jobPanelState` (canonical store for x, y, w, h, docked, title, isOpen)
+- ~~`gts-panel-width`~~ (deprecated: migrated to `jobPanelState.w` in Phase 4)
+- ~~`gts-panel-height`~~ (deprecated: migrated to `jobPanelState.h` in Phase 4)
 - `gts-job-initial-save-attempted:*`
 
 ### Workspace
@@ -562,6 +883,9 @@ Keep `panel.js` + `workspace.js` facades initially, then shrink them to wrappers
 
 ### Calendar
 - `GET /api/job-calendar-data/`
+
+### Job list partials (Phase 6)
+- `GET /jobs/partial/table/` — returns job table fragment for calendar search (no full page wrapper)
 
 ### Job panel partials
 - `GET /jobs/new/partial/` (supports `?date=` and `?edit=`)
@@ -585,12 +909,15 @@ Keep `panel.js` + `workspace.js` facades initially, then shrink them to wrappers
 
 ## Appendix C — Existing test safety net
 - Playwright smoke tests: `tests/e2e/test_calendar_smoke.py`
+- Hard-coded URL guard: `tests/test_no_hardcoded_urls.py` (added in Phase 5)
+  - Scans all JS files for forbidden URL patterns
+  - Run standalone: `python tests/test_no_hardcoded_urls.py`
 
 Recommended additions:
-- “minimize → tab appears → restore → save”
-- “draft persists across reload”
-- “virtual occurrence materialize opens job”
-- “call reminder update/delete reflected on calendar”
+- "minimize → tab appears → restore → save"
+- "draft persists across reload"
+- "virtual occurrence materialize opens job"
+- "call reminder update/delete reflected on calendar"
 
 
 

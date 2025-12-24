@@ -11,17 +11,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 
-@pytest.fixture(autouse=True)
-def use_simple_staticfiles_storage(settings):
-    """Use simple staticfiles storage to avoid needing collectstatic."""
-    settings.STORAGES = {
-        "default": {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
-        },
-        "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-        },
-    }
+# Note: StaticFilesStorage override is now handled globally in root conftest.py
 
 
 @pytest.mark.django_db
@@ -53,6 +43,16 @@ class TestJobCreatePartial:
         # Verify form fields are present
         assert 'name="start_dt"' in content
         assert 'name="business_name"' in content
+    
+    def test_new_job_form_preselects_default_calendar(self, api_client, calendar):
+        """GET /jobs/new/partial/ without calendar param should preselect first active calendar."""
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url)
+        
+        assert response.status_code == 200
+        # Access form from context to verify calendar is preselected
+        form = response.context['form']
+        assert form['calendar'].value() == calendar.id, f"Expected calendar {calendar.id}, got {form['calendar'].value()}"
     
     def test_edit_job_form_renders(self, api_client, job):
         """GET /jobs/new/partial/?edit=<id> should return 200 and show job data."""
@@ -121,6 +121,24 @@ class TestJobCreatePartial:
         # Verify recurrence section renders
         assert 'recurrence-type' in content
 
+    def test_job_form_partial_scopes_compact_input_css_to_job_form_only(self, api_client, calendar):
+        """
+        Regression test:
+        The job form partial includes a <style> block to compact inputs. That CSS must be scoped to
+        the job form (data-gts-job-form) so it doesn't affect other forms on the page (e.g. job list search).
+        """
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+
+        # Must be scoped to the job form only
+        assert 'form[data-gts-job-form] input[type="text"]' in content
+
+        # Must NOT be a global "form input" rule (would affect the job list search form)
+        assert 'form input[type="text"]' not in content
+
 
 @pytest.mark.django_db
 class TestCallReminderCreatePartial:
@@ -149,17 +167,23 @@ class TestCallReminderCreatePartial:
         
         # Form should render successfully
         assert 'name="reminder_date"' in content
+    
+    def test_call_reminder_form_preselects_default_calendar(self, api_client, calendar):
+        """GET /call-reminders/new/partial/ without calendar param should preselect first active calendar."""
+        url = reverse('rental_scheduler:call_reminder_create_partial')
+        response = api_client.get(url, {'date': '2026-01-12'})
+        
+        assert response.status_code == 200
+        # Access form from context to verify calendar is preselected
+        form = response.context['form']
+        assert form['calendar'].value() == calendar.id, f"Expected calendar {calendar.id}, got {form['calendar'].value()}"
 
 
 @pytest.mark.django_db
 class TestJobDetailPartial:
     """Test the job_detail_partial view.
-    
-    NOTE: The template _job_detail_partial.html does not exist yet.
-    These tests document the expected behavior once the template is created.
     """
     
-    @pytest.mark.skip(reason="Template _job_detail_partial.html does not exist yet")
     def test_job_detail_renders(self, api_client, job):
         """GET /jobs/<pk>/partial/ should return 200."""
         url = reverse('rental_scheduler:job_detail_partial', args=[job.id])
@@ -207,12 +231,6 @@ class TestJobCreateSubmitValidation:
         assert response.status_code == 200
         assert Job.objects.count() == initial_count + 1
     
-    # NOTE: The following tests are skipped due to a pytest-django caching issue where
-    # the form field's required=True setting is not picked up when running through the view.
-    # The same validation is tested in test_job_form_validation.py::TestJobFormRequiredFields
-    # which passes correctly, proving the form validation works.
-    
-    @pytest.mark.skip(reason="Form validation works (see test_job_form_validation.py) but pytest-django caching causes view test to fail")
     def test_missing_business_name_returns_400(self, api_client, calendar):
         """POST without business_name should return 400 and not create job."""
         from rental_scheduler.models import Job
@@ -228,7 +246,6 @@ class TestJobCreateSubmitValidation:
         assert Job.objects.count() == initial_count
         assert 'business_name' in response.content.decode('utf-8').lower() or 'required' in response.content.decode('utf-8').lower()
     
-    @pytest.mark.skip(reason="Form validation works (see test_job_form_validation.py) but pytest-django caching causes view test to fail")
     def test_empty_business_name_returns_400(self, api_client, calendar):
         """POST with empty business_name should return 400 and not create job."""
         from rental_scheduler.models import Job
@@ -243,7 +260,6 @@ class TestJobCreateSubmitValidation:
         assert response.status_code == 400
         assert Job.objects.count() == initial_count
     
-    @pytest.mark.skip(reason="Form validation works (see test_job_form_validation.py) but pytest-django caching causes view test to fail")
     def test_whitespace_only_business_name_returns_400(self, api_client, calendar):
         """POST with whitespace-only business_name should return 400 and not create job."""
         from rental_scheduler.models import Job

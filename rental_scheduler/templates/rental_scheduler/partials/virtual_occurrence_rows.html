@@ -1,0 +1,76 @@
+{% load static %}
+{# Virtual occurrence rows for forever recurring series preview #}
+
+{% for occ in occurrences %}
+<tr class="hover:bg-gray-50 job-row virtual-occurrence-row bg-indigo-50/50"
+    data-virtual="1"
+    data-recurrence-parent-id="{{ parent.id }}"
+    data-recurrence-original-start="{{ occ.start_dt|date:'c' }}"
+    data-parent-row-id="job-row-{{ parent.id }}">
+    <td class="px-6 py-4 whitespace-nowrap text-center">
+        <div class="flex items-center justify-center">
+            <span class="text-indigo-400 mr-2" title="Virtual occurrence (click to open)">↻</span>
+            <div>
+                <div class="text-sm font-medium text-gray-900">{{ parent.display_name }}</div>
+                {% if parent.get_phone %}
+                    <div class="text-sm text-gray-500">{{ parent.get_phone }}</div>
+                {% endif %}
+            </div>
+        </div>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+              style="background-color: {{ parent.calendar.color }}20; color: {{ parent.calendar.color }};">
+            {{ parent.calendar.name }}
+        </span>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-center">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+            Virtual
+        </span>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        {{ occ.start_dt|date:"M j, Y" }}
+        {% if not parent.all_day %}
+            <br><span class="text-gray-500">{{ occ.start_dt|time:"g:i A" }}</span>
+        {% endif %}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        {{ occ.end_dt|date:"M j, Y" }}
+        {% if not parent.all_day %}
+            <br><span class="text-gray-500">{{ occ.end_dt|time:"g:i A" }}</span>
+        {% endif %}
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-600">
+            #{{ occ.occurrence_number }}
+        </span>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
+        <span class="text-indigo-600 text-xs">Click to open</span>
+    </td>
+</tr>
+{% empty %}
+<tr class="virtual-occurrence-row" data-parent-row-id="job-row-{{ parent.id }}">
+    <td colspan="7" class="px-6 py-4 text-center text-gray-500 text-sm">
+        No upcoming occurrences found.
+    </td>
+</tr>
+{% endfor %}
+
+{% if has_more %}
+<tr class="virtual-occurrence-row show-more-row bg-gray-50" 
+    data-parent-row-id="job-row-{{ parent.id }}"
+    data-parent-id="{{ parent.id }}"
+    data-current-count="{{ count }}">
+    <td colspan="7" class="px-6 py-3 text-center">
+        <button type="button" 
+                class="show-more-occurrences-btn text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                data-parent-id="{{ parent.id }}"
+                data-current-count="{{ count }}">
+            Show 5 more occurrences...
+        </button>
+    </td>
+</tr>
+{% endif %}
+

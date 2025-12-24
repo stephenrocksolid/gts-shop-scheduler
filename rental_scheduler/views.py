@@ -216,6 +216,150 @@ def _build_workorder_normalized_search_annotation():
     
     return normalized
 
+
+def _build_series_collapsed_rows(jobs, now, *, date_filter='all', include_match_counts=False):
+    """
+    Unified helper to collapse recurring series into header rows.
+    
+    Used for both search results (with match counts) and standard Jobs list.
+    Returns interleaved row items that preserve the original sort order,
+    with series headers appearing exactly where the first matching occurrence
+    would have appeared (collapse-in-place).
+    
+    Args:
+        jobs: List/queryset of Job objects (already sorted)
+        now: Current datetime (for upcoming/past classification)
+        date_filter: Date filter ('all', 'future', 'past', 'two_years', 'custom')
+        include_match_counts: If True, compute match_count for each series (for search mode)
+        
+    Returns:
+        dict with structure:
+        {
+            'upcoming': [...] or None,  # list of row dicts
+            'past': [...] or None,      # list of row dicts  
+            'has_recurring': bool,      # True if any series headers were created
+        }
+        
+    Where each row dict is either:
+        {'type': 'series', 'series': series_info} or
+        {'type': 'job', 'job': job}
+        
+    And series_info contains:
+        {
+            'parent_id': int,
+            'display_name': str,
+            'phone': str,
+            'calendar_name': str,
+            'calendar_color': str,
+            'recurrence_type': str,
+            'is_forever': bool,
+            'scope': 'upcoming' | 'past',
+            'match_count': int (only if include_match_counts=True),
+        }
+    """
+    from rental_scheduler.utils.recurrence import is_forever_series
+    
+    def get_parent_id(job):
+        """Get the parent ID for a job (itself if parent, or its recurrence_parent)."""
+        if job.recurrence_parent_id:
+            return job.recurrence_parent_id
+        elif job.recurrence_rule:
+            return job.id
+        return None
+    
+    def get_parent(job):
+        """Get the parent job object."""
+        if job.recurrence_parent_id:
+            return job.recurrence_parent
+        elif job.recurrence_rule:
+            return job
+        return None
+    
+    def determine_scope(job, date_filter):
+        """
+        Determine the scope for a job based on date filter and job timing.
+        
+        Forever parents included by future filters may have start_dt < now
+        but should still appear under 'upcoming'.
+        """
+        # Use annotated is_past_event if available, else compute
+        if hasattr(job, 'is_past_event'):
+            job_is_past = bool(job.is_past_event)
+        else:
+            job_is_past = job.start_dt < now
+        
+        # For future-oriented filters, forever parents go to 'upcoming' even if start_dt is past
+        if date_filter in ('future', 'two_years'):
+            parent = get_parent(job)
+            if parent and is_forever_series(parent):
+                return 'upcoming'
+        
+        return 'past' if job_is_past else 'upcoming'
+    
+    # Convert to list if needed
+    job_list = list(jobs) if hasattr(jobs, '__iter__') and not isinstance(jobs, list) else jobs
+    
+    # First pass: collect match counts if needed (for search mode)
+    series_match_counts = {}
+    if include_match_counts:
+        for job in job_list:
+            scope = determine_scope(job, date_filter)
+            parent_id = get_parent_id(job)
+            if parent_id:
+                key = (parent_id, scope)
+                series_match_counts[key] = series_match_counts.get(key, 0) + 1
+    
+    # Second pass: build rows, splitting into upcoming/past sections
+    upcoming_rows = []
+    past_rows = []
+    seen_series = {}  # (parent_id, scope) -> True
+    has_recurring = False
+    
+    for job in job_list:
+        scope = determine_scope(job, date_filter)
+        rows = past_rows if scope == 'past' else upcoming_rows
+        
+        parent_id = get_parent_id(job)
+        parent = get_parent(job)
+        
+        if parent_id and parent:
+            # Part of a recurring series
+            series_key = (parent_id, scope)
+            
+            if series_key not in seen_series:
+                # First occurrence - emit header
+                seen_series[series_key] = True
+                has_recurring = True
+                
+                series_info = {
+                    'parent_id': parent_id,
+                    'display_name': parent.display_name if hasattr(parent, 'display_name') else parent.business_name,
+                    'phone': parent.get_phone() if hasattr(parent, 'get_phone') else (parent.phone or ''),
+                    'calendar_name': parent.calendar.name if parent.calendar else '',
+                    'calendar_color': parent.calendar.color if parent.calendar else '#6366F1',
+                    'recurrence_type': (parent.recurrence_rule or {}).get('type', 'recurring'),
+                    'is_forever': is_forever_series(parent) if parent.recurrence_rule else False,
+                    'scope': scope,
+                }
+                
+                if include_match_counts:
+                    series_info['match_count'] = series_match_counts.get(series_key, 1)
+                
+                rows.append({'type': 'series', 'series': series_info})
+            # else: skip (collapsed under header)
+        else:
+            # Non-recurring job - emit directly
+            rows.append({'type': 'job', 'job': job})
+    
+    # For non-'all' filters, only one section will have data
+    # Return None for empty sections to match expected behavior
+    return {
+        'upcoming': upcoming_rows if upcoming_rows else None,
+        'past': past_rows if past_rows else None,
+        'has_recurring': has_recurring,
+    }
+
+
 class HomeView(TemplateView):
     template_name = 'rental_scheduler/home.html'
     
@@ -333,32 +477,73 @@ class JobListView(ListView):
             queryset = queryset.filter(calendar_id__in=calendars)
         
         # Date filter
+        # For future-looking filters, we also include "forever" recurring parents
+        # whose start_dt may be in the past but have occurrences in the future
         date_filter = self.request.GET.get('date_filter', 'all')
+        self._includes_forever_parents = False  # Track for template context
+        
+        # Build a filter for forever recurring parents (for OR-combining with date filters)
+        # Forever parents: have recurrence_rule with end='never' or no count/until_date,
+        # and no recurrence_parent (they are the parent themselves)
+        forever_parent_filter = (
+            models.Q(recurrence_parent__isnull=True) &
+            models.Q(recurrence_rule__isnull=False) &
+            (
+                models.Q(recurrence_rule__end='never') |
+                (
+                    models.Q(recurrence_rule__count__isnull=True) &
+                    models.Q(recurrence_rule__until_date__isnull=True)
+                )
+            )
+        )
+        
         if date_filter == 'custom':
             start_date = self.request.GET.get('start_date')
             end_date = self.request.GET.get('end_date')
+            date_range_filter = models.Q()
+            has_future_component = False
+            
             if start_date:
                 try:
                     start_date_obj = timezone.datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.get_current_timezone())
-                    queryset = queryset.filter(start_dt__gte=start_date_obj)
+                    date_range_filter &= models.Q(start_dt__gte=start_date_obj)
+                    if start_date_obj > timezone.now():
+                        has_future_component = True
                 except ValueError:
                     pass
             if end_date:
                 try:
                     end_date_obj = timezone.datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.get_current_timezone())
-                    queryset = queryset.filter(start_dt__lte=end_date_obj)
+                    date_range_filter &= models.Q(start_dt__lte=end_date_obj)
                 except ValueError:
                     pass
+            
+            # If filtering for a future range, also include forever parents
+            if has_future_component and date_range_filter:
+                queryset = queryset.filter(date_range_filter | forever_parent_filter)
+                self._includes_forever_parents = True
+            elif date_range_filter:
+                queryset = queryset.filter(date_range_filter)
+                
         elif date_filter == 'future':
             now = timezone.now()
-            queryset = queryset.filter(start_dt__gte=now)
+            # Include forever parents since they have future occurrences
+            queryset = queryset.filter(
+                models.Q(start_dt__gte=now) | forever_parent_filter
+            )
+            self._includes_forever_parents = True
         elif date_filter == 'past':
             now = timezone.now()
             queryset = queryset.filter(start_dt__lt=now)
         elif date_filter == 'two_years':
             now = timezone.now()
             two_years_from_now = now + timedelta(days=730)  # 2 years = 730 days
-            queryset = queryset.filter(start_dt__gte=now, start_dt__lte=two_years_from_now)
+            # Include forever parents since they have occurrences in this range
+            queryset = queryset.filter(
+                (models.Q(start_dt__gte=now) & models.Q(start_dt__lte=two_years_from_now)) |
+                forever_parent_filter
+            )
+            self._includes_forever_parents = True
         
         # Unified search across multiple fields with punctuation-insensitive matching
         # and smart fallback (strict AND first, then broaden to OR if no results)
@@ -464,8 +649,18 @@ class JobListView(ListView):
         return queryset
     
     def get_context_data(self, **kwargs):
+        from django.utils import timezone
+        from .models import Calendar
+        
         context = super().get_context_data(**kwargs)
         context['title'] = 'Jobs'
+        
+        # Fix pagination context: make 'jobs' refer to the Page object (not just the list)
+        # so templates can call .has_next, .has_other_pages, .start_index, etc.
+        # Django ListView puts the page in 'page_obj' by default, but our templates expect 'jobs'.
+        if 'page_obj' in context and context['page_obj'] is not None:
+            context['jobs'] = context['page_obj']
+        # If pagination is not active, 'jobs' will still be the queryset/list (fallback)
         
         # Add sorting context
         context['current_sort'] = getattr(self, '_effective_sort', self.request.GET.get('sort', 'start_dt'))
@@ -475,7 +670,6 @@ class JobListView(ListView):
         context['search_query'] = self.request.GET.get('search', '')
         
         # Add calendar filter context
-        from .models import Calendar
         context['calendars'] = Calendar.objects.all().order_by('name')
         
         # Get selected calendars
@@ -490,137 +684,210 @@ class JobListView(ListView):
         # Add search widened flag (True if fallback to OR matching was used)
         context['search_widened'] = getattr(self, '_search_widened', False)
         
-        return context
-
-
-class JobForm(forms.ModelForm):
-    """Custom form for Job creation with proper datetime handling"""
-    
-    # Override datetime fields to use proper widgets
-    start_dt = forms.DateTimeField(
-        required=True,
-        input_formats=[DATETIME_LOCAL_FMT, DATE_ONLY_FMT],
-        widget=forms.DateTimeInput(attrs={
-            'type': 'datetime-local',
-            'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
-            'required': True
-        }, format=DATETIME_LOCAL_FMT),
-        help_text="Start date and time of the job"
-    )
-    
-    end_dt = forms.DateTimeField(
-        required=True,
-        input_formats=[DATETIME_LOCAL_FMT, DATE_ONLY_FMT],
-        widget=forms.DateTimeInput(attrs={
-            'type': 'datetime-local',
-            'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
-            'required': True
-        }, format=DATETIME_LOCAL_FMT),
-        help_text="End date and time of the job"
-    )
-    
-    date_call_received = forms.DateTimeField(
-        required=False,
-        input_formats=[DATETIME_LOCAL_FMT, DATE_ONLY_FMT],
-        widget=forms.DateTimeInput(attrs={
-            'type': 'datetime-local',
-            'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'
-        }, format=DATETIME_LOCAL_FMT),
-        help_text="Date and time the initial call was received"
-    )
-    
-    # Override the calendar field to make it visible
-    calendar = forms.ModelChoiceField(
-        queryset=Calendar.objects.filter(is_active=True),
-        required=True,
-        widget=forms.Select(attrs={
-            'class': 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none',
-            'required': True
-        }),
-        help_text="Select which calendar this event belongs to"
-    )
-    
-    status = forms.ChoiceField(
-        choices=[
-            ('uncompleted', 'Uncompleted'),
-            ('completed', 'Completed'),
-        ],
-        required=False,
-        widget=forms.HiddenInput(),
-        initial='uncompleted'
-    )
-
-    class Meta:
-        model = Job
-        fields = [
-            'business_name', 'date_call_received', 'contact_name', 'phone',
-            'address_line1', 'address_line2', 'city', 'state', 'postal_code',
-            'start_dt', 'end_dt', 'all_day', 'repeat_type', 'notes',
-            'trailer_color', 'trailer_serial', 'trailer_details', 'repair_notes', 'quote',
-            'calendar', 'status'
-        ]
-        widgets = {
-            'business_name': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'contact_name': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'phone': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'address_line1': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'address_line2': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'city': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'state': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'postal_code': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'all_day': forms.CheckboxInput(attrs={'class': 'h-4 w-4 rounded border-gray-300 mr-2'}),
-            'repeat_type': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'notes': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none h-20 resize-none', 'rows': 3}),
-            'trailer_color': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'trailer_serial': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'trailer_details': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none'}),
-            'repair_notes': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none h-32 resize-none', 'rows': 5}),
-            'quote': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 pl-7 pr-3 py-2 text-sm focus:border-gray-400 focus:outline-none', 'placeholder': 'e.g., 500.00 or TBD'}),
-        }
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Pre-fill existing values with correct format so the browser control shows them
-        for name in ("start_dt", "end_dt", "date_call_received"):
-            if self.instance and getattr(self.instance, name, None):
-                self.fields[name].initial = getattr(self.instance, name).strftime(DATETIME_LOCAL_FMT)
-    
-    def clean(self):
-        """Custom validation to ensure end date is after start date and handle all-day normalization"""
-        from datetime import datetime, time, timedelta
+        # Add flag indicating if forever recurring parents were included
+        # (used to show appropriate badge/info in templates)
+        context['includes_forever_parents'] = getattr(self, '_includes_forever_parents', False)
         
-        cleaned_data = super().clean()
-        all_day = cleaned_data.get("all_day") or False
-        start_dt = cleaned_data.get("start_dt")
-        end_dt = cleaned_data.get("end_dt")
+        # Collapse recurring series into header rows (unified for both search and standard mode)
+        search_query = context['search_query']
+        jobs = context.get('jobs')
+        now = timezone.now()
+        date_filter = context.get('date_filter', 'all')
         
-        if not start_dt or not end_dt:
-            raise forms.ValidationError("Please select both start and end dates.")
-        
-        if all_day:
-            # Normalize to noon to avoid timezone shift issues
-            start_normalized = datetime.combine(start_dt.date(), time(12, 0, 0))
-            end_normalized = datetime.combine(end_dt.date(), time(12, 0, 0))
+        if jobs:
+            job_list = list(jobs.object_list) if hasattr(jobs, 'object_list') else list(jobs)
             
-            # Make timezone-aware if using timezone support
-            from django.utils import timezone
-            if timezone.is_aware(start_dt):
-                start_normalized = timezone.make_aware(start_normalized)
-                end_normalized = timezone.make_aware(end_normalized)
+            # Use unified helper for both modes
+            # Search mode includes match counts, standard mode doesn't
+            collapsed = _build_series_collapsed_rows(
+                job_list,
+                now,
+                date_filter=date_filter,
+                include_match_counts=bool(search_query),
+            )
             
-            # For all-day events, allow same day (equal dates) but not end before start
-            if start_normalized > end_normalized:
-                self.add_error("end_dt", "End date cannot be before start date.")
+            # Unified context for templates
+            context['job_sections'] = {
+                'upcoming': collapsed['upcoming'],
+                'past': collapsed['past'],
+            }
+            context['has_recurring'] = collapsed['has_recurring']
+            context['is_series_collapsed'] = True  # Always use collapsed rendering
             
-            cleaned_data['start_dt'] = start_normalized
-            cleaned_data['end_dt'] = end_normalized
+            # Legacy context keys for backwards compatibility (remove after templates are updated)
+            context['is_grouped_search'] = bool(search_query)
+            context['grouped_search'] = {
+                'upcoming_rows': collapsed['upcoming'],
+                'past_rows': collapsed['past'],
+            }
+            context['standard_sections'] = {
+                'upcoming': collapsed['upcoming'],
+                'past': collapsed['past'],
+            }
         else:
-            # Keep times as provided, just validate order
-            # For timed events, end must be strictly after start
-            if end_dt <= start_dt:
-                self.add_error("end_dt", "End date/time must be after start date/time.")
+            context['job_sections'] = {'upcoming': None, 'past': None}
+            context['has_recurring'] = False
+            context['is_series_collapsed'] = False
+            context['is_grouped_search'] = False
+            context['grouped_search'] = {'upcoming_rows': None, 'past_rows': None}
+            context['standard_sections'] = {'upcoming': None, 'past': None}
         
-        return cleaned_data
+        # For load-more links: determine if last job on current page is a past event
+        # (needed for boundary-safe section header insertion)
+        jobs = context.get('jobs')
+        if jobs and hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
+            if context['date_filter'] == 'all' and context['current_sort'] == 'smart':
+                # Convert to list to support negative indexing (QuerySet doesn't support it)
+                job_list = list(jobs.object_list)
+                last_job = job_list[-1]
+                if hasattr(last_job, 'is_past_event'):
+                    context['last_job_is_past_event'] = bool(last_job.is_past_event)
+                else:
+                    # Fallback: check start_dt against now
+                    context['last_job_is_past_event'] = last_job.start_dt < timezone.now()
+            else:
+                context['last_job_is_past_event'] = None
+        else:
+            context['last_job_is_past_event'] = None
+        
+        # Add pagination presenter context for footer display
+        # Use append-only mode for consistent UX: user loads more to see more items
+        self._add_pagination_presenter_context(context, is_append_mode=True)
+        
+        return context
+    
+    def _add_pagination_presenter_context(self, context, *, is_append_mode):
+        """
+        Add pagination display context for footer templates.
+        
+        Args:
+            context: Template context dict
+            is_append_mode: If True, use cumulative display (show 1 to N);
+                          if False, use page-range display (show X to Y)
+        """
+        from django.utils import timezone as tz
+        
+        jobs = context.get('jobs')
+        if not jobs or not hasattr(jobs, 'paginator'):
+            return
+        
+        # Pagination display values
+        # NOTE: Django Page's start_index, end_index, has_next, next_page_number are methods
+        context['is_append_mode'] = is_append_mode
+        # show_start: always 1 for append mode (cumulative), else current page start
+        context['show_start'] = 1 if is_append_mode else jobs.start_index()
+        context['show_end'] = jobs.end_index()
+        context['show_total'] = jobs.paginator.count
+        
+        # Build canonical next-page querystring to avoid duplication in templates
+        if jobs.has_next():
+            params = self.request.GET.copy()
+            params['page'] = jobs.next_page_number()
+            # For chunk responses, track if last job is a past event (for boundary detection)
+            if context.get('date_filter') == 'all' and context.get('current_sort') == 'smart':
+                if hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
+                    job_list = list(jobs.object_list)
+                    last_job = job_list[-1]
+                    if hasattr(last_job, 'is_past_event'):
+                        params['prev_is_past_event'] = '1' if last_job.is_past_event else '0'
+                    else:
+                        params['prev_is_past_event'] = '1' if last_job.start_dt < tz.now() else '0'
+            context['next_page_querystring'] = params.urlencode()
+        else:
+            context['next_page_querystring'] = ''
+
+
+class JobListTablePartialView(JobListView):
+    """
+    Returns only the job list table fragment (no surrounding page layout).
+    Used by the calendar search panel to avoid HTML scraping.
+    
+    For HTMX requests (HX-Request header), returns a chunk template that appends
+    rows to the existing table body, plus out-of-band updates for pagination controls.
+    """
+    template_name = 'rental_scheduler/partials/job_list_table.html'
+
+    def paginate_queryset(self, queryset, page_size):
+        """
+        Override pagination to handle out-of-range pages gracefully for HTMX requests.
+        Returns empty page instead of raising Http404.
+        """
+        from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+        from django.core.paginator import Page as DjangoPage
+        
+        paginator = Paginator(queryset, page_size)
+        page_number = self.request.GET.get('page', 1)
+        
+        is_htmx = self.request.headers.get('HX-Request') == 'true'
+        
+        # Handle empty queryset case for HTMX
+        if is_htmx and paginator.count == 0:
+            # Create an empty page manually
+            empty_page = DjangoPage([], 1, paginator)
+            return (paginator, empty_page, [], False)
+        
+        try:
+            page = paginator.page(page_number)
+        except PageNotAnInteger:
+            # If page is not an integer, deliver first page
+            page = paginator.page(1)
+        except EmptyPage:
+            if is_htmx:
+                # For HTMX chunk requests, return last valid page with empty list
+                # This allows the chunk template to render OOB updates safely
+                if paginator.num_pages > 0:
+                    page = paginator.page(paginator.num_pages)
+                    # Override object_list to empty to avoid showing stale data
+                    page.object_list = []
+                else:
+                    # Fallback: create empty page
+                    page = DjangoPage([], 1, paginator)
+            else:
+                # For non-HTMX requests, maintain default behavior (raise 404)
+                raise
+        
+        return (paginator, page, page.object_list, page.has_other_pages())
+
+    def get_template_names(self):
+        """Return chunk template for HTMX requests, full table template otherwise."""
+        is_htmx = self.request.headers.get('HX-Request') == 'true'
+        if is_htmx:
+            return ['rental_scheduler/partials/job_list_table_chunk.html']
+        return [self.template_name]
+
+    def get_context_data(self, **kwargs):
+        from django.utils import timezone as tz
+        
+        context = super().get_context_data(**kwargs)
+        # Remove 'calendars' from context - the table partial doesn't need the full calendar list
+        context.pop('calendars', None)
+        
+        # For HTMX chunk responses, add boundary detection context
+        is_htmx = self.request.headers.get('HX-Request') == 'true'
+        
+        # NOTE: Parent already sets is_append_mode=True; no need to override here.
+        
+        if is_htmx:
+            # Check if we need to insert a section header at the boundary
+            # This happens when crossing from "upcoming" to "past" in smart sort mode
+            prev_is_past_event = self.request.GET.get('prev_is_past_event')
+            if prev_is_past_event is not None:
+                context['prev_is_past_event'] = int(prev_is_past_event)
+            
+            # Determine if first row of this chunk is past event
+            jobs = context.get('jobs')
+            if jobs and hasattr(jobs, 'object_list') and len(jobs.object_list) > 0:
+                if context.get('date_filter') == 'all' and context.get('current_sort') == 'smart':
+                    # Convert to list to support indexing (QuerySet may not support it efficiently)
+                    job_list = list(jobs.object_list)
+                    first_job = job_list[0]
+                    if hasattr(first_job, 'is_past_event'):
+                        context['first_row_is_past'] = bool(first_job.is_past_event)
+                    else:
+                        # Fallback: check start_dt against now
+                        context['first_row_is_past'] = first_job.start_dt < tz.now()
+        
+        return context
 
 
 class JobDeleteView(DeleteView):
@@ -862,11 +1129,18 @@ def get_job_calendar_data(request):
                 try:
                     from rental_scheduler.utils.recurrence import is_forever_series, generate_occurrences_in_window
                     
+                    # Build filter datetime for cheap parent exclusion
+                    # (series starting after the window can't contribute)
+                    filter_end_for_parent = timezone.make_aware(
+                        datetime.combine(request_end_date + timedelta(days=1), datetime.min.time())
+                    )
+                    
                     # Find "forever" recurring parents
                     forever_parents_qs = Job.objects.select_related('calendar').filter(
                         is_deleted=False,
                         recurrence_parent__isnull=True,
                         recurrence_rule__isnull=False,
+                        start_dt__lt=filter_end_for_parent,  # Parent must start before window ends
                     ).exclude(status='canceled')
                     
                     if pg_calendar_ids:
@@ -885,13 +1159,20 @@ def get_job_calendar_data(request):
                         if not is_forever_series(parent):
                             continue
                         
-                        materialized_starts = set(
-                            Job.objects.filter(recurrence_parent=parent).values_list('recurrence_original_start', flat=True)
-                        )
-                        
-                        occurrences = generate_occurrences_in_window(
-                            parent, request_start_date, request_end_date, safety_cap=100
-                        )
+                        try:
+                            materialized_starts = set(
+                                Job.objects.filter(recurrence_parent=parent).values_list('recurrence_original_start', flat=True)
+                            )
+                            
+                            occurrences = generate_occurrences_in_window(
+                                parent, request_start_date, request_end_date, safety_cap=100
+                            )
+                        except Exception as parent_err:
+                            logger.error(
+                                f"Error generating virtual occurrences for parent job {parent.id} "
+                                f"(window: {request_start_date} to {request_end_date}): {parent_err}"
+                            )
+                            continue
                         
                         for occ in occurrences:
                             if occ.get('is_parent') or occ['start_dt'] in materialized_starts:
@@ -1450,12 +1731,19 @@ def get_job_calendar_data(request):
                         except ValueError:
                             pass
                 
+                # Build filter datetime for cheap parent exclusion
+                # (series starting after the window can't contribute)
+                filter_end_for_parent = timezone.make_aware(
+                    datetime.combine(request_end_date + timedelta(days=1), datetime.min.time())
+                )
+                
                 # Find "forever" recurring parents that could have occurrences in the window
                 # A forever series has recurrence_rule with end='never' or no count/until_date
                 forever_parents_qs = Job.objects.select_related('calendar').filter(
                     is_deleted=False,
                     recurrence_parent__isnull=True,  # Only parents
                     recurrence_rule__isnull=False,   # Has a recurrence rule
+                    start_dt__lt=filter_end_for_parent,  # Parent must start before window ends
                 ).exclude(
                     status='canceled'
                 )
@@ -1481,20 +1769,27 @@ def get_job_calendar_data(request):
                     if not is_forever_series(parent):
                         continue
                     
-                    # Get already-materialized instance starts for this parent (including soft-deleted)
-                    materialized_starts = set(
-                        Job.objects.filter(
-                            recurrence_parent=parent
-                        ).values_list('recurrence_original_start', flat=True)
-                    )
-                    
-                    # Generate virtual occurrences in the window
-                    occurrences = generate_occurrences_in_window(
-                        parent,
-                        request_start_date,
-                        request_end_date,
-                        safety_cap=100  # Limit per parent per request
-                    )
+                    try:
+                        # Get already-materialized instance starts for this parent (including soft-deleted)
+                        materialized_starts = set(
+                            Job.objects.filter(
+                                recurrence_parent=parent
+                            ).values_list('recurrence_original_start', flat=True)
+                        )
+                        
+                        # Generate virtual occurrences in the window
+                        occurrences = generate_occurrences_in_window(
+                            parent,
+                            request_start_date,
+                            request_end_date,
+                            safety_cap=100  # Limit per parent per request
+                        )
+                    except Exception as parent_err:
+                        logger.error(
+                            f"Error generating virtual occurrences for parent job {parent.id} "
+                            f"(window: {request_start_date} to {request_end_date}): {parent_err}"
+                        )
+                        continue
                     
                     for occ in occurrences:
                         # Skip parent occurrence (already in real jobs query) and materialized ones
@@ -1729,6 +2024,12 @@ def call_reminder_create_partial(request):
             initial['calendar'] = int(calendar_id)
         except (ValueError, TypeError):
             pass
+    
+    # Fallback: if no calendar was set, select the first active calendar as default
+    if 'calendar' not in initial:
+        default_calendar = Calendar.objects.filter(is_active=True).first()
+        if default_calendar:
+            initial['calendar'] = default_calendar.id
     
     form = CallReminderForm(initial=initial)
     
@@ -2215,6 +2516,12 @@ def job_create_partial(request):
             except (ValueError, TypeError):
                 pass  # Invalid calendar ID, ignore
         
+        # Fallback: if no calendar was set, select the first active calendar as default
+        if 'calendar' not in initial:
+            default_calendar = Calendar.objects.filter(is_active=True).first()
+            if default_calendar:
+                initial['calendar'] = default_calendar
+        
         form = JobForm(initial=initial)
     
     return render(request, 'rental_scheduler/jobs/_job_form_partial.html', {
@@ -2383,6 +2690,68 @@ def job_create_submit(request):
                 # Generate recurring instances for non-forever series
                 job.generate_recurring_instances()
                 logger.info(f"Created recurring job {job.id} with {recurrence_type} recurrence ({count or 'until ' + str(until_date)} occurrences)")
+        
+        # Handle recurring event updates (finite -> forever conversion)
+        elif recurrence_enabled and job_id and job.is_recurring_parent:
+            # Only allow editing recurring parents (not instances)
+            if job.recurrence_parent:
+                messages.error(request, 'Cannot edit recurrence for an instance. Edit the parent series instead.')
+                return redirect('rental_scheduler:job_list')
+            
+            # Parse recurrence settings from form
+            recurrence_end_mode = request.POST.get('recurrence_end', 'never')
+            
+            # Update recurrence rule based on end mode
+            if recurrence_end_mode == 'never':
+                # Converting to forever series
+                rule = job.recurrence_rule or {}
+                rule['end'] = 'never'
+                rule['count'] = None
+                rule['until_date'] = None
+                job.recurrence_rule = rule
+                job.save(update_fields=['recurrence_rule'])
+                logger.info(f"Updated job {job.id} to forever recurring series")
+            elif recurrence_end_mode == 'after_count':
+                # Converting to finite count series
+                recurrence_count_raw = request.POST.get('recurrence_count')
+                if recurrence_count_raw:
+                    try:
+                        count = int(recurrence_count_raw)
+                        if count < 1:
+                            messages.error(request, 'Recurrence count must be at least 1.')
+                            return redirect('rental_scheduler:job_list')
+                        if count > 500:
+                            messages.error(request, 'Recurrence count cannot exceed 500 occurrences.')
+                            return redirect('rental_scheduler:job_list')
+                        
+                        rule = job.recurrence_rule or {}
+                        rule['count'] = count
+                        rule['until_date'] = None
+                        if 'end' in rule:
+                            del rule['end']
+                        job.recurrence_rule = rule
+                        job.save(update_fields=['recurrence_rule'])
+                        logger.info(f"Updated job {job.id} to finite count recurring series (count={count})")
+                    except (TypeError, ValueError):
+                        messages.error(request, 'Recurrence count must be a whole number.')
+                        return redirect('rental_scheduler:job_list')
+            elif recurrence_end_mode == 'on_date':
+                # Converting to finite date series
+                recurrence_until_raw = request.POST.get('recurrence_until')
+                if recurrence_until_raw:
+                    try:
+                        until_date = datetime.strptime(recurrence_until_raw, DATE_ONLY_FMT).date()
+                        rule = job.recurrence_rule or {}
+                        rule['count'] = None
+                        rule['until_date'] = until_date.isoformat()
+                        if 'end' in rule:
+                            del rule['end']
+                        job.recurrence_rule = rule
+                        job.save(update_fields=['recurrence_rule'])
+                        logger.info(f"Updated job {job.id} to finite date recurring series (until={until_date})")
+                    except ValueError:
+                        messages.error(request, 'Recurrence end date must be a valid date (YYYY-MM-DD).')
+                        return redirect('rental_scheduler:job_list')
         
         logger.info(f"Job saved successfully: {job.id}")
         # Return a simple success response that triggers the close action

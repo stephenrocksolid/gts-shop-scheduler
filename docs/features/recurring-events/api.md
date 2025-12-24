@@ -1,4 +1,6 @@
-# Recurring Events API Documentation
+# Recurring Events API
+
+Last updated: 2025-12-22
 
 ## Overview
 The recurring events API provides full support for Google Calendar-like recurring job management.
@@ -124,30 +126,165 @@ This cancels all recurring instances on or after the specified date.
 
 ---
 
-### 4. Delete with Scope
+### 4. Delete with Scope (Soft Delete)
 
-**Endpoint:** `DELETE /api/jobs/<id>/delete-recurring/?scope=<scope>`
+**Endpoint:** `POST /api/jobs/<id>/delete-recurring/`
 
-**Query Parameters:**
-- `scope`: One of `"this_only"`, `"all"`, or `"future"`
+**Request Body:**
+```json
+{
+  "delete_scope": "this_only"
+}
+```
 
-**Scopes:**
-- `this_only`: Delete only this job (default)
-- `all`: Delete entire series (parent + all instances)
-- `future`: Delete this and all future instances
+**Delete Scopes:**
+- `"this_only"`: Soft delete only this job (default). **Note:** Deleting only the parent is rejected with 400 error if instances exist.
+- `"this_and_future"`: Soft delete this and all future instances. Also truncates `end_recurrence_date` to prevent virtual occurrences from being generated beyond the deleted boundary.
+  - For instances: Sets parent's `end_recurrence_date` to day before the deleted instance
+  - For parent: Deletes all instances and sets `end_recurrence_date` to parent's start date (keeps parent itself)
+- `"all"`: Soft delete entire series (parent + all instances)
+
+**Important:** This endpoint uses **soft delete** (`is_deleted=True`) instead of hard delete to:
+- Prevent cascading deletes of related objects (WorkOrders, CallReminders)
+- Keep deleted occurrences in DB so calendar feed can avoid re-emitting them as virtual occurrences
+- Maintain consistency with the rest of the app's delete behavior
 
 **Response:**
 ```json
 {
   "success": true,
   "deleted_count": 5,
-  "scope": "future"
+  "scope": "this_and_future"
+}
+```
+
+**Error Response (attempting to delete parent only):**
+```json
+{
+  "status": "error",
+  "error": "Cannot delete only the series template. Choose to delete the entire series or delete this and future events."
+}
+```
+
+**Legacy Support:**
+
+The backend also accepts DELETE method with query parameter:
+
+`DELETE /api/jobs/<id>/delete-recurring/?scope=<scope>`
+
+However, POST with JSON body is preferred for consistency.
+
+---
+
+### 5. Materialize Virtual Occurrence (Forever Series)
+
+The calendar feed can include **virtual** occurrences for never-ending series. This endpoint creates (or returns) the real `Job` row for a specific occurrence.
+
+**How virtual occurrences work:**
+
+- Forever series (with `recurrence_rule.end === 'never'`) don't pre-generate all instances as DB rows
+- Instead, the calendar feed generates `virtual_job` and `virtual_call_reminder` events on-the-fly for the requested date window
+- Virtual occurrences work correctly for windows far into the future (4+ years ahead) thanks to a fast-forward optimization
+- When a user clicks on a virtual occurrence, the frontend calls this endpoint to "materialize" it into a real Job row
+
+**Endpoint:** `POST /api/recurrence/materialize/`
+
+**Request Body:**
+
+```json
+{
+  "parent_id": 123,
+  "original_start": "2026-02-20T10:00:00"
+}
+```
+
+**Response:**
+
+```json
+{
+  "job_id": 456,
+  "created": true,
+  "job": { "id": 456, "recurrence_parent_id": 123, "...": "..." }
 }
 ```
 
 ---
 
-### 5. Get Calendar Data (Updated)
+### 6. Preview Upcoming Occurrences (Forever Series)
+
+Returns an HTML fragment containing the next N virtual occurrences for a forever recurring series. Used by the Jobs list and Calendar Search Panel to show expandable preview rows.
+
+**Endpoint:** `GET /api/recurrence/preview/`
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `parent_id` | int | Yes | ID of the forever recurring parent job |
+| `count` | int | No | Number of occurrences to return (default: 5, max: 200) |
+
+**Response:** HTML fragment containing `<tr>` elements for each virtual occurrence.
+
+Each virtual occurrence row includes:
+
+- `data-virtual="1"` - Marks the row as a virtual occurrence
+- `data-recurrence-parent-id` - The parent job ID
+- `data-recurrence-original-start` - ISO datetime for the occurrence start
+- `data-parent-row-id` - Reference to the parent row for JS manipulation
+
+**Load-More Behavior:**
+
+- For forever series, a "Show 5 more" button is always displayed until the maximum count (200) is reached
+- Users can repeatedly click "Show more" to incrementally load additional occurrences
+- This avoids loading hundreds of occurrences at once while still allowing deep exploration
+
+**Error Responses:**
+
+- `400` - Missing `parent_id`, job is not a forever series, or job is an instance (not a parent)
+- `404` - Job not found
+
+---
+
+### 7. Series Occurrences (Grouped Search)
+
+Returns an HTML fragment with materialized + virtual occurrences for a recurring series, filtered by search query and scope. Used by the Jobs list when search is active to expand series header rows.
+
+**Endpoint:** `GET /api/recurrence/series-occurrences/`
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `parent_id` | int | Yes | ID of the recurring parent job |
+| `scope` | string | Yes | `upcoming` or `past` - which occurrences to return |
+| `search` | string | No | Search query to filter occurrences |
+| `count` | int | No | Number of occurrences to return (default: 10, max: 50) |
+| `offset` | int | No | Offset for pagination (default: 0) |
+
+**Response:** HTML fragment containing `<tr>` elements for each occurrence.
+
+Each occurrence row includes:
+
+- `data-series-id` - The parent job ID
+- `data-series-scope` - The scope (`upcoming` or `past`)
+- `data-job-id` - For materialized jobs, the job ID
+- `data-virtual="1"` - For virtual occurrences only
+
+**Behavior:**
+
+- Returns materialized occurrences (parent + instances) filtered by search and scope
+- For forever series where parent matches search, also returns virtual occurrences
+- Supports pagination with `offset` and `count` parameters
+- Includes "Show more" button when more results are available
+
+**Error Responses:**
+
+- `400` - Missing `parent_id`, invalid scope, or job is an instance (not a parent)
+- `404` - Job not found
+
+---
+
+### 8. Get Calendar Data (Updated)
 
 **Endpoint:** `GET /api/job-calendar-data/`
 
@@ -202,6 +339,8 @@ This cancels all recurring instances on or after the specified date.
 ---
 
 ## Frontend Integration Examples
+
+**Important (project rule):** this codebase forbids hard-coded app URLs in JS. If you add frontend code that calls these endpoints, inject them into `window.GTS.urls` (in `base.html`) and call them via the `GTS.urls.*` helpers (see `docs/reference/urls-and-routing.md`).
 
 ### Detecting Recurring Events
 
@@ -291,22 +430,53 @@ function cancelFutureRecurrences(jobId, fromDate) {
 
 ### Deleting with Scope
 
+**Recommended Implementation (with modal):**
+
+The app includes a built-in recurring delete modal in `job_form_partial.js` that:
+- Automatically detects recurring jobs from the form DOM
+- Shows appropriate options for instances vs. parent
+- Uses user-friendly copy (no internal terms)
+- Handles all scope logic
+
+```javascript
+// Automatic detection and modal - already implemented in job_form_partial.js
+function deleteJob(jobId) {
+    var recurrenceState = detectRecurrenceState();
+    
+    if (recurrenceState.isRecurring) {
+        showRecurringDeleteModal(jobId, recurrenceState.isInstance);
+    } else {
+        // Simple confirm for non-recurring jobs
+        if (confirm('Are you sure you want to delete this job?')) {
+            fetch(GTS.urls.jobDelete(jobId), { method: 'POST', ... });
+        }
+    }
+}
+```
+
+**Manual Implementation (if needed):**
+
 ```javascript
 function deleteWithScope(jobId, scope) {
-    if (!confirm(`Delete ${scope === 'all' ? 'entire series' : scope}?`)) {
-        return;
-    }
-    
-    fetch(`/api/jobs/${jobId}/delete-recurring/?scope=${scope}`, {
-        method: 'DELETE',
-        headers: {
-            'X-CSRFToken': getCsrfToken(),
-        }
+    fetch(GTS.urls.jobDeleteRecurring(jobId), {
+        method: 'POST',
+        headers: GTS.csrf.headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ delete_scope: scope })
     })
     .then(response => response.json())
     .then(data => {
-        alert(`Deleted ${data.deleted_count} job(s)`);
-        calendar.refetchEvents();
+        if (data.success) {
+            GTS.showToast(`Deleted ${data.deleted_count} event(s)`, 'success');
+            if (window.jobCalendar && window.jobCalendar.calendar) {
+                window.jobCalendar.calendar.refetchEvents();
+            }
+        } else {
+            GTS.showToast('Failed to delete: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting job:', error);
+        GTS.showToast('Error deleting job', 'error');
     });
 }
 ```
@@ -374,35 +544,11 @@ This verifies:
 
 ---
 
-## Next Steps for Frontend
+## Frontend status
 
-1. **Add Recurring UI to Job Form**
-   - Checkbox: "Make this a recurring event"
-   - Dropdown: Recurrence type (Monthly, Yearly, etc.)
-   - Input: Interval (Every N months/years)
-   - Input: End after X occurrences or by date
+Recurring UI (including virtual occurrence materialization) is implemented in the current frontend.
 
-2. **Show Recurring Indicators**
-   - Add icon/badge to recurring events on calendar
-   - Distinguish between parent and instance events
+References:
 
-3. **Update Edit Dialog**
-   - Show scope options for recurring instances
-   - Add "Cancel future occurrences" button
-   - Add "Delete series" option
-
-4. **Update Delete Dialog**
-   - Show scope options (this only, all, future)
-   - Warn user about cascade effects
-
-5. **Add Recurrence Info Panel**
-   - Show recurrence pattern in job details
-   - Link to parent event
-   - Show occurrence number (e.g., "3 of 12")
-
-
-
-
-
-
-
+- `docs/architecture/frontend.md`
+- `rental_scheduler/static/rental_scheduler/js/calendar/recurrence_virtual.js`

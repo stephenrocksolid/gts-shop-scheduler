@@ -1,0 +1,19 @@
+---
+alwaysApply: true
+---
+
+## Canonical references
+
+- Backend architecture: `docs/architecture/backend.md`
+- URL strategy: `docs/reference/urls-and-routing.md`
+- Data model overview: `docs/architecture/data-model.md`
+
+## Hard rules
+
+- Preserve Django **URL names** for routes used by the frontend. If you add/change a route that JS needs:
+  - add it to `rental_scheduler/urls.py`
+  - inject it into `window.GTS.urls` in `rental_scheduler/templates/base.html`
+  - optionally add a helper wrapper in `static/.../js/shared/urls.js`
+- Prefer **partial endpoints** for fragment fetches; don’t reintroduce “fetch full HTML page + DOM scrape” patterns.
+- If you change the calendar feed schema (`/api/job-calendar-data/`), update docs and validate calendar JS still supports it.
+

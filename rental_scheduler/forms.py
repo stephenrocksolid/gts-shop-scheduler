@@ -36,12 +36,33 @@ class JobForm(forms.ModelForm):
             'type': 'datetime-local'
         })
     )
+
+    # Optional: date the initial call was received (model field is DateTimeField).
+    # The panel UI currently uses an <input type="date">, so accept date-only values.
+    date_call_received = forms.DateTimeField(
+        required=False,
+        input_formats=['%Y-%m-%dT%H:%M', '%Y-%m-%d'],  # datetime-local and date-only
+        widget=forms.DateTimeInput(attrs={
+            'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
+            'type': 'date'
+        })
+    )
+
+    # The panel form currently doesn't submit a status field (status changes are handled via
+    # separate "Mark Complete/Uncompleted" actions). Keep this non-required so job creation
+    # via the panel doesn't fail validation when status isn't present in POST.
+    status = forms.ChoiceField(
+        choices=Job.STATUS_CHOICES,
+        required=False,
+        widget=forms.HiddenInput(),
+        initial='uncompleted',
+    )
     
     class Meta:
         model = Job
         fields = [
             'calendar',  # Added calendar as a required field
-            'business_name', 'contact_name', 'phone',
+            'business_name', 'date_call_received', 'contact_name', 'phone',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'start_dt', 'end_dt', 'all_day',
             'has_call_reminder', 'call_reminder_weeks_prior', 'call_reminder_completed',

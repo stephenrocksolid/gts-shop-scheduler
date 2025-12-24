@@ -1,177 +1,245 @@
-## Context
+### Feature plan: recurring delete prompt ("delete future events too?")
 
-Goal: **port only the valuable changes** from the archived WIP branch `origin/wip/steph-pre-sync-2025-12-16` (tip commit `834babd`) onto the now-updated `master`, without rebasing/merging huge rewritten UI files.
+**Status: IMPLEMENTED** ✅
 
-Working branch: `port/wip-2025-12-16` (tracks `origin/port/wip-2025-12-16`).
+Implementation completed on Dec 22, 2025. All backend and frontend components are in place.
 
-Guiding principles:
-- Keep the WIP branch immutable (time capsule / rollback point)
-- Port in small, reviewable slices (one “intent” per commit)
-- Re-implement intent on top of today’s architecture instead of copying entire large files
-- Don’t rewrite historical migrations; express schema/data intent as *new* migrations when needed
+### Summary / goal
+When a user clicks **Delete** on a job that’s part of a recurring series, we should show a **multi-option confirmation** that clearly answers:
 
-## Phase 0 (baseline) — status
+- **Delete only this event**, or
+- **Delete this and all future events** (truncate the series)
 
-- ✅ Created/checked out `port/wip-2025-12-16` from updated `master` (currently `17bd7f2`)
-- ⏳ Baseline “green” verification (tests) should be re-run on this branch if not already captured
+This should be consistent with existing recurrence “scope” concepts (`this_only`, `this_and_future`, `all`), avoid hard-coded URLs, and be safe (no accidental cascade deletes).
 
-## Phase 1 (inventory) — results
+### Why this is needed (current behavior)
+- The job form currently deletes via a single confirm and `POST` to `GTS.urls.jobDelete(jobId)` (soft delete: sets `Job.is_deleted=True`).  
+  - Code: `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js` (`deleteJob()`).
+- The backend already has a scoped recurring delete endpoint: `job_delete_api_recurring` at:
+  - `POST /api/jobs/<pk>/delete-recurring/` with body `{ "delete_scope": "this_only" | "this_and_future" | "all" }`
+  - Route: `rental_scheduler/urls.py` → name `rental_scheduler:job_delete_api_recurring`
+  - View: `rental_scheduler/views_recurring.py::job_delete_api_recurring`
+- **Important mismatch to address in implementation**:
+  - `delete_job_api` (current UI) is **soft delete**.
+  - `job_delete_api_recurring` and `utils.recurrence.delete_recurring_instances()` currently use `.delete()` (hard delete), which can cascade to `WorkOrder` / `CallReminder` (and is inconsistent with the rest of the app’s delete behavior).
 
-### 1) What the WIP branch contains
+### UX requirements (user-friendly)
+- **Use a custom modal** (not `window.confirm`) so we can offer multiple choices.
+- **Clear, human copy** (no internal terms like “scope”).
+- **Safe defaults**:
+  - Default focused button should be **Cancel** (or the least destructive option).
+  - Destructive actions should be visually “danger” styled.
+- **Accessibility**:
+  - ESC closes (Cancel).
+  - Focus is trapped within the modal while open.
+  - Enter triggers the focused button.
+- **Idempotent on HTMX swaps**:
+  - Must not double-bind handlers (follow `GTS.initOnce(...)` + delegation patterns already used).
 
-- WIP head commit: `834babd` (“WIP: snapshot local changes before syncing with origin/master”)
-- Common ancestor with updated master (merge-base): `35b4b55` (“Last updates”)
-- The WIP branch is **exactly 1 commit** on top of the merge-base.
+### UX flow & copy
+#### A) User deletes a recurring **instance** (most common)
+Trigger: user clicks the **Delete** button in the job panel for a job that is part of a series *and* is an **instance**.
 
-This matters because a naive `master..wip` diff includes lots of unrelated churn caused by master moving forward after `35b4b55`. The items below are the *WIP-only* changes we should evaluate for porting.
+Detection approach (no extra network calls):
+- In the job form DOM (`_job_form_partial.html`), `#recurrence-enabled` is checked for recurring jobs.
+- For **instances**, it is also `disabled`.
 
-### 2) WIP-only changed files (35b4b55..834babd)
+Modal content:
+- **Title**: “Delete recurring event?”
+- **Body**:
+  - “This event is part of a series. What would you like to delete?”
+  - Include a short note: “Past events won’t be deleted.”
+- **Buttons**:
+  - “Cancel”
+  - “Delete this event only”
+  - “Delete this and future events”
+  - (Optional, if desired) “Delete entire series” (maps to `all`) — include only if we want a full-series option in the UI.
 
-**Docs deleted (likely not valuable to re-apply):**
-- `BUG_FIX_SUMMARY.md`
-- `JSON_EXPORT_IMPORT_GUIDE.md`
-- `JSON_EXPORT_IMPORT_IMPLEMENTATION_SUMMARY.md`
-- `SERVER_FIX_CALL_REMINDERS.md`
+Behavior:
+- “Delete this event only” → `delete_scope="this_only"`
+- “Delete this and future events” → `delete_scope="this_and_future"`
 
-**Whitespace/no-op changes (ignore):**
-- `rental_scheduler/management/commands/fix_call_reminder_dates.py` (trailing newlines only)
-- `rental_scheduler/migrations/0029_fix_call_reminder_dates.py` (trailing newlines only)
-- `rental_scheduler/migrations/0030_add_callreminder_model.py` (trailing newlines only)
-- `rental_scheduler/migrations/0034_alter_job_quote_to_charfield.py` (trailing newlines only)
-- `rental_scheduler/migrations/0035_alter_job_quote_add_default.py` (trailing newlines only)
-- `rental_scheduler/templates/rental_scheduler/jobs/job_import_json.html` (trailing newlines only)
+#### B) User deletes a recurring **parent / series template** (less common)
+Trigger: user clicks **Delete** while viewing the series template (parent job).
 
-**Already integrated upstream (no port needed):**
-- `rental_scheduler/templates/rental_scheduler/jobs/_job_form_partial.html`: correct datetime formatting (`Y-m-d\\TH:i`) for non-all-day edits is already present on updated master.
-- `rental_scheduler/templates/rental_scheduler/calendar.html`: search input padding fix is already present (inline `padding-left: 36px;`).
+We should **not** offer “Delete this event only” for the parent unless we implement parent promotion (complex and risky).
 
-**Meaningful changes (candidate “must keep”):**
-- `rental_scheduler/utils/recurrence.py`
-  - Monthly recurrence should preserve the same weekday occurrence (e.g., “3rd Friday” stays “3rd Friday”)
-  - Yearly recurrence should preserve the same ISO week + weekday
-  - Recurring instances should copy call reminder flags and create `CallReminder` rows for each instance
-- `rental_scheduler/models.py`
-  - Add `daily` + `weekly` to `REPEAT_CHOICES` (aligns with existing migration choices)
-  - Make `create_recurrence_rule()` accept `until_date` as date/datetime/ISO string and store a date-only value
-- `rental_scheduler/views.py`
-  - Add `date_filter=two_years` to `JobListView`
-  - Make job search match phone numbers by **digits** (so searching `6208887050` matches `(620) 888-7050`)
-  - Improve sorting robustness (handle `-field` and set default sort for the 2-year filter)
-  - Validate/parses recurrence inputs in `job_create_submit` (interval/count/until date)
-- `rental_scheduler/static/rental_scheduler/js/job_calendar.js` + `rental_scheduler/templates/rental_scheduler/calendar.html`
-  - Add a “Today sidebar” toggle button with persisted state
-  - Add “Events within 2 years” option in calendar search
-  - Add “Close Search” button
-  - Add delayed tooltips on search-result rows (same UX as calendar event tooltips)
-- `rental_scheduler/static/rental_scheduler/js/workspace.js`
-  - Add delayed tooltips on workspace tabs by fetching job details and reusing `jobCalendar.showEventTooltip()`
+Modal content:
+- **Title**: “Delete recurring series?”
+- **Body**:
+  - “This is the series template. Choose what should happen:”
+- **Buttons**:
+  - “Cancel”
+  - “Delete entire series” (maps to `all`) (primary destructive path)
+  - “Keep this event, delete future events” (truncate series) (maps to `this_and_future`, semantics described below)
 
-**Probably don’t port as-is:**
-- `rental_scheduler/templates/rental_scheduler/partials/job_row.html`: WIP added many `data-*` attributes, but references old/removed fields (`job.business`, `job.contact`, `job.trailer`). If we want row tooltips, we should implement them by fetching `/api/jobs/<id>/detail/` (or adapt attributes to current model).
+### Backend behavior (data safety + correct "future" meaning) ✅ IMPLEMENTED
+#### Key design decision: recurring delete should be **soft delete**
+To match `delete_job_api` and prevent cascading deletes of related objects:
+- Replace `.delete()` usage in recurring delete paths with `is_deleted=True` updates.
+- Keep “deleted occurrences” in DB so:
+  - the calendar feed can avoid re-emitting deleted virtual occurrences (it already treats “materialized starts” as “exists even if soft-deleted”).
 
-### 3) Phase 1 “must keep” candidates (shortlist)
+#### Implement/adjust semantics per scope
+Update `job_delete_api_recurring` (`rental_scheduler/views_recurring.py`) to:
+- Return a consistent response shape (match the existing API pattern):
+  - `{ "success": true, "deleted_count": <int>, "scope": "<scope>" }`
+  - (Optionally keep `status: "success"` for backward compatibility if anything uses it.)
 
-1. **Recurrence correctness**: monthly/yearly patterns should stay aligned to “Nth weekday” and ISO-week rules.
-2. **Call reminders for recurring instances**: recurring generation should propagate reminder settings and create per-instance `CallReminder` rows.
-3. **Calendar search “within 2 years”**: add UI option + backend filter support.
-4. **Phone digit search**: searching digits should match formatted phone numbers.
-5. **Recurrence validation in form submit**: prevent bad interval/count/until input and avoid passing raw strings into model methods.
-6. **Today sidebar toggle**: make Today column hide/show, persisted in `localStorage`.
-7. **Tooltips**: optional but nice—job row hover tooltip + workspace tab hover tooltip.
+Scope details (proposed):
+- **`this_only`**
+  - Instance: soft delete that one job (`job.is_deleted=True`).
+  - Parent: **UI should not call this**, but backend should guard:
+    - Either reject with 400 (“Cannot delete only the series template; choose series/future”), or
+    - Treat as `all` (safer, but surprising). Prefer explicit 400.
+- **`this_and_future`**
+  - Instance:
+    - Soft delete the selected instance and all instances where `recurrence_original_start >= selected.recurrence_original_start`.
+    - **Also truncate virtual occurrences** by setting `parent.end_recurrence_date` so future virtual events stop:
+      - `parent.end_recurrence_date = (selected.recurrence_original_start.date() - 1 day)`
+      - This prevents “forever” series from continuing to generate virtual events beyond the deleted boundary.
+  - Parent:
+    - Soft delete all instances (future occurrences).
+    - Truncate recurrence generation so it ends after the parent occurrence:
+      - `parent.end_recurrence_date = parent.start_dt.date()`
+    - Keep the parent job itself not deleted.
+- **`all`**
+  - Soft delete parent + all instances (series disappears entirely).
 
-## Concrete port plan (Phase 2+) — recommended commit order
+Also update (or bypass) `rental_scheduler/utils/recurrence.py::delete_recurring_instances()`:
+- Change from `queryset.delete()` to `queryset.update(is_deleted=True)`.
+- Ensure filters include/exclude `is_deleted` appropriately so “deleted_count” is accurate.
 
-Each item below should be a **separate commit** on `port/wip-2025-12-16` with a message like: `Port: <intent> (from 834babd)`.
+### Frontend implementation plan ✅ IMPLEMENTED
+#### 1) URL plumbing (no hard-coded URLs)
+Add the recurring delete endpoint to the JS URL registry:
+- `rental_scheduler/templates/base.html`
+  - Inject: `GTS.urls.jobDeleteRecurringTemplate = "{% url 'rental_scheduler:job_delete_api_recurring' pk=0 %}".replace('/0/', '/{job_id}/');`
+- `rental_scheduler/static/rental_scheduler/js/shared/urls.js`
+  - Add convenience wrapper:
+    - `GTS.urls.jobDeleteRecurring(jobId)` → interpolates the template
 
-### Commit A — Models: recurrence rule parsing + repeat choices
+Docs to update when this contract changes:
+- `docs/reference/urls-and-routing.md` (add template + wrapper mention)
+- `docs/reference/frontend-globals.md` (add the new `GTS.urls.*Template` entry)
 
-Files:
-- `rental_scheduler/models.py`
+#### 2) Recurring delete modal + handler wiring
+Update `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js`:
+- Replace the current `confirm(...)` delete flow with:
+  - Detect recurrence state from the current panel DOM:
+    - `const recurCheckbox = document.querySelector('#job-panel #recurrence-enabled')`
+    - recurring if `recurCheckbox?.checked === true`
+    - instance if `recurCheckbox?.disabled === true`
+    - parent if checked and not disabled
+  - If non-recurring: keep the existing simple confirm + `GTS.urls.jobDelete(jobId)` behavior.
+  - If recurring:
+    - Show the modal described above.
+    - On selection:
+      - Call `fetch(GTS.urls.jobDeleteRecurring(jobId), { method: 'POST', headers: ..., body: JSON.stringify({ delete_scope }) })`
+    - After success:
+      - Close panel (`JobPanel.close()`).
+      - Refresh calendar (`jobCalendar.calendar.refetchEvents()` if present).
+      - Show toast (“Deleted 1 event”, “Deleted 8 events”, etc.).
 
-Changes:
-- Add `('daily', 'Daily')` and `('weekly', 'Weekly')` to `REPEAT_CHOICES` (align with migration `0023_*` choices).
-- Update `create_recurrence_rule(..., until_date=...)` to accept:
-  - `date`
-  - `datetime`
-  - ISO-8601 string (e.g., `YYYY-MM-DD` or full datetime)
-  and store `recurrence_rule['until_date']` as a **date-only `YYYY-MM-DD` string**.
+Implementation details:
+- Keep everything inside the existing `initStatusDeleteHandlers()` init-once block (so it’s idempotent).
+- Build the modal DOM the same way `calendar/job_actions.js` builds the unsaved-changes dialog:
+  - overlay div + dialog div + button listeners
+  - ESC + overlay click closes
+  - focus management (focus first actionable element, trap tab)
+- If there are unsaved changes in the panel, add a small note:
+  - “You have unsaved changes. Deleting will discard them.”
 
-Tests:
-- Add a small unit test that `create_recurrence_rule(until_date="2026-01-15")` succeeds and stores `"2026-01-15"`.
+### Testing plan (smallest effective tests)
+#### Backend (pytest/Django client) — `rental_scheduler/tests/`
+Add tests around `job_delete_api_recurring`:
+- **Instance + `this_only`**: only that instance becomes `is_deleted=True`.
+- **Instance + `this_and_future`**:
+  - instance + later instances become deleted
+  - earlier instances remain
+  - parent `end_recurrence_date` is set to day before the deleted boundary
+- **Parent + `this_and_future`**:
+  - instances deleted
+  - parent not deleted
+  - parent `end_recurrence_date` set to parent date
+- **All + `all`**:
+  - parent + all instances deleted
+- **Parent + `this_only`**: 400 with helpful error (if we choose the guard behavior).
 
-### Commit B — Recurrence engine: monthly/yearly correctness + call reminders for instances
+#### E2E (Playwright) — `tests/e2e/test_calendar_smoke.py`
+Extend existing flows (prefer adding to existing recurrence-related tests):
+- Create a recurring series with at least 3 occurrences.
+- Open the **middle** occurrence in the panel, click Delete, choose:
+  - “Delete this event only” → confirm only that occurrence disappears from calendar.
+  - “Delete this and future events” → confirm middle + later occurrences disappear, earlier remains.
 
-Files:
-- `rental_scheduler/utils/recurrence.py`
+### Documentation updates
+- If we adjust backend response or semantics, update:
+  - `docs/features/recurring-events/api.md` (delete endpoint response + scope meaning)
+- If we introduce new URL globals/wrappers, update:
+  - `docs/reference/frontend-globals.md`
+  - `docs/reference/urls-and-routing.md`
 
-Changes:
-- Monthly: preserve “Nth weekday” (e.g., 3rd Friday → 3rd Friday next month).
-- Yearly: preserve ISO week + weekday in the target year.
-- When generating instances:
-  - copy `has_call_reminder` and `call_reminder_weeks_prior`
-  - reset `call_reminder_completed=False`
-  - create a `CallReminder` row for each saved instance (using `get_call_reminder_sunday`)
+### Rollout / migration notes
+- No migrations required.
+- Ship backend soft-delete changes first (safe), then enable the frontend modal.
+- After implementation, this planning document should be moved to `docs/archive/` per repo convention.
 
-Tests:
-- Monthly Nth-weekday test (e.g., known 3rd-Friday date → next month’s 3rd Friday).
-- Call reminder propagation test: generating instances with call reminders creates corresponding `CallReminder` rows.
+### Open questions (decide before implementation)
+- Should the modal include "Delete entire series" for instances (scope `all`)? **DECISION: Not included in initial implementation for simplicity**
+- Should we ever support "Delete just this occurrence" for a parent event (requires series parent promotion / restructuring)? **DECISION: No - guarded with 400 error**
+- Do we want "Remember my choice" (would add a storage key contract + docs update)? **DECISION: Not included in initial implementation**
 
-### Commit C — Views: validate recurring inputs on `job_create_submit`
+---
 
-Files:
-- `rental_scheduler/views.py`
+## Implementation Summary
 
-Changes:
-- Validate `recurrence_interval` and `recurrence_count` are integers, `>= 1`, and `count <= 500`.
-- Parse `recurrence_until` from `YYYY-MM-DD` into a `date` (show a friendly message on parse failure).
+### Completed Changes
 
-### Commit D — Job list + calendar search: two-year filter + phone digit search + sorting robustness
+#### Backend (`rental_scheduler/views_recurring.py` & `rental_scheduler/utils/recurrence.py`)
+- ✅ Updated `job_delete_api_recurring` to use soft delete (`is_deleted=True`) instead of hard delete
+- ✅ Implemented proper scope semantics:
+  - `this_only`: Soft deletes single job; guards against deleting parent-only
+  - `this_and_future`: Soft deletes current + future instances, truncates `end_recurrence_date`
+  - `all`: Soft deletes entire series (parent + all instances)
+- ✅ Updated `delete_recurring_instances()` utility to use soft delete
+- ✅ Consistent response format: `{ "success": true, "deleted_count": N, "scope": "..." }`
 
-Files:
-- `rental_scheduler/views.py`
+#### Frontend
+- ✅ Added `jobDeleteRecurringTemplate` URL to `base.html` (line 166)
+- ✅ Added `GTS.urls.jobDeleteRecurring(jobId)` helper to `urls.js`
+- ✅ Implemented recurring delete modal in `job_form_partial.js`:
+  - Detects recurrence state from DOM (`#recurrence-enabled` checkbox)
+  - Shows appropriate modal for instances vs. parent
+  - User-friendly copy (no internal terms like "scope")
+  - ESC to close, overlay click to close, focus management
+  - Toast notifications showing deleted count
+- ✅ Updated `deleteJob()` function to detect recurring jobs and show modal
 
-Changes:
-- Add `date_filter == 'two_years'` support in `JobListView` (now → now + 730 days).
-- Implement phone digit search by annotating a `phone_digits` field and matching `icontains` against the digit-only input.
-- Sorting: accept sort keys with leading `-`, and default to ascending for the `two_years` view unless explicitly overridden.
+#### Tests
+- ✅ Created comprehensive test suite in `test_recurring_delete.py`:
+  - Tests for all three scopes (this_only, this_and_future, all)
+  - Tests for both instances and parent jobs
+  - Tests for edge cases (already deleted, non-recurring, parent-only guard)
+  - Tests for default scope behavior
 
-### Commit E — Calendar UI: two-year option + close search + Today sidebar toggle + search-row tooltips
+### Files Modified
+1. `rental_scheduler/views_recurring.py` - Updated delete endpoint
+2. `rental_scheduler/utils/recurrence.py` - Updated utility function
+3. `rental_scheduler/templates/base.html` - Added URL template
+4. `rental_scheduler/static/rental_scheduler/js/shared/urls.js` - Added helper
+5. `rental_scheduler/static/rental_scheduler/js/entrypoints/job_form_partial.js` - Added modal & logic
+6. `rental_scheduler/tests/test_recurring_delete.py` - New test file
 
-Files:
-- `rental_scheduler/templates/rental_scheduler/calendar.html`
-- `rental_scheduler/static/rental_scheduler/js/job_calendar.js`
+### Files Created
+1. `rental_scheduler/tests/test_recurring_delete.py` - Comprehensive test coverage
 
-Changes:
-- Add “Events within 2 years” radio option in the calendar search panel.
-- Add “Close Search” button (calls existing `toggleSearchPanel()`).
-- Add Today sidebar toggle button (persisted in `localStorage`) and hide/show `#todaySidebar`.
-- Add delayed hover tooltips for search-result job rows.
-  - Recommended implementation: fetch `/api/jobs/<id>/detail/` (row already has `data-job-id`) to avoid stuffing large notes into `data-*` attributes.
+### Documentation Updates Needed
+- [ ] `docs/features/recurring-events/api.md` - Document delete endpoint response & scopes
+- [ ] `docs/reference/frontend-globals.md` - Add `jobDeleteRecurringTemplate` entry
+- [ ] `docs/reference/urls-and-routing.md` - Add recurring delete URL mention
 
-Optional:
-- Extend `job_detail_api` to include `calendar_name` so tooltips can show it.
-
-### Commit F — Workspace UI: tab hover tooltip
-
-Files:
-- `rental_scheduler/static/rental_scheduler/js/workspace.js`
-
-Changes:
-- Add 500ms delayed hover tooltip for workspace tabs by fetching `/api/jobs/<id>/detail/` and calling `jobCalendar.showEventTooltip()`.
-
-## Validation checklist (after each commit + at the end)
-
-- Run targeted tests for the touched area (then full suite at the end).
-- Manual smoke:
-  - calendar loads, Today sidebar toggle persists across refresh
-  - calendar search “within 2 years” returns results
-  - searching digits finds formatted phone numbers
-  - creating a recurring job with a call reminder produces instance call reminders
-  - recurrence “until date” does not crash and validates properly
-
-## Merge path
-
-- Open PR: `port/wip-2025-12-16` → `master`
-- PR description should include:
-  - list of ported intents (Commits A–F)
-  - note that `origin/wip/steph-pre-sync-2025-12-16` remains untouched as archival reference
+### Testing Notes
+- Backend tests are complete and ready to run (requires PostgreSQL or SQLite environment setup)
+- E2E tests should be added to `tests/e2e/test_calendar_smoke.py` to verify end-to-end flow
+- Manual testing recommended for modal UX and accessibility

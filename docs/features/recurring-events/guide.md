@@ -1,7 +1,14 @@
-# Recurring Events Implementation Guide
+# Recurring Events (Guide)
+
+Last updated: 2025-12-22
 
 ## Overview
+
 This document describes the Google Calendar-like recurring event system implemented in the GTS Scheduler.
+
+See also:
+
+- API reference: `docs/features/recurring-events/api.md`
 
 ## Database Schema
 
@@ -13,7 +20,8 @@ This document describes the Google Calendar-like recurring event system implemen
      "type": "monthly|yearly|weekly|daily",
      "interval": 2,           // Every 2 months/years/weeks/days
      "count": 12,             // Generate 12 occurrences
-     "until_date": "2025-12-31"  // Don't generate after this date
+     "until_date": "2025-12-31",  // Don't generate after this date (optional)
+     "end": "never"               // Optional: marks a “forever” series (virtual occurrences)
    }
    ```
 
@@ -105,6 +113,47 @@ parent.update_recurring_instances(
 )
 ```
 
+#### Edit Recurrence Rule (Finite ↔ Forever)
+
+You can edit a recurring parent to change its recurrence rule, including converting between finite and forever series.
+
+**Converting Finite to Forever:**
+```python
+# A job with count=50 can be changed to forever
+parent = Job.objects.get(id=parent_id, recurrence_parent__isnull=True)
+
+# Update the recurrence rule
+rule = parent.recurrence_rule or {}
+rule['end'] = 'never'
+rule['count'] = None
+rule['until_date'] = None
+parent.recurrence_rule = rule
+parent.save(update_fields=['recurrence_rule'])
+
+# Existing materialized instances remain intact
+# Virtual occurrences will now generate indefinitely
+```
+
+**Converting Forever to Finite:**
+```python
+# A forever series can be converted to have a count
+parent = Job.objects.get(id=parent_id, recurrence_parent__isnull=True)
+
+rule = parent.recurrence_rule or {}
+rule['count'] = 24
+rule['until_date'] = None
+if 'end' in rule:
+    del rule['end']
+parent.recurrence_rule = rule
+parent.save(update_fields=['recurrence_rule'])
+```
+
+**Important Notes:**
+- Only recurring *parents* can have their recurrence rule edited (not instances)
+- Existing materialized instances are preserved—no data loss occurs
+- Virtual occurrences adjust automatically based on the new rule
+- The UI (Job Form) supports this via the "Ends" dropdown
+
 ### Marking an Instance Complete
 
 ```python
@@ -150,17 +199,23 @@ parent.delete()
 # CASCADE deletes parent and ALL child instances
 ```
 
-## API Endpoints
+## API Endpoints (JSON)
 
-### Create Recurring Job
+These endpoints are implemented in `rental_scheduler/views_recurring.py` and are documented in more detail in:
+
+- `docs/features/recurring-events/api.md`
+
+### Create job with recurrence
+
 ```
 POST /api/jobs/create/
 {
   "business_name": "ABC Company",
   "start": "2025-01-01T09:00:00",
   "end": "2025-01-01T17:00:00",
-  "calendar": 1,
+  "calendar_id": 1,
   "recurrence": {
+    "enabled": true,
     "type": "monthly",
     "interval": 2,
     "count": 12
@@ -168,7 +223,28 @@ POST /api/jobs/create/
 }
 ```
 
-### Update Recurring Job
+### Create a “forever” series (virtual occurrences)
+
+For never-ending series, send `end: "never"` (or explicitly mark it as forever and omit `count`/`until_date`).
+
+```
+POST /api/jobs/create/
+{
+  "business_name": "Weekly Check-in",
+  "start": "2025-01-01T09:00:00",
+  "end": "2025-01-01T10:00:00",
+  "calendar_id": 1,
+  "recurrence": {
+    "enabled": true,
+    "type": "weekly",
+    "interval": 1,
+    "end": "never"
+  }
+}
+```
+
+### Update job with scope
+
 ```
 POST /api/jobs/<id>/update/
 {
@@ -177,7 +253,8 @@ POST /api/jobs/<id>/update/
 }
 ```
 
-### Cancel Future Recurrences
+### Cancel future recurrences
+
 ```
 POST /api/jobs/<parent_id>/cancel-future/
 {
@@ -185,10 +262,33 @@ POST /api/jobs/<parent_id>/cancel-future/
 }
 ```
 
-### Delete Recurring Event
+### Delete recurring with scope
+
+Either:
+
 ```
-DELETE /api/jobs/<id>/delete/
-?scope=all  // Options: "this_only", "all", "future"
+DELETE /api/jobs/<id>/delete-recurring/?scope=this_only|this_and_future|all
+```
+
+Or:
+
+```
+POST /api/jobs/<id>/delete-recurring/
+{
+  "delete_scope": "this_only"  // or: "this_and_future", "all"
+}
+```
+
+### Materialize a virtual occurrence (forever series)
+
+When the calendar emits “virtual” occurrences, the UI materializes them into real rows via:
+
+```
+POST /api/recurrence/materialize/
+{
+  "parent_id": 123,
+  "original_start": "2026-02-20T10:00:00"
+}
 ```
 
 ## Calendar Query
@@ -211,7 +311,8 @@ jobs = Job.objects.filter(
     status='canceled'
 ).select_related('calendar', 'recurrence_parent')
 
-# Calendar will display both parent jobs and generated instances
+# Calendar will display parent jobs and materialized instances.
+# For “forever” series, the calendar feed also emits virtual occurrences in the requested window.
 ```
 
 ## Frontend Integration
@@ -244,6 +345,50 @@ if (job.is_recurring_instance) {
     // - Cancel future occurrences
 }
 ```
+
+### Virtual occurrences (forever series)
+
+For "forever" series (those with `recurrence_rule.end === 'never'`), the calendar feed emits **virtual** events (not backed by a real `Job` row yet). These are generated on-the-fly for any calendar date window, including windows far into the future (4+ years ahead).
+
+Virtual event types:
+
+- `extendedProps.type === 'virtual_job'`
+- `extendedProps.type === 'virtual_call_reminder'`
+
+Virtual events include:
+
+- `extendedProps.recurrence_parent_id`
+- `extendedProps.recurrence_original_start` (ISO datetime string)
+- `extendedProps.is_virtual === true`
+
+The frontend materializes them via `POST /api/recurrence/materialize/` and then opens the resulting real job.
+
+**Performance Note:** The virtual occurrence generator uses a fast-forward algorithm to efficiently handle distant future windows without iterating through years of dates. It also has iteration guardrails (max 2000 iterations per parent) to prevent runaway loops.
+
+### Jobs list / Search behavior
+
+When using the Jobs List page or the Calendar Search Panel with future-looking date filters (`future`, `two_years`, or `custom` with a future range):
+
+- **Forever recurring parents** are included in the results, even if their original `start_dt` is in the past
+- These parents are displayed with an **∞ badge** (e.g., "∞ Weekly") to indicate they're forever series
+- Users can click on the parent row to view/edit the series template
+
+This ensures forever series remain discoverable when searching for future events.
+
+### Expandable preview of upcoming occurrences
+
+Forever series rows in the Jobs list and Calendar Search Panel include a **"Show upcoming"** button next to the ∞ badge that reveals the next 5 upcoming virtual occurrences:
+
+- Click the **"Show upcoming"** button to expand and show virtual occurrence rows (the button changes to "Hide upcoming" when expanded)
+- Virtual rows are styled with a subtle indigo background and a "↻" icon to indicate they are not yet real jobs
+- **Click any virtual row** to materialize it into a real Job and open it for editing
+- Use the **"Show 5 more"** button to load additional occurrences (repeatable up to a maximum of 200 occurrences)
+- Click the **"Hide upcoming"** button again to collapse the virtual rows
+
+**Technical Details:**
+- Virtual occurrences are generated on-the-fly via `GET /api/recurrence/preview/?parent_id=X&count=N` (max: 200)
+- Clicking a virtual row calls `POST /api/recurrence/materialize/` to create the real Job before opening it
+- The 200-occurrence cap prevents abuse while still allowing users to explore far into the future incrementally
 
 ## Best Practices
 

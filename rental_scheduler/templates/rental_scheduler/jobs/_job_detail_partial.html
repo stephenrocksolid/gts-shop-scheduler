@@ -1,0 +1,33 @@
+{# Partial used by /jobs/<pk>/partial/ for the right-hand panel #}
+<div id="job-detail" data-gts-job-id="{{ job.id }}">
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div style="display: flex; align-items: baseline; justify-content: space-between;">
+      <h3 style="margin: 0; font-size: 14px; font-weight: 700; color: #111827;">
+        Job Details
+      </h3>
+      <span style="font-size: 12px; color: #6b7280;">
+        #{{ job.id }}
+      </span>
+    </div>
+
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px;">
+      <div style="display: grid; grid-template-columns: 90px 1fr; gap: 6px; font-size: 12px;">
+        <div style="font-weight: 600; color: #374151;">Business</div>
+        <div style="color: #111827;">{{ job.business_name|default:"(blank)" }}</div>
+
+        <div style="font-weight: 600; color: #374151;">Calendar</div>
+        <div style="color: #111827;">{{ job.calendar.name }}</div>
+
+        <div style="font-weight: 600; color: #374151;">Start</div>
+        <div style="color: #111827;">{{ job.start_dt }}</div>
+
+        <div style="font-weight: 600; color: #374151;">End</div>
+        <div style="color: #111827;">{{ job.end_dt }}</div>
+
+        <div style="font-weight: 600; color: #374151;">Status</div>
+        <div style="color: #111827;">{{ job.status }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+

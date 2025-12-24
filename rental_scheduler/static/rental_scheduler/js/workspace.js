@@ -1,14 +1,93 @@
 /**
  * Job Workspace - Manages open jobs in a bottom tab bar
  * Allows users to open multiple jobs from calendar, minimize them, and switch between them
- * VERSION: 1.0 - Initial implementation
+ * VERSION: 1.1 - Draft HTML moved to sessionStorage for security
  */
 
 (function () {
     'use strict';
 
     const STORAGE_KEY = 'gts-job-workspace';
+    const DRAFT_HTML_PREFIX = 'gts-job-workspace:html:'; // sessionStorage prefix for draft HTML
     const MAX_TABS = 10; // Limit number of open jobs
+
+    // ========================================================================
+    // SESSION STORAGE HELPERS FOR DRAFT HTML
+    // Draft HTML is stored in sessionStorage (tab-scoped, clears on browser close)
+    // to prevent sensitive data from persisting across browser restarts.
+    // ========================================================================
+
+    /**
+     * Get draft HTML from sessionStorage
+     * @param {string} jobId - The job/draft ID
+     * @returns {string|null} - The HTML content or null
+     */
+    function getDraftHtml(jobId) {
+        if (!jobId) return null;
+        try {
+            return sessionStorage.getItem(DRAFT_HTML_PREFIX + jobId);
+        } catch (e) {
+            console.warn('JobWorkspace: Error reading draft HTML from sessionStorage', e);
+            return null;
+        }
+    }
+
+    /**
+     * Set draft HTML in sessionStorage
+     * @param {string} jobId - The job/draft ID
+     * @param {string} html - The HTML content (capped at 100KB)
+     * @returns {boolean} - True if stored successfully
+     */
+    function setDraftHtml(jobId, html) {
+        if (!jobId) return false;
+        try {
+            // Cap at 100KB to prevent storage overflow
+            if (html && html.length > 100000) {
+                console.warn('JobWorkspace: Draft HTML too large, not storing');
+                return false;
+            }
+            if (html) {
+                sessionStorage.setItem(DRAFT_HTML_PREFIX + jobId, html);
+            } else {
+                sessionStorage.removeItem(DRAFT_HTML_PREFIX + jobId);
+            }
+            return true;
+        } catch (e) {
+            console.warn('JobWorkspace: Error writing draft HTML to sessionStorage', e);
+            return false;
+        }
+    }
+
+    /**
+     * Remove draft HTML from sessionStorage
+     * @param {string} jobId - The job/draft ID
+     */
+    function removeDraftHtml(jobId) {
+        if (!jobId) return;
+        try {
+            sessionStorage.removeItem(DRAFT_HTML_PREFIX + jobId);
+        } catch (e) {
+            // Ignore errors
+        }
+    }
+
+    /**
+     * Clear all draft HTML from sessionStorage (for workspace.clear())
+     */
+    function clearAllDraftHtml() {
+        try {
+            const keysToRemove = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key && key.startsWith(DRAFT_HTML_PREFIX)) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(k => sessionStorage.removeItem(k));
+        } catch (e) {
+            // Ignore errors
+        }
+    }
 
     /**
      * Normalize job ID to string for consistent Map key usage
@@ -16,39 +95,6 @@
      */
     function normalizeJobId(jobId) {
         return jobId != null ? String(jobId) : null;
-    }
-
-    /**
-     * Sanitize cached HTML before storing.
-     * Trims value attributes for input types that don't accept whitespace.
-     * @param {string} html - Raw HTML string
-     * @returns {string} - Sanitized HTML string
-     */
-    function sanitizeDraftHtml(html) {
-        if (!html || typeof html !== 'string') return html;
-
-        try {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-
-            // Input types that cannot have whitespace in their value attribute
-            const strictValueTypes = ['number', 'date', 'datetime-local', 'time', 'month', 'week'];
-            const selector = strictValueTypes.map(t => `input[type="${t}"]`).join(', ');
-
-            const inputs = doc.querySelectorAll(selector);
-            inputs.forEach(input => {
-                if (input.hasAttribute('value')) {
-                    const rawValue = input.getAttribute('value');
-                    const trimmed = rawValue.trim();
-                    input.setAttribute('value', trimmed);
-                }
-            });
-
-            return doc.body.innerHTML;
-        } catch (e) {
-            console.warn('sanitizeDraftHtml: Error parsing HTML, returning original', e);
-            return html;
-        }
     }
 
     class JobWorkspace {
@@ -108,9 +154,7 @@
 
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
-                if (window.showToast) {
-                    window.showToast(`Maximum ${MAX_TABS} jobs can be open at once`, 'warning');
-                }
+                GTS.toast.warning(`Maximum ${MAX_TABS} jobs can be open at once`);
                 return;
             }
 
@@ -133,7 +177,7 @@
             // Load job edit form in panel
             if (window.JobPanel) {
                 window.JobPanel.setTitle('Edit Job');
-                window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
                 window.JobPanel.setCurrentJobId(jobId); // Pass normalized ID
 
                 // Update minimize button after a short delay to ensure panel is ready
@@ -159,9 +203,7 @@
 
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
-                if (window.showToast) {
-                    window.showToast(`Maximum ${MAX_TABS} jobs can be open at once`, 'warning');
-                }
+                GTS.toast.warning(`Maximum ${MAX_TABS} jobs can be open at once`);
                 return;
             }
 
@@ -243,6 +285,9 @@
 
             this.openJobs.delete(jobId);
 
+            // Clean up draft HTML from sessionStorage
+            removeDraftHtml(jobId);
+
             // If this was the active job, close the panel
             if (this.activeJobId === jobId) {
                 this.activeJobId = null;
@@ -321,12 +366,14 @@
             this.activeJobId = jobId;
 
             if (window.JobPanel) {
-                // Check if we have unsavedHtml to restore (for drafts or failed saves)
-                if (job.unsavedHtml) {
+                // Check for draft HTML in sessionStorage (for drafts or failed saves)
+                const unsavedHtml = getDraftHtml(jobId);
+
+                if (unsavedHtml) {
                     // Restore from cached HTML instead of loading from server
                     const title = job.isDraft ? 'New Job (Unsaved)' : 'Edit Job (Unsaved)';
                     window.JobPanel.setTitle(title);
-                    window.JobPanel.showContent(job.unsavedHtml);
+                    window.JobPanel.showContent(unsavedHtml);
 
                     // Set the job ID context (for drafts, store the draft ID so we can promote later)
                     if (job.isDraft) {
@@ -345,10 +392,15 @@
                     }, 100);
 
                 } else if (job.isDraft) {
-                    // Draft without HTML (shouldn't happen, but handle gracefully)
+                    // Draft without HTML - can't restore, must drop the draft
+                    console.warn('JobWorkspace: Draft without HTML, cannot restore. Removing draft.');
+                    GTS.toast.warning('Draft expired. Starting a new job.');
+                    this.openJobs.delete(jobId);
+
+                    // Load fresh new job form
                     window.JobPanel.setTitle('New Job');
-                    window.JobPanel.load('/jobs/new/partial/');
-                    window.JobPanel.currentDraftId = jobId;
+                    window.JobPanel.load(GTS.urls.jobCreatePartial());
+                    window.JobPanel.currentDraftId = null;
                     window.JobPanel.setCurrentJobId(null);
 
                     setTimeout(() => {
@@ -360,7 +412,7 @@
                 } else {
                     // Normal case: load job from server
                     window.JobPanel.setTitle('Edit Job');
-                    window.JobPanel.load(`/jobs/new/partial/?edit=${jobId}`);
+                    window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
                     window.JobPanel.setCurrentJobId(jobId);
                     window.JobPanel.currentDraftId = null;
 
@@ -396,7 +448,7 @@
         /**
          * Mark a job as having unsaved changes
          * @param {string} jobId - The job ID
-         * @param {string} html - The HTML content to restore (optional, capped at 100KB)
+         * @param {string} html - The HTML content to restore (optional, stored in sessionStorage)
          */
         markUnsaved(jobId, html) {
             jobId = normalizeJobId(jobId);
@@ -406,12 +458,10 @@
             if (!job) return;
 
             job.unsaved = true;
-            // Sanitize and cap HTML size to avoid localStorage overflow (100KB max)
-            if (html && html.length <= 100000) {
-                job.unsavedHtml = sanitizeDraftHtml(html);
-            } else if (html) {
-                console.warn('JobWorkspace: unsavedHtml too large, not storing');
-                job.unsavedHtml = null;
+            // Store sanitized HTML in sessionStorage (tab-scoped, security improvement)
+            if (html) {
+                const sanitizedHtml = GTS.htmlState.sanitizeDraftHtml(html);
+                setDraftHtml(jobId, sanitizedHtml);
             }
 
             this.saveToStorage();
@@ -430,7 +480,8 @@
             if (!job) return;
 
             job.unsaved = false;
-            job.unsavedHtml = null;
+            // Remove draft HTML from sessionStorage
+            removeDraftHtml(jobId);
 
             this.saveToStorage();
             this.render();
@@ -458,8 +509,8 @@
             jobId = normalizeJobId(jobId);
             if (!jobId) return null;
 
-            const job = this.openJobs.get(jobId);
-            return job ? job.unsavedHtml || null : null;
+            // Get from sessionStorage (primary) for security
+            return getDraftHtml(jobId);
         }
 
         /**
@@ -469,22 +520,26 @@
          * @param {string} data.customerName - Customer name for display
          * @param {string} data.trailerColor - Trailer color
          * @param {string} data.calendarColor - Calendar color
-         * @param {string} data.html - Panel HTML content to restore
+         * @param {string} data.html - Panel HTML content to restore (stored in sessionStorage)
          * @returns {string} The draft ID
          */
         createDraft(data) {
             // Check max tabs limit
             if (this.openJobs.size >= MAX_TABS) {
-                if (window.showToast) {
-                    window.showToast(`Maximum ${MAX_TABS} jobs can be open at once`, 'warning');
-                }
+                GTS.toast.warning(`Maximum ${MAX_TABS} jobs can be open at once`);
                 return null;
             }
 
             // Generate a unique draft ID
             const draftId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-            // Add to workspace as a draft (sanitize HTML to fix invalid value attributes)
+            // Store HTML in sessionStorage (not localStorage) for security
+            if (data.html) {
+                const sanitizedHtml = GTS.htmlState.sanitizeDraftHtml(data.html);
+                setDraftHtml(draftId, sanitizedHtml);
+            }
+
+            // Add to workspace as a draft (HTML stored separately in sessionStorage)
             this.openJobs.set(draftId, {
                 jobId: draftId,
                 customerName: data.customerName || 'New Job',
@@ -493,8 +548,8 @@
                 isMinimized: true,
                 timestamp: Date.now(),
                 isDraft: true,
-                unsaved: true,
-                unsavedHtml: data.html ? sanitizeDraftHtml(data.html) : null
+                unsaved: true
+                // Note: unsavedHtml no longer stored here, moved to sessionStorage
             });
 
             this.saveToStorage();
@@ -521,13 +576,15 @@
             // Remove the draft entry
             this.openJobs.delete(draftId);
 
+            // Clean up draft HTML from sessionStorage
+            removeDraftHtml(draftId);
+
             // Create the real job entry
             const realJob = {
                 ...draft,
                 jobId: realJobId,
                 isDraft: false,
                 unsaved: false,
-                unsavedHtml: null,
                 ...updatedMeta
             };
 
@@ -560,6 +617,9 @@
             if (this.openJobs.size === 0) return;
 
             if (confirm('Close all open jobs?')) {
+                // Clean up all draft HTML from sessionStorage
+                clearAllDraftHtml();
+
                 this.openJobs.clear();
                 this.activeJobId = null;
 
@@ -722,10 +782,11 @@
                     let startDt = null;
                     let endDt = null;
 
-                    // Try to parse additional fields from unsavedHtml if available
-                    if (draft.unsavedHtml) {
+                    // Try to parse additional fields from unsavedHtml in sessionStorage
+                    const unsavedHtml = getDraftHtml(jobId);
+                    if (unsavedHtml) {
                         const parser = new DOMParser();
-                        const doc = parser.parseFromString(draft.unsavedHtml, 'text/html');
+                        const doc = parser.parseFromString(unsavedHtml, 'text/html');
 
                         const businessInput = doc.querySelector('input[name="business_name"]');
                         if (businessInput && businessInput.value) {
@@ -771,7 +832,7 @@
                 }
 
                 // For real jobs, fetch from API
-                const response = await fetch(`/api/jobs/${jobId}/detail/`);
+                const response = await fetch(GTS.urls.jobDetailApi(jobId));
                 if (!response.ok) {
                     console.error(`Failed to fetch job details for job ${jobId}`);
                     return;
@@ -987,83 +1048,99 @@
 
         /**
          * Save workspace state to localStorage
-         * Note: unsavedHtml is size-limited to prevent localStorage overflow
+         * Note: Draft HTML is stored in sessionStorage, not here (for security)
          */
         saveToStorage() {
-            try {
-                // Create a copy of jobs with size-limited unsavedHtml
-                const jobsToSave = Array.from(this.openJobs.entries()).map(([key, job]) => {
-                    const jobCopy = { ...job };
-                    // Cap unsavedHtml at 100KB per job to prevent localStorage overflow
-                    if (jobCopy.unsavedHtml && jobCopy.unsavedHtml.length > 100000) {
-                        jobCopy.unsavedHtml = null; // Don't save if too large
-                    }
-                    return [key, jobCopy];
-                });
+            // Create a copy of jobs without unsavedHtml (it's in sessionStorage now)
+            const jobsToSave = Array.from(this.openJobs.entries()).map(([key, job]) => {
+                const jobCopy = { ...job };
+                // Remove unsavedHtml from localStorage payload - it's in sessionStorage
+                delete jobCopy.unsavedHtml;
+                return [key, jobCopy];
+            });
 
-                const state = {
-                    jobs: jobsToSave,
-                    activeJobId: this.activeJobId
-                };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-            } catch (error) {
-                console.warn('JobWorkspace: Error saving to localStorage', error);
-                // If quota exceeded, try saving without unsavedHtml
+            const state = {
+                schemaVersion: 2, // Version 2: unsavedHtml moved to sessionStorage
+                jobs: jobsToSave,
+                activeJobId: this.activeJobId
+            };
+
+            // Use GTS.storage if available
+            if (window.GTS && window.GTS.storage) {
+                const ok = GTS.storage.setJson(STORAGE_KEY, state);
+                if (!ok) {
+                    console.error('JobWorkspace: Error saving to localStorage');
+                }
+            } else {
                 try {
-                    const jobsWithoutHtml = Array.from(this.openJobs.entries()).map(([key, job]) => {
-                        const jobCopy = { ...job };
-                        jobCopy.unsavedHtml = null; // Remove large content
-                        return [key, jobCopy];
-                    });
-                    const state = {
-                        jobs: jobsWithoutHtml,
-                        activeJobId: this.activeJobId
-                    };
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-                } catch (e2) {
-                    console.error('JobWorkspace: Could not save even without HTML', e2);
+                } catch (error) {
+                    console.error('JobWorkspace: Error saving to localStorage', error);
                 }
             }
         }
 
         /**
          * Load workspace state from localStorage
+         * Handles migration from v1 (unsavedHtml in localStorage) to v2 (sessionStorage)
          */
         loadFromStorage() {
-            try {
-                const saved = localStorage.getItem(STORAGE_KEY);
-                if (!saved) return;
+            let state = null;
 
-                const state = JSON.parse(saved);
-
-                // Restore jobs with normalized IDs
-                if (state.jobs && Array.isArray(state.jobs)) {
-                    this.openJobs = new Map();
-                    state.jobs.forEach(([key, value]) => {
-                        const normalizedKey = normalizeJobId(key);
-                        if (normalizedKey) {
-                            value.jobId = normalizedKey; // Also normalize the stored jobId
-                            // Ensure backwards compatibility for new fields
-                            value.unsaved = value.unsaved || false;
-                            value.unsavedHtml = value.unsavedHtml || null;
-                            value.isDraft = value.isDraft || false;
-                            this.openJobs.set(normalizedKey, value);
-                        }
-                    });
+            // Use GTS.storage if available
+            if (window.GTS && window.GTS.storage) {
+                state = GTS.storage.getJson(STORAGE_KEY, null);
+            } else {
+                try {
+                    const saved = localStorage.getItem(STORAGE_KEY);
+                    if (saved) {
+                        state = JSON.parse(saved);
+                    }
+                } catch (error) {
+                    console.warn('JobWorkspace: Error loading from localStorage', error);
                 }
+            }
 
-                // Restore active job (but don't open panel yet - wait for user action)
-                this.activeJobId = null; // Don't auto-open on page load
+            if (!state) return;
 
-                // Mark all as minimized on page load
-                this.openJobs.forEach(job => {
-                    job.isMinimized = true;
+            const needsMigration = !state.schemaVersion || state.schemaVersion < 2;
+
+            // Restore jobs with normalized IDs
+            if (state.jobs && Array.isArray(state.jobs)) {
+                this.openJobs = new Map();
+                state.jobs.forEach(([key, value]) => {
+                    const normalizedKey = normalizeJobId(key);
+                    if (normalizedKey) {
+                        value.jobId = normalizedKey; // Also normalize the stored jobId
+                        // Ensure backwards compatibility for new fields
+                        value.unsaved = value.unsaved || false;
+                        value.isDraft = value.isDraft || false;
+
+                        // MIGRATION: Move unsavedHtml from localStorage to sessionStorage
+                        if (needsMigration && value.unsavedHtml) {
+                            console.log('JobWorkspace: Migrating draft HTML to sessionStorage for', normalizedKey);
+                            setDraftHtml(normalizedKey, value.unsavedHtml);
+                        }
+                        // Remove unsavedHtml from in-memory state (it's in sessionStorage now)
+                        delete value.unsavedHtml;
+
+                        this.openJobs.set(normalizedKey, value);
+                    }
                 });
+            }
 
-            } catch (error) {
-                console.warn('JobWorkspace: Error loading from localStorage', error);
-                this.openJobs.clear();
-                this.activeJobId = null;
+            // Restore active job (but don't open panel yet - wait for user action)
+            this.activeJobId = null; // Don't auto-open on page load
+
+            // Mark all as minimized on page load
+            this.openJobs.forEach(job => {
+                job.isMinimized = true;
+            });
+
+            // If we migrated, save the updated state immediately to update schema version
+            if (needsMigration && this.openJobs.size > 0) {
+                console.log('JobWorkspace: Migration complete, saving updated state');
+                this.saveToStorage();
             }
         }
 
@@ -1071,9 +1148,16 @@
          * Clear all workspace data
          */
         clear() {
+            // Clear all draft HTML from sessionStorage
+            clearAllDraftHtml();
+
             this.openJobs.clear();
             this.activeJobId = null;
-            localStorage.removeItem(STORAGE_KEY);
+            if (window.GTS && window.GTS.storage) {
+                GTS.storage.remove(STORAGE_KEY);
+            } else {
+                localStorage.removeItem(STORAGE_KEY);
+            }
             this.render();
         }
     }

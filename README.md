@@ -2,6 +2,11 @@
 
 A Django app for scheduling and managing shop/rental jobs. The UI uses TailwindCSS, and the calendar experience is driven by JavaScript in `rental_scheduler/static/`.
 
+## Documentation
+
+- Start here: `docs/README.md`
+- Local dev runbook: `docs/runbooks/local-dev.md`
+
 ## Tech stack
 
 - **Backend**: Django (`gts_django/`, app: `rental_scheduler/`)
@@ -27,11 +32,19 @@ cd gts-shop-scheduler
 
 ### 2) Python venv + dependencies
 
-```bash
-# Windows (PowerShell)
-python -m venv env
-.\env\Scripts\Activate.ps1
+Linux/macOS:
 
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
@@ -51,8 +64,15 @@ npm run watch
 
 Copy the example env file and adjust as needed:
 
+Linux/macOS:
+
 ```bash
-# Windows (PowerShell)
+cp env_example.txt .env
+```
+
+Windows (PowerShell):
+
+```powershell
 Copy-Item .\env_example.txt .\.env
 ```
 
@@ -151,17 +171,32 @@ python manage.py runserver
 
 Terminal 2 (run E2E tests):
 
+Linux/macOS:
+
 ```bash
-# PowerShell
+DJANGO_ALLOW_ASYNC_UNSAFE=true pytest tests/e2e -v
+```
+
+Windows (PowerShell):
+
+```powershell
 $env:DJANGO_ALLOW_ASYNC_UNSAFE="true"
 pytest tests/e2e -v
 ```
 
 Optional: point E2E tests at a different server URL:
 
+Linux/macOS:
+
 ```bash
-# PowerShell
+BASE_URL="http://127.0.0.1:8000" DJANGO_ALLOW_ASYNC_UNSAFE=true pytest tests/e2e -v
+```
+
+Windows (PowerShell):
+
+```powershell
 $env:BASE_URL="http://127.0.0.1:8000"
+$env:DJANGO_ALLOW_ASYNC_UNSAFE="true"
 pytest tests/e2e -v
 ```
 

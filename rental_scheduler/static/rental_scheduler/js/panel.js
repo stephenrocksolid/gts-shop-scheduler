@@ -12,7 +12,6 @@
 
   // Initialize global API immediately
   let panelInstance = null;
-  let isAlpineMode = false;
 
   // Queue for operations before panel is ready
   let operationQueue = [];
@@ -34,114 +33,8 @@
 
   // ==========================================================================
   // HTML SANITIZATION FOR DRAFT RESTORE
-  // Trims whitespace from value attributes of numeric/date inputs to prevent
-  // browser parsing errors when restoring cached HTML from localStorage.
+  // Now delegated to GTS.htmlState (shared/html_state.js)
   // ==========================================================================
-
-  /**
-   * Sanitize cached HTML before inserting into the DOM.
-   * Trims value attributes for input types that don't accept whitespace.
-   * @param {string} html - Raw HTML string (e.g., from localStorage draft)
-   * @returns {string} - Sanitized HTML string
-   */
-  function sanitizeDraftHtml(html) {
-    if (!html || typeof html !== 'string') return html;
-
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-
-      // Input types that cannot have whitespace in their value attribute
-      const strictValueTypes = ['number', 'date', 'datetime-local', 'time', 'month', 'week'];
-      const selector = strictValueTypes.map(t => `input[type="${t}"]`).join(', ');
-
-      const inputs = doc.querySelectorAll(selector);
-      inputs.forEach(input => {
-        if (input.hasAttribute('value')) {
-          const rawValue = input.getAttribute('value');
-          const trimmed = rawValue.trim();
-          input.setAttribute('value', trimmed);
-        }
-      });
-
-      // Return the sanitized body innerHTML
-      return doc.body.innerHTML;
-    } catch (e) {
-      console.warn('sanitizeDraftHtml: Error parsing HTML, returning original', e);
-      return html;
-    }
-  }
-
-  /**
-   * Serialize panel body HTML for draft storage, preserving form state.
-   * Unlike innerHTML alone, this persists checkbox/radio checked state and select values
-   * by setting the corresponding HTML attributes to match runtime properties.
-   * 
-   * Uses parallel NodeList iteration (by index) to avoid invalid selectors when
-   * elements have empty IDs or names.
-   * 
-   * @param {HTMLElement} panelBody - The panel body element to serialize
-   * @returns {string} - HTML string with form state preserved
-   */
-  function serializeDraftHtml(panelBody) {
-    if (!panelBody) return null;
-
-    try {
-      // Clone the panel body so we don't modify the live DOM
-      const clone = panelBody.cloneNode(true);
-
-      // Persist checkbox and radio checked state as attributes using parallel iteration
-      const origCheckboxes = panelBody.querySelectorAll('input[type="checkbox"], input[type="radio"]');
-      const cloneCheckboxes = clone.querySelectorAll('input[type="checkbox"], input[type="radio"]');
-      for (let i = 0; i < origCheckboxes.length && i < cloneCheckboxes.length; i++) {
-        if (origCheckboxes[i].checked) {
-          cloneCheckboxes[i].setAttribute('checked', 'checked');
-        } else {
-          cloneCheckboxes[i].removeAttribute('checked');
-        }
-      }
-
-      // Persist select element selected state using parallel iteration
-      const origSelects = panelBody.querySelectorAll('select');
-      const cloneSelects = clone.querySelectorAll('select');
-      for (let i = 0; i < origSelects.length && i < cloneSelects.length; i++) {
-        const origSelect = origSelects[i];
-        const cloneSelect = cloneSelects[i];
-        // Clear all selected attributes first
-        cloneSelect.querySelectorAll('option').forEach(opt => opt.removeAttribute('selected'));
-        // Set selected on the currently selected option(s) by matching value
-        Array.from(origSelect.selectedOptions).forEach(origOpt => {
-          const cloneOpts = cloneSelect.querySelectorAll('option');
-          for (let j = 0; j < cloneOpts.length; j++) {
-            if (cloneOpts[j].value === origOpt.value) {
-              cloneOpts[j].setAttribute('selected', 'selected');
-              break;
-            }
-          }
-        });
-      }
-
-      // Persist textarea values using parallel iteration (innerHTML doesn't capture typed content)
-      const origTextareas = panelBody.querySelectorAll('textarea');
-      const cloneTextareas = clone.querySelectorAll('textarea');
-      for (let i = 0; i < origTextareas.length && i < cloneTextareas.length; i++) {
-        cloneTextareas[i].textContent = origTextareas[i].value;
-      }
-
-      // Persist text/number/date input values using parallel iteration
-      const inputSelector = 'input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="email"], input[type="tel"], input[type="hidden"]';
-      const origInputs = panelBody.querySelectorAll(inputSelector);
-      const cloneInputs = clone.querySelectorAll(inputSelector);
-      for (let i = 0; i < origInputs.length && i < cloneInputs.length; i++) {
-        cloneInputs[i].setAttribute('value', origInputs[i].value);
-      }
-
-      return clone.innerHTML;
-    } catch (e) {
-      console.warn('serializeDraftHtml: Error serializing, falling back to innerHTML', e);
-      return panelBody.innerHTML;
-    }
-  }
 
   // ==========================================================================
   // JOB FORM TOGGLE UI (Call Reminder + Recurrence)
@@ -247,8 +140,47 @@
   // ==========================================================================
 
   /**
+   * Get the current hidden calendar select from the panel body.
+   * Returns null if not found. Used for dynamic lookup to avoid stale references.
+   */
+  function getHiddenCalendarSelect() {
+    return document.querySelector('#job-panel .panel-body #calendar-field-container select[name="calendar"]');
+  }
+
+  /**
+   * Sync header calendar select value FROM hidden form select.
+   * Call this when hidden select value may have changed (e.g., server-side update).
+   */
+  function syncHeaderFromHidden() {
+    const hiddenSelect = getHiddenCalendarSelect();
+    const headerSelect = document.getElementById('calendar-header-select');
+    if (hiddenSelect && headerSelect && headerSelect.value !== hiddenSelect.value) {
+      headerSelect.value = hiddenSelect.value;
+    }
+  }
+
+  /**
+   * Sync hidden form select value FROM header calendar select.
+   * Call this when header select value changes (user interaction).
+   */
+  function syncHiddenFromHeader() {
+    const hiddenSelect = getHiddenCalendarSelect();
+    const headerSelect = document.getElementById('calendar-header-select');
+    if (hiddenSelect && headerSelect && hiddenSelect.value !== headerSelect.value) {
+      hiddenSelect.value = headerSelect.value;
+      // Dispatch change event on hidden field in case other code listens for it
+      hiddenSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  // Expose sync functions globally for belt-and-suspenders usage
+  window.syncHiddenCalendarFromHeader = syncHiddenFromHeader;
+  window.syncHeaderCalendarFromHidden = syncHeaderFromHidden;
+
+  /**
    * Initialize the panel header calendar selector by cloning the hidden form select.
-   * Idempotent - safe to call multiple times (uses dataset guard).
+   * Safe to call multiple times - refreshes options and value from current hidden select.
+   * Uses delegated event handling so changes always write to the CURRENT hidden select.
    * @param {HTMLElement} panelBody - The panel body element containing the form
    */
   function initPanelCalendarSelector(panelBody) {
@@ -260,41 +192,53 @@
     const panelCalendarContainer = document.getElementById('panel-calendar-container');
 
     if (!calendarField || !panelCalendarSelector || !panelCalendarContainer) {
-      return; // Elements not found, nothing to do
-    }
-
-    // Check if we already have a header select that matches the current form
-    const existingHeaderSelect = panelCalendarSelector.querySelector('#calendar-header-select');
-
-    // Guard: if the header select already exists and has the same options, just sync value
-    if (existingHeaderSelect && existingHeaderSelect.dataset.calendarInitialized === '1') {
-      // Sync value from hidden field to header select (in case it changed)
-      existingHeaderSelect.value = calendarField.value;
-      panelCalendarContainer.style.display = 'flex';
+      // Hide container if no calendar field in form
+      if (panelCalendarContainer) panelCalendarContainer.style.display = 'none';
       return;
     }
 
-    // Clone the select element for the header (visual display)
-    const clonedSelect = calendarField.cloneNode(true);
-    clonedSelect.id = 'calendar-header-select';
-    clonedSelect.removeAttribute('name'); // Remove name to avoid duplicate submission
-    clonedSelect.dataset.calendarInitialized = '1'; // Mark as initialized
+    // Check if we already have a header select
+    let headerSelect = panelCalendarSelector.querySelector('#calendar-header-select');
 
-    // Clear any existing content in the selector container first
-    panelCalendarSelector.innerHTML = '';
-    // Add the cloned select to the header
-    panelCalendarSelector.appendChild(clonedSelect);
+    if (headerSelect) {
+      // Header select exists - refresh its options from the current hidden field
+      // This handles the case where the panel body was replaced (draft restore)
+      // and the hidden select has different options or value
 
-    // Set the cloned select's value to match the hidden field's current value
-    clonedSelect.value = calendarField.value;
+      // Clear and rebuild options to match current hidden select
+      headerSelect.innerHTML = '';
+      for (const opt of calendarField.options) {
+        const newOpt = opt.cloneNode(true);
+        headerSelect.appendChild(newOpt);
+      }
+      // Sync value from hidden field to header select
+      headerSelect.value = calendarField.value;
+    } else {
+      // Create header select by cloning the hidden one
+      headerSelect = calendarField.cloneNode(true);
+      headerSelect.id = 'calendar-header-select';
+      headerSelect.removeAttribute('name'); // Remove name to avoid duplicate submission
 
-    // Add event listener to sync changes from header dropdown to original hidden field
-    clonedSelect.addEventListener('change', function () {
-      // Update the original hidden field so it gets submitted with the form
-      calendarField.value = this.value;
-      // Dispatch change event on hidden field in case other code listens for it
-      calendarField.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+      // Clear any existing content and add the new select
+      panelCalendarSelector.innerHTML = '';
+      panelCalendarSelector.appendChild(headerSelect);
+
+      // Set the value to match the hidden field
+      headerSelect.value = calendarField.value;
+    }
+
+    // Bind a single delegated change handler on the container (idempotent)
+    // This handler dynamically looks up the hidden select so it never goes stale
+    if (panelCalendarSelector.dataset.calendarChangeHandlerBound !== '1') {
+      panelCalendarSelector.dataset.calendarChangeHandlerBound = '1';
+
+      panelCalendarSelector.addEventListener('change', function(e) {
+        if (e.target && e.target.id === 'calendar-header-select') {
+          // Use dynamic lookup to get the CURRENT hidden select
+          syncHiddenFromHeader();
+        }
+      });
+    }
 
     // Show the container
     panelCalendarContainer.style.display = 'flex';
@@ -534,18 +478,74 @@
   /**
    * Initialize flatpickr on date-only inputs in the panel that aren't
    * handled by schedule_picker.js (e.g., date_call_received, recurrence_until).
+   * 
+   * Uses JS-based idempotency (checking for live _flatpickr instance) rather than
+   * class-based checks, which can persist in cached draft HTML after restore.
    */
   function initPanelDatePickers() {
     const panel = document.getElementById('job-panel');
     if (!panel) return;
 
-    // Find date inputs that don't already have flatpickr and aren't start/end
-    const dateInputs = panel.querySelectorAll('input[type="date"]');
+    // Date field names that should be enhanced (date-only, not datetime)
+    const dateFieldNames = ['date_call_received', 'recurrence_until'];
+
+    // Find date inputs by type="date" OR by name (in case type was already converted to text)
+    const selector = 'input[type="date"], ' + dateFieldNames.map(n => `input[name="${n}"]`).join(', ');
+    const dateInputs = panel.querySelectorAll(selector);
+
     dateInputs.forEach(input => {
-      // Skip if already has flatpickr
-      if (input._flatpickr || input.classList.contains('flatpickr-input')) return;
       // Skip start_dt and end_dt (handled by schedule_picker.js)
       if (input.name === 'start_dt' || input.name === 'end_dt') return;
+
+      // Skip if this is a flatpickr alt input (no name attribute or has marker class)
+      if (!input.name || input.classList.contains('gts-flatpickr-alt')) return;
+
+      // Skip if this input isn't one of our known date-only fields and isn't a native date input.
+      // This keeps us from unexpectedly hijacking other inputs in the panel.
+      if (!dateFieldNames.includes(input.name) && input.type !== 'date') return;
+
+      // Detect a live flatpickr instance (JS-based idempotency)
+      // (Don't rely on class checks; they can persist in cached draft HTML.)
+      const hasLiveInstance = input._flatpickr && typeof input._flatpickr.open === 'function';
+      if (hasLiveInstance) {
+        // If the instance exists and its alt input is still in the DOM, we are done.
+        // IMPORTANT: Do NOT remove alt inputs here; doing so would hide the field because
+        // flatpickr keeps the original input hidden when altInput:true.
+        const alt = input._flatpickr && input._flatpickr.altInput;
+        if (alt && alt.isConnected) return;
+
+        // Self-heal: if an earlier run removed the alt input, destroy and re-init.
+        try {
+          input._flatpickr.destroy();
+        } catch (e) {
+          // Ignore; we'll attempt to re-init below.
+        }
+      }
+
+      // ================================================================
+      // CLEANUP (only when we are about to initialize/re-initialize)
+      // Remove stale alt inputs from restored draft HTML to prevent duplicates.
+      // ================================================================
+      const markerClass = window.GtsDateInputs ? window.GtsDateInputs.ALT_INPUT_MARKER_CLASS : 'gts-flatpickr-alt';
+      let sibling = input.nextElementSibling;
+      while (sibling && sibling.tagName === 'INPUT') {
+        if (sibling.classList.contains(markerClass) || !sibling.name) {
+          const toRemove = sibling;
+          sibling = sibling.nextElementSibling;
+          toRemove.remove();
+        } else {
+          break;
+        }
+      }
+
+      // Clean up stale flatpickr class from restored draft HTML
+      input.classList.remove('flatpickr-input');
+      input.removeAttribute('data-fp-original');
+      input.removeAttribute('readonly');
+      if (input.type === 'hidden') {
+        // Draft restore can leave the original hidden; ensure it's visible before re-init.
+        input.type = 'text';
+      }
 
       // Store original value before converting
       const originalValue = input.value;
@@ -553,11 +553,16 @@
       // Change type to text so flatpickr can work with it
       input.type = 'text';
 
+      // Build altInputClass: include our marker class plus the original input's classes
+      const originalClasses = input.className || '';
+      const altInputClass = 'gts-flatpickr-alt ' + originalClasses;
+
       // Initialize flatpickr with friendly format
-      const fp = window.flatpickr(input, {
+      window.flatpickr(input, {
         dateFormat: 'Y-m-d',
         altInput: true,
         altFormat: 'M j, Y',
+        altInputClass: altInputClass.trim(),
         allowInput: true,
         disableMobile: true,
         defaultDate: originalValue || null,
@@ -571,6 +576,10 @@
         onReady: function (selectedDates, dateStr, instance) {
           if (instance.input) {
             instance.input.setAttribute('data-fp-original', 'true');
+          }
+          // Copy inline styles from original to alt input
+          if (instance.altInput && input.style.cssText) {
+            instance.altInput.style.cssText = input.style.cssText;
           }
         }
       });
@@ -870,6 +879,11 @@
        */
       getRequiredMissing(form) {
         if (!form) return ['form'];
+
+        // Belt-and-suspenders: sync header calendar → hidden form field before validation
+        // This prevents "calendar missing" errors when UI shows a selected calendar
+        syncHiddenFromHeader();
+
         const missing = [];
 
         // Business name - required and must not be whitespace-only
@@ -1011,9 +1025,7 @@
           if (hasMissing) {
             // Trigger HTML5 validation display
             if (!form.reportValidity()) {
-              if (window.showToast) {
-                window.showToast('Please fill in all required fields before saving.', 'warning');
-              }
+              GTS.toast.warning('Please fill in all required fields before saving.');
               if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
               return;
             }
@@ -1105,17 +1117,12 @@
           // Use fetch() to avoid navigation - never call form.submit()
           const formData = new FormData(form);
           const actionUrl = form.getAttribute('hx-post') || form.getAttribute('action') || window.location.href;
-          const csrfToken = window.getCookie ? window.getCookie('csrftoken') :
-            document.querySelector('meta[name="csrf-token"]')?.content ||
-            form.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
-
           fetch(actionUrl, {
             method: 'POST',
             body: formData,
-            headers: {
-              'X-CSRFToken': csrfToken || '',
-              'X-Requested-With': 'XMLHttpRequest'
-            }
+            headers: window.GTS && window.GTS.csrf
+              ? GTS.csrf.headers({ 'X-Requested-With': 'XMLHttpRequest' }, { root: form })
+              : { 'X-Requested-With': 'XMLHttpRequest' }
           })
             .then(response => {
               return response.text().then(html => ({
@@ -1254,7 +1261,7 @@
 
             // Capture current panel HTML for potential unsaved state restoration
             // Use serializeDraftHtml to preserve checkbox/select state
-            const currentHtml = panelBody ? serializeDraftHtml(panelBody) : null;
+            const currentHtml = panelBody ? GTS.htmlState.serializeDraftHtml(panelBody) : null;
 
             // Check for missing required fields FIRST
             const missingFields = this.getRequiredMissing(form);
@@ -1295,7 +1302,11 @@
                 window.JobPanel.isSwitchingJobs = true;
 
                 self.saveForm((result) => {
-                  window.JobPanel.isSwitchingJobs = false;
+                  // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                  // This prevents the race condition where the flag is reset before HTMX checks it
+                  setTimeout(() => {
+                    window.JobPanel.isSwitchingJobs = false;
+                  }, 0);
 
                   if (result.successful) {
                     // Clear unsaved state on success
@@ -1311,7 +1322,7 @@
                     if (window.JobWorkspace.markUnsaved) {
                       window.JobWorkspace.markUnsaved(jobId, result.responseHtml || currentHtml);
                     }
-                    window.showToast('Failed to save changes. Reopen the job to fix.', 'warning');
+                    GTS.toast.warning('Failed to save changes. Reopen the job to fix.');
                   }
                 });
               }
@@ -1327,7 +1338,11 @@
               window.JobPanel.isSwitchingJobs = true;
 
               self.saveForm((result) => {
-                window.JobPanel.isSwitchingJobs = false;
+                // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                // This prevents the race condition where the flag is reset before HTMX checks it
+                setTimeout(() => {
+                  window.JobPanel.isSwitchingJobs = false;
+                }, 0);
                 workspaceMinimizeBtn.disabled = false;
                 workspaceMinimizeBtn.innerHTML = originalBtnContent;
 
@@ -1353,9 +1368,9 @@
                     });
                     // Store draft ID so we can promote it later on successful save
                     window.JobPanel.currentDraftId = draftId;
-                    window.showToast('Job not saved yet. Reopen to fix errors.', 'warning');
+                    GTS.toast.warning('Job not saved yet. Reopen to fix errors.');
                   } else {
-                    window.showToast('Failed to save new job.', 'error');
+                    GTS.toast.error('Failed to save new job.');
                   }
                 }
               });
@@ -1516,7 +1531,7 @@
 
             // Capture current panel HTML for potential unsaved state restoration
             // Use serializeDraftHtml to preserve checkbox/select state
-            const currentHtml = panelBody ? serializeDraftHtml(panelBody) : null;
+            const currentHtml = panelBody ? GTS.htmlState.serializeDraftHtml(panelBody) : null;
 
             // Check for missing required fields
             const missingFields = self.getRequiredMissing(form);
@@ -1551,7 +1566,11 @@
               if (isDirty) {
                 window.JobPanel.isSwitchingJobs = true;
                 self.saveForm((result) => {
-                  window.JobPanel.isSwitchingJobs = false;
+                  // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                  // This prevents the race condition where the flag is reset before HTMX checks it
+                  setTimeout(() => {
+                    window.JobPanel.isSwitchingJobs = false;
+                  }, 0);
                   if (result.successful) {
                     if (window.JobWorkspace.clearUnsaved) {
                       window.JobWorkspace.clearUnsaved(jobId);
@@ -1570,9 +1589,11 @@
             } else {
               // NEW JOB: Must save first to get an ID, then minimize
               window.JobPanel.isSwitchingJobs = true;
-
               self.saveForm((result) => {
-                window.JobPanel.isSwitchingJobs = false;
+                // Defer resetting isSwitchingJobs to ensure HTMX afterRequest handler sees it as true
+                setTimeout(() => {
+                  window.JobPanel.isSwitchingJobs = false;
+                }, 0);
 
                 if (result.successful && result.jobId) {
                   // Success: add to workspace and minimize
@@ -1600,11 +1621,145 @@
       },
 
       init() {
+        // Apply saved dimensions to panel element
+        applyPanelDimensions(panelEl, this.w, this.h);
         this.updatePosition();
         this.updateVisibility();
         this.setupDragging();
         this.setupButtons();
         this.setupOutsideClick();
+        this.setupResize();
+        this.setupRefreshBinding();
+      },
+
+      // ========================================================================
+      // PANEL RESIZE (moved from panel_shell.js)
+      // ========================================================================
+      setupResize() {
+        const handleRight = document.getElementById('panel-resize-handle-right');
+        const handleBottom = document.getElementById('panel-resize-handle-bottom');
+        const handleCorner = document.getElementById('panel-resize-handle-corner');
+
+        if (!handleRight || !handleBottom || !handleCorner) return;
+
+        let isResizing = false;
+        let resizeDirection = '';
+        let startX = 0;
+        let startY = 0;
+        let startWidth = 0;
+        let startHeight = 0;
+        const self = this;
+
+        const startResize = (e, direction) => {
+          isResizing = true;
+          resizeDirection = direction;
+          startX = e.clientX;
+          startY = e.clientY;
+          startWidth = panelEl.offsetWidth;
+          startHeight = panelEl.offsetHeight;
+
+          if (direction === 'right' || direction === 'corner') {
+            handleRight.classList.add('active');
+          }
+          if (direction === 'bottom' || direction === 'corner') {
+            handleBottom.classList.add('active');
+          }
+
+          document.body.style.cursor = direction === 'right' ? 'ew-resize' :
+            direction === 'bottom' ? 'ns-resize' : 'nwse-resize';
+          document.body.style.userSelect = 'none';
+          e.preventDefault();
+          e.stopPropagation();
+        };
+
+        const doResize = (e) => {
+          if (!isResizing) return;
+
+          const maxW = window.innerWidth * MAX_PANEL_WIDTH_RATIO;
+          const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+
+          if (resizeDirection === 'right' || resizeDirection === 'corner') {
+            const deltaX = e.clientX - startX;
+            let newWidth = startWidth + deltaX;
+            newWidth = clamp(newWidth, MIN_PANEL_WIDTH, maxW);
+            panelEl.style.width = newWidth + 'px';
+            self.w = newWidth;
+          }
+
+          if (resizeDirection === 'bottom' || resizeDirection === 'corner') {
+            const deltaY = e.clientY - startY;
+            let newHeight = startHeight + deltaY;
+            newHeight = clamp(newHeight, MIN_PANEL_HEIGHT, maxH);
+            panelEl.style.height = newHeight + 'px';
+            self.h = newHeight;
+          }
+        };
+
+        const endResize = () => {
+          if (isResizing) {
+            isResizing = false;
+            handleRight.classList.remove('active');
+            handleBottom.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+
+            // Constrain panel to viewport after resize
+            self.constrainToViewport();
+
+            // Update stored dimensions
+            self.w = panelEl.offsetWidth;
+            self.h = panelEl.offsetHeight;
+
+            // Save state (this now captures w/h from DOM)
+            save(self);
+          }
+        };
+
+        // Right edge resize
+        handleRight.addEventListener('mousedown', (e) => startResize(e, 'right'));
+
+        // Bottom edge resize
+        handleBottom.addEventListener('mousedown', (e) => startResize(e, 'bottom'));
+
+        // Corner resize (both directions)
+        handleCorner.addEventListener('mousedown', (e) => startResize(e, 'corner'));
+
+        // Document-level listeners for resize
+        document.addEventListener('mousemove', doResize);
+        document.addEventListener('mouseup', endResize);
+
+        // Observe when panel becomes visible and constrain it
+        const observer = new MutationObserver((mutations) => {
+          mutations.forEach((mutation) => {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+              if (!panelEl.classList.contains('hidden')) {
+                setTimeout(() => self.constrainToViewport(), 10);
+              }
+            }
+          });
+        });
+        observer.observe(panelEl, { attributes: true });
+      },
+
+      // ========================================================================
+      // HTMX REFRESH BINDING (moved from panel_shell.js)
+      // ========================================================================
+      setupRefreshBinding() {
+        // Bind refresh event to panel body for HTMX reload trigger
+        document.addEventListener('htmx:load', function() {
+          document.querySelectorAll('#job-panel .panel-body').forEach(function(el) {
+            // Guard against double-binding
+            if (el.dataset.refreshBound === '1') return;
+            el.dataset.refreshBound = '1';
+
+            el.addEventListener('refresh', function() {
+              const hxGet = el.getAttribute('hx-get');
+              if (hxGet && typeof htmx !== 'undefined') {
+                htmx.ajax('GET', hxGet, { target: el });
+              }
+            });
+          });
+        });
       }
     };
 
@@ -1664,7 +1819,7 @@
       target.setAttribute('hx-trigger', 'refresh');
 
       // Sanitize the HTML to fix any invalid value attributes (e.g., from old cached drafts)
-      const sanitizedHtml = sanitizeDraftHtml(html);
+      const sanitizedHtml = GTS.htmlState.sanitizeDraftHtml(html);
       target.innerHTML = sanitizedHtml;
 
       // Re-run HTMX processing ONLY on the inner form content, not the panel body
@@ -1697,8 +1852,9 @@
         }
 
         // Initialize schedule picker if available
-        if (window.initSchedulePicker) {
-          window.initSchedulePicker();
+        // Note: schedule_picker.js exposes window.SchedulePicker.init, NOT window.initSchedulePicker
+        if (window.SchedulePicker && window.SchedulePicker.init) {
+          window.SchedulePicker.init();
         }
       }, 50);
     },
@@ -1724,417 +1880,6 @@
     currentDraftId: null
   };
 
-  window.jobPanel = function jobPanel() {
-    return {
-      isOpen: false,
-      title: 'Job',
-      x: 80, y: 80, w: 520, h: null,
-      docked: false,
-      dragging: false, sx: 0, sy: 0,
-      currentJobId: null, // Track current job for workspace integration
-      get panelStyle() {
-        if (this.docked) {
-          return `top:80px; right:16px; left:auto; transform:none;`;
-        }
-        return `top:0; left:0; transform: translate(${this.x}px, ${this.y}px);`;
-      },
-      open() { this.isOpen = true; this.updateMinimizeButton(); save(this); },
-      close(skipUnsavedCheck) {
-        // Check for unsaved changes before closing (unless explicitly skipped)
-        if (!skipUnsavedCheck && this.hasUnsavedChanges()) {
-          if (!confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
-            return; // User cancelled, don't close
-          }
-        }
-
-        this.isOpen = false;
-        this.currentJobId = null; // Clear current job ID when closing
-        this.updateMinimizeButton(); // Hide minimize button
-        save(this);
-      },
-      setTitle(t) { this.title = t || 'Job'; save(this); },
-      setCurrentJobId(jobId) {
-        this.currentJobId = normalizeJobId(jobId);
-        this.updateMinimizeButton();
-      },
-      updateMinimizeButton() {
-        const minimizeBtn = document.getElementById('panel-workspace-minimize-btn');
-        if (!minimizeBtn) return;
-
-        // Always show minimize button when panel is open
-        if (this.isOpen) {
-          minimizeBtn.style.display = 'inline-flex';
-        } else {
-          minimizeBtn.style.display = 'none';
-        }
-      },
-      toggleDock() { this.docked = !this.docked; save(this); },
-      hasUnsavedChanges() {
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) return false;
-
-        // Check for any form inputs that have been modified
-        const inputs = panelBody.querySelectorAll('input, select, textarea');
-        for (const input of inputs) {
-          // Skip hidden inputs and buttons
-          if (input.type === 'hidden' || input.type === 'submit' || input.type === 'button') {
-            continue;
-          }
-
-          // Skip inputs without a name attribute - they don't submit and are UI-only
-          // (e.g., flatpickr alt display inputs, cloned header selects, etc.)
-          if (!input.name) {
-            continue;
-          }
-
-          // Check if the current value differs from the original value
-          if (input.hasAttribute('data-original-value')) {
-            const originalValue = input.getAttribute('data-original-value');
-            const currentValue = input.value;
-            if (originalValue !== currentValue) {
-              return true;
-            }
-          } else if (input.value !== '') {
-            // If no original value stored but input has a value, it might be a change
-            // This is a fallback for inputs that weren't tracked from the start
-            return true;
-          }
-        }
-
-        return false;
-      },
-      trackFormChanges() {
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) {
-          console.log('trackFormChanges: No panel body found');
-          return;
-        }
-
-        // Store original values for all form inputs
-        const inputs = panelBody.querySelectorAll('input, select, textarea');
-        console.log('trackFormChanges: Setting tracking on', inputs.length, 'inputs');
-        inputs.forEach(input => {
-          // Skip inputs without a name attribute - they don't submit and are UI-only
-          if (!input.name) {
-            return;
-          }
-          if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
-            input.setAttribute('data-original-value', input.value);
-          }
-        });
-      },
-      clearUnsavedChanges() {
-        // Reset tracking by updating all original values to current values
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) return;
-
-        const inputs = panelBody.querySelectorAll('input, select, textarea');
-        inputs.forEach(input => {
-          // Skip inputs without a name attribute - they don't submit and are UI-only
-          if (!input.name) {
-            return;
-          }
-          if (input.type !== 'hidden' && input.type !== 'submit' && input.type !== 'button') {
-            input.setAttribute('data-original-value', input.value);
-          }
-        });
-      },
-      /**
-       * Check which required fields are missing from the form (Alpine version).
-       * Required fields: business_name, start_dt, end_dt, calendar
-       * @param {HTMLFormElement} form - The form element
-       * @returns {string[]} - Array of missing field names (empty if all present)
-       */
-      getRequiredMissing(form) {
-        if (!form) return ['form'];
-        const missing = [];
-
-        // Business name - required and must not be whitespace-only
-        const businessName = form.querySelector('input[name="business_name"]');
-        if (!businessName || !businessName.value.trim()) {
-          missing.push('business_name');
-        }
-
-        // Start date - required
-        const startDt = form.querySelector('input[name="start_dt"]');
-        if (!startDt || !startDt.value.trim()) {
-          missing.push('start_dt');
-        }
-
-        // End date - required
-        const endDt = form.querySelector('input[name="end_dt"]');
-        if (!endDt || !endDt.value.trim()) {
-          missing.push('end_dt');
-        }
-
-        // Calendar - required (select element)
-        const calendar = form.querySelector('select[name="calendar"]');
-        if (!calendar || !calendar.value) {
-          missing.push('calendar');
-        }
-
-        return missing;
-      },
-      /**
-       * Check if any required fields are missing (Alpine version).
-       * @param {HTMLFormElement} form - The form element
-       * @returns {boolean} - True if any required fields are missing
-       */
-      hasRequiredMissing(form) {
-        return this.getRequiredMissing(form).length > 0;
-      },
-      /**
-       * Save the form without causing page navigation (Alpine version).
-       * Uses HTMX if the form has hx-post, otherwise uses fetch().
-       * Handles draft promotion automatically on successful save.
-       * @param {Object|Function} optionsOrCallback - Options object or callback function
-       * @param {Function} callback - Called with result object: { successful, jobId, responseHtml, status, reason }
-       */
-      saveForm(optionsOrCallback, callback) {
-        // Handle backwards compatibility: saveForm(callback) vs saveForm(options, callback)
-        let options = { mode: 'autosave' };
-        if (typeof optionsOrCallback === 'function') {
-          callback = optionsOrCallback;
-        } else if (optionsOrCallback && typeof optionsOrCallback === 'object') {
-          options = { ...options, ...optionsOrCallback };
-        }
-
-        const panelBody = document.querySelector('#job-panel .panel-body');
-        if (!panelBody) {
-          console.warn('Panel body not found');
-          if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null });
-          return;
-        }
-
-        const form = panelBody.querySelector('form');
-        if (!form) {
-          console.warn('Form not found in panel');
-          if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null });
-          return;
-        }
-
-        const self = this;
-        const mode = options.mode || 'autosave';
-
-        // Check for missing required fields
-        const missingFields = this.getRequiredMissing(form);
-        const hasMissing = missingFields.length > 0;
-
-        if (mode === 'manual') {
-          // Manual save mode: run HTML5 validation and show messages
-          if (hasMissing) {
-            // Trigger HTML5 validation display
-            if (!form.reportValidity()) {
-              if (window.showToast) {
-                window.showToast('Please fill in all required fields before saving.', 'warning');
-              }
-              if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
-              return;
-            }
-          }
-        } else {
-          // Autosave mode: don't show validation popups, just return unsuccessful
-          if (hasMissing) {
-            console.log('Alpine saveForm autosave skipped: missing required fields', missingFields);
-            if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null, reason: 'missing_required', missingFields });
-            return;
-          }
-        }
-
-        /**
-         * Handle draft promotion after successful save
-         */
-        const handleDraftPromotion = (jobId) => {
-          if (jobId && window.JobPanel.currentDraftId && window.JobWorkspace && window.JobWorkspace.promoteDraft) {
-            const draftId = window.JobPanel.currentDraftId;
-            window.JobWorkspace.promoteDraft(draftId, jobId, {});
-            window.JobPanel.currentDraftId = null;
-            console.log('Alpine: Promoted draft', draftId, 'to job', jobId);
-          }
-        };
-
-        // Check if form has HTMX attributes (hx-post, hx-put, etc.)
-        const hasHtmxPost = form.hasAttribute('hx-post') || form.hasAttribute('hx-put') ||
-          form.hasAttribute('hx-patch') || form.hasAttribute('hx-delete');
-
-        if (typeof htmx !== 'undefined' && hasHtmxPost) {
-          // Use HTMX submission - it won't navigate because the form has hx-* attrs
-          const afterRequestHandler = (event) => {
-            const xhr = event.detail.xhr;
-            const successful = event.detail.successful;
-            const status = xhr ? xhr.status : null;
-            const responseHtml = xhr ? xhr.responseText : null;
-            let jobId = null;
-
-            if (successful) {
-              // Clear unsaved changes tracking
-              self.clearUnsavedChanges();
-
-              // Capture job ID from HX-Trigger header
-              if (xhr) {
-                const triggerHeader = xhr.getResponseHeader('HX-Trigger');
-                if (triggerHeader) {
-                  try {
-                    const triggerData = JSON.parse(triggerHeader);
-                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
-                      jobId = normalizeJobId(triggerData.jobSaved.jobId);
-                      self.currentJobId = jobId;
-                      console.log('Captured job ID from trigger:', jobId);
-                    }
-                  } catch (e) {
-                    console.warn('Could not parse trigger data:', e);
-                  }
-                }
-              }
-
-              // Fallback: try to get from DOM
-              if (!jobId) {
-                const jobIdInput = form.querySelector('input[name="job_id"]');
-                if (jobIdInput && jobIdInput.value) {
-                  jobId = normalizeJobId(jobIdInput.value);
-                  self.currentJobId = jobId;
-                  console.log('Captured job ID from DOM fallback:', jobId);
-                }
-              }
-
-              // Handle draft promotion
-              handleDraftPromotion(jobId);
-
-              // Migrate warning key from temp to job ID
-              if (jobId && window.migrateWarningKeyToJobId) {
-                window.migrateWarningKeyToJobId(form, jobId);
-              }
-            } else {
-              console.error('Form submission failed with status:', status);
-            }
-
-            form.removeEventListener('htmx:afterRequest', afterRequestHandler);
-            if (callback) callback({ successful, jobId, responseHtml, status });
-          };
-
-          form.addEventListener('htmx:afterRequest', afterRequestHandler);
-          htmx.trigger(form, 'submit');
-
-        } else {
-          // Use fetch() to avoid navigation - never call form.submit()
-          const formData = new FormData(form);
-          const actionUrl = form.getAttribute('hx-post') || form.getAttribute('action') || window.location.href;
-          const csrfToken = window.getCookie ? window.getCookie('csrftoken') :
-            document.querySelector('meta[name="csrf-token"]')?.content ||
-            form.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
-
-          fetch(actionUrl, {
-            method: 'POST',
-            body: formData,
-            headers: {
-              'X-CSRFToken': csrfToken || '',
-              'X-Requested-With': 'XMLHttpRequest'
-            }
-          })
-            .then(response => {
-              return response.text().then(html => ({
-                successful: response.ok,
-                status: response.status,
-                responseHtml: html,
-                headers: response.headers
-              }));
-            })
-            .then(result => {
-              let jobId = null;
-
-              if (result.successful) {
-                self.clearUnsavedChanges();
-
-                // Try to parse HX-Trigger from response headers
-                const triggerHeader = result.headers.get('HX-Trigger');
-                if (triggerHeader) {
-                  try {
-                    const triggerData = JSON.parse(triggerHeader);
-                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
-                      jobId = normalizeJobId(triggerData.jobSaved.jobId);
-                      self.currentJobId = jobId;
-                      console.log('Captured job ID from fetch trigger:', jobId);
-                    }
-                  } catch (e) {
-                    console.warn('Could not parse trigger data:', e);
-                  }
-                }
-
-                // Fallback: try to extract job_id from response HTML
-                if (!jobId && result.responseHtml) {
-                  const match = result.responseHtml.match(/name="job_id"\s+value="(\d+)"/);
-                  if (match) {
-                    jobId = normalizeJobId(match[1]);
-                    self.currentJobId = jobId;
-                    console.log('Captured job ID from response HTML:', jobId);
-                  }
-                }
-
-                // Handle draft promotion
-                handleDraftPromotion(jobId);
-
-                // Migrate warning key from temp to job ID
-                if (jobId && window.migrateWarningKeyToJobId) {
-                  window.migrateWarningKeyToJobId(form, jobId);
-                }
-              } else {
-                console.error('Form submission failed with status:', result.status);
-              }
-
-              if (callback) callback({
-                successful: result.successful,
-                jobId,
-                responseHtml: result.responseHtml,
-                status: result.status
-              });
-            })
-            .catch(error => {
-              console.error('Fetch error:', error);
-              if (callback) callback({ successful: false, jobId: null, responseHtml: null, status: null });
-            });
-        }
-      },
-      startDrag(e) {
-        if (this.docked) return;
-        const p = e.touches?.[0] ?? e;
-        this.dragging = true;
-        this.sx = p.clientX - this.x;
-        this.sy = p.clientY - this.y;
-        window.addEventListener('mousemove', this._move);
-        window.addEventListener('mouseup', this._stop);
-        window.addEventListener('touchmove', this._move, { passive: false });
-        window.addEventListener('touchend', this._stop);
-      },
-      _move: null,
-      _stop: null,
-      init() {
-        const self = this;
-        panelInstance = this; // Store reference for global API
-        const st = load() || {};
-        Object.assign(this, st);
-        this._move = function (ev) {
-          if (!self.dragging) return;
-          const p = ev.touches?.[0] ?? ev;
-          const maxX = window.innerWidth - 200; // keep header on-screen
-          const maxY = window.innerHeight - 48;
-          self.x = clamp(p.clientX - self.sx, 8, maxX);
-          self.y = clamp(p.clientY - self.sy, 8, maxY);
-          ev.preventDefault();
-        };
-        this._stop = function () {
-          self.dragging = false;
-          window.removeEventListener('mousemove', self._move);
-          window.removeEventListener('mouseup', self._stop);
-          window.removeEventListener('touchmove', self._move);
-          window.removeEventListener('touchend', self._stop);
-          save(self);
-        };
-        // Execute any queued operations now that panel is ready
-        flushQueue();
-      }
-    };
-  };
-
   // ==========================================================================
   // DATE VALIDATION GUARDRAILS
   // Values come from server (constants.py) via window.calendarConfig.guardrails
@@ -2154,6 +1899,114 @@
   }
   // Convenience alias for immediate use (re-evaluated each call for late-loading config)
   const DATE_GUARDRAILS = getGuardrails();
+
+  // ==========================================================================
+  // ONE-TIME WARNING TRACKING (BOUNDED MAP + TTL)
+  // Replaces unbounded per-job localStorage keys with a single JSON map.
+  // Format: { schemaVersion: 1, entries: { "job:123": timestamp, "temp:xxx": timestamp } }
+  // TTL: 90 days. Cap: 500 entries (oldest removed first).
+  // ==========================================================================
+  const WARNING_MAP_KEY = 'gts-job-initial-save-attempted';
+  const WARNING_MAP_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+  const WARNING_MAP_MAX_ENTRIES = 500;
+
+  /**
+   * Load the warning map from localStorage
+   * @returns {Object} - { schemaVersion: 1, entries: { key: timestamp } }
+   */
+  function loadWarningMap() {
+    try {
+      const raw = localStorage.getItem(WARNING_MAP_KEY);
+      if (!raw) return { schemaVersion: 1, entries: {} };
+      const data = JSON.parse(raw);
+      if (!data || typeof data.entries !== 'object') {
+        return { schemaVersion: 1, entries: {} };
+      }
+      return { schemaVersion: data.schemaVersion || 1, entries: data.entries || {} };
+    } catch (e) {
+      return { schemaVersion: 1, entries: {} };
+    }
+  }
+
+  /**
+   * Save the warning map to localStorage
+   * @param {Object} map - { schemaVersion: 1, entries: { key: timestamp } }
+   */
+  function saveWarningMap(map) {
+    try {
+      localStorage.setItem(WARNING_MAP_KEY, JSON.stringify(map));
+    } catch (e) {
+      console.warn('JobPanel: Error saving warning map', e);
+    }
+  }
+
+  /**
+   * Clean up old entries from the warning map (TTL + cap)
+   * @param {Object} map - The warning map
+   * @returns {Object} - Cleaned map
+   */
+  function cleanupWarningMap(map) {
+    const now = Date.now();
+    const entries = map.entries || {};
+    const cutoff = now - WARNING_MAP_TTL_MS;
+
+    // Remove expired entries
+    const valid = {};
+    for (const [key, ts] of Object.entries(entries)) {
+      if (typeof ts === 'number' && ts > cutoff) {
+        valid[key] = ts;
+      }
+    }
+
+    // If still over cap, remove oldest entries
+    const keys = Object.keys(valid);
+    if (keys.length > WARNING_MAP_MAX_ENTRIES) {
+      // Sort by timestamp (oldest first) and keep only newest
+      keys.sort((a, b) => valid[a] - valid[b]);
+      const toRemove = keys.slice(0, keys.length - WARNING_MAP_MAX_ENTRIES);
+      toRemove.forEach(k => delete valid[k]);
+    }
+
+    return { schemaVersion: 1, entries: valid };
+  }
+
+  /**
+   * Migrate legacy per-job warning keys to the new map format.
+   * Called once on load to clean up old unbounded keys.
+   */
+  function migrateLegacyWarningKeys() {
+    try {
+      const map = loadWarningMap();
+      const keysToRemove = [];
+
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('gts-job-initial-save-attempted:')) {
+          // Extract the job/temp key
+          const warningKey = key.replace('gts-job-initial-save-attempted:', '');
+          if (warningKey && warningKey !== 'gts-job-initial-save-attempted') {
+            // Only migrate if value was 'true'
+            if (localStorage.getItem(key) === 'true') {
+              // Use current time as timestamp (we don't know when it was set)
+              map.entries[warningKey] = Date.now();
+            }
+            keysToRemove.push(key);
+          }
+        }
+      }
+
+      if (keysToRemove.length > 0) {
+        console.log('JobPanel: Migrating', keysToRemove.length, 'legacy warning keys to bounded map');
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+        saveWarningMap(cleanupWarningMap(map));
+      }
+    } catch (e) {
+      console.warn('JobPanel: Error migrating legacy warning keys', e);
+    }
+  }
+
+  // Run migration on load
+  migrateLegacyWarningKeys();
 
   /**
    * Get or create a stable key for tracking one-time warnings per job.
@@ -2177,10 +2030,16 @@
    */
   function hasShownInitialWarning(warningKey) {
     try {
-      return localStorage.getItem(`gts-job-initial-save-attempted:${warningKey}`) === 'true';
-    } catch (e) {
-      // localStorage blocked - treat as already shown to avoid annoyance
+      const map = loadWarningMap();
+      const ts = map.entries[warningKey];
+      if (!ts) return false;
+      // Check TTL
+      if (Date.now() - ts > WARNING_MAP_TTL_MS) {
+        return false; // Expired
+      }
       return true;
+    } catch (e) {
+      return true; // Default to true on error (skip warning)
     }
   }
 
@@ -2189,9 +2048,12 @@
    */
   function markInitialWarningShown(warningKey) {
     try {
-      localStorage.setItem(`gts-job-initial-save-attempted:${warningKey}`, 'true');
+      let map = loadWarningMap();
+      map.entries[warningKey] = Date.now();
+      map = cleanupWarningMap(map);
+      saveWarningMap(map);
     } catch (e) {
-      // localStorage blocked - ignore
+      console.warn('JobPanel: Error marking warning shown', e);
     }
   }
 
@@ -2203,15 +2065,19 @@
     if (!form.dataset.tempWarningKey) return;
     const tempKey = form.dataset.tempWarningKey;
     const jobKey = `job:${jobId}`;
+
     try {
-      const wasShown = localStorage.getItem(`gts-job-initial-save-attempted:${tempKey}`);
-      if (wasShown === 'true') {
-        localStorage.setItem(`gts-job-initial-save-attempted:${jobKey}`, 'true');
+      const map = loadWarningMap();
+      // If temp key exists, move it to job key
+      if (map.entries[tempKey]) {
+        map.entries[jobKey] = map.entries[tempKey];
+        delete map.entries[tempKey];
+        saveWarningMap(map);
       }
-      localStorage.removeItem(`gts-job-initial-save-attempted:${tempKey}`);
     } catch (e) {
-      // localStorage blocked - ignore
+      console.warn('JobPanel: Error migrating warning key', e);
     }
+
     // Update the form's key reference
     delete form.dataset.tempWarningKey;
   }
@@ -2349,12 +2215,117 @@
     }
   });
 
+  // ==========================================================================
+  // PANEL STATE PERSISTENCE
+  // jobPanelState is the single source of truth for panel state
+  // Legacy keys (gts-panel-width, gts-panel-height) are migrated on first load
+  // ==========================================================================
+
+  const LEGACY_WIDTH_KEY = 'gts-panel-width';
+  const LEGACY_HEIGHT_KEY = 'gts-panel-height';
+  const MIN_PANEL_WIDTH = 200;
+  const MAX_PANEL_WIDTH_RATIO = 0.95;
+  const MIN_PANEL_HEIGHT = 100;
+  const MAX_PANEL_HEIGHT_RATIO = 0.99;
+
   function save(vm) {
-    const st = { x: vm.x, y: vm.y, w: vm.w, h: vm.h, docked: vm.docked, title: vm.title, isOpen: vm.isOpen };
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); } catch (e) { }
+    // Capture current panel dimensions from DOM (ensures state matches reality)
+    const panelEl = document.getElementById('job-panel');
+    const currentW = panelEl ? panelEl.offsetWidth : vm.w;
+    const currentH = panelEl ? panelEl.offsetHeight : vm.h;
+
+    const st = {
+      x: vm.x,
+      y: vm.y,
+      w: currentW || vm.w,
+      h: currentH || vm.h,
+      docked: vm.docked,
+      title: vm.title,
+      isOpen: vm.isOpen
+    };
+    if (window.GTS && window.GTS.storage) {
+      GTS.storage.setJson(STORAGE_KEY, st);
+    } else {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(st)); } catch (e) { }
+    }
   }
+
   function load() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { return null; }
+    let st = null;
+    if (window.GTS && window.GTS.storage) {
+      st = GTS.storage.getJson(STORAGE_KEY, null);
+    } else {
+      try { st = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { st = null; }
+    }
+
+    // Migrate legacy width/height keys if w/h are missing or invalid
+    if (st) {
+      let needsMigration = false;
+      const maxW = window.innerWidth * MAX_PANEL_WIDTH_RATIO;
+      const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+
+      // Check and migrate width
+      if (!st.w || typeof st.w !== 'number' || st.w < MIN_PANEL_WIDTH) {
+        const legacyWidth = window.GTS && window.GTS.storage
+          ? GTS.storage.getRaw(LEGACY_WIDTH_KEY)
+          : localStorage.getItem(LEGACY_WIDTH_KEY);
+        if (legacyWidth) {
+          const parsed = parseInt(legacyWidth, 10);
+          if (!isNaN(parsed) && parsed >= MIN_PANEL_WIDTH) {
+            st.w = clamp(parsed, MIN_PANEL_WIDTH, maxW);
+            needsMigration = true;
+          }
+        }
+      }
+
+      // Check and migrate height
+      if (!st.h || typeof st.h !== 'number' || st.h < MIN_PANEL_HEIGHT) {
+        const legacyHeight = window.GTS && window.GTS.storage
+          ? GTS.storage.getRaw(LEGACY_HEIGHT_KEY)
+          : localStorage.getItem(LEGACY_HEIGHT_KEY);
+        if (legacyHeight) {
+          const parsed = parseInt(legacyHeight, 10);
+          if (!isNaN(parsed) && parsed >= MIN_PANEL_HEIGHT) {
+            st.h = clamp(parsed, MIN_PANEL_HEIGHT, maxH);
+            needsMigration = true;
+          }
+        }
+      }
+
+      // If we migrated, save the updated state and remove legacy keys
+      if (needsMigration) {
+        if (window.GTS && window.GTS.storage) {
+          GTS.storage.setJson(STORAGE_KEY, st);
+          GTS.storage.remove(LEGACY_WIDTH_KEY);
+          GTS.storage.remove(LEGACY_HEIGHT_KEY);
+        } else {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+            localStorage.removeItem(LEGACY_WIDTH_KEY);
+            localStorage.removeItem(LEGACY_HEIGHT_KEY);
+          } catch (e) { }
+        }
+        console.log('[Panel] Migrated legacy panel dimensions to jobPanelState');
+      }
+    }
+
+    return st;
+  }
+
+  /**
+   * Apply saved panel dimensions to the DOM element
+   */
+  function applyPanelDimensions(panelEl, w, h) {
+    if (!panelEl) return;
+    const maxW = window.innerWidth * MAX_PANEL_WIDTH_RATIO;
+    const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+
+    if (w && typeof w === 'number' && w >= MIN_PANEL_WIDTH) {
+      panelEl.style.width = clamp(w, MIN_PANEL_WIDTH, maxW) + 'px';
+    }
+    if (h && typeof h === 'number' && h >= MIN_PANEL_HEIGHT) {
+      panelEl.style.height = clamp(h, MIN_PANEL_HEIGHT, maxH) + 'px';
+    }
   }
 
   // Initialize panel when DOM is ready
@@ -2366,28 +2337,11 @@
   }
 
   function initPanel() {
-    // Wait a bit for Alpine to potentially load
-    setTimeout(() => {
-      const hasAlpine = typeof Alpine !== 'undefined' && Alpine !== null && typeof Alpine.start === 'function';
-      if (hasAlpine) {
-        isAlpineMode = true;
-        // Alpine will call init() on the component
-        // Wait a bit more for Alpine to initialize the component
-        setTimeout(() => {
-          if (!panelInstance) {
-            panelInstance = createVanillaPanel();
-            if (panelInstance) {
-              flushQueue();
-            }
-          }
-        }, 500);
-      } else {
-        isAlpineMode = false;
-        panelInstance = createVanillaPanel();
-        if (panelInstance) {
-          flushQueue();
-        }
-      }
-    }, 100);
+    // Initialize the vanilla JS panel implementation
+    // Note: Alpine support was removed in Phase 4 cleanup
+    panelInstance = createVanillaPanel();
+    if (panelInstance) {
+      flushQueue();
+    }
   }
 })();

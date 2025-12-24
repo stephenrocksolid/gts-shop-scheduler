@@ -12,7 +12,7 @@
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             <a href="?sort=business_name&direction={% if current_sort == 'business_name' and current_direction == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
                                class="group inline-flex items-center hover:text-gray-700">
                                 Customer
@@ -33,7 +33,7 @@
                                 {% endif %}
                             </a>
                         </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             <a href="?sort=calendar__name&direction={% if current_sort == 'calendar__name' and current_direction == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
                                class="group inline-flex items-center hover:text-gray-700">
                                 Calendar
@@ -54,7 +54,7 @@
                                 {% endif %}
                             </a>
                         </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             <a href="?sort=status&direction={% if current_sort == 'status' and current_direction == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
                                class="group inline-flex items-center hover:text-gray-700">
                                 Status
@@ -75,7 +75,7 @@
                                 {% endif %}
                             </a>
                         </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             <a href="?sort=start_dt&direction={% if current_sort == 'start_dt' and current_direction == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
                                class="group inline-flex items-center hover:text-gray-700">
                                 Start Date
@@ -96,7 +96,7 @@
                                 {% endif %}
                             </a>
                         </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             <a href="?sort=end_dt&direction={% if current_sort == 'end_dt' and current_direction == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
                                class="group inline-flex items-center hover:text-gray-700">
                                 End Date
@@ -117,7 +117,7 @@
                                 {% endif %}
                             </a>
                         </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             <a href="?sort=repeat_type&direction={% if current_sort == 'repeat_type' and current_direction == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
                                class="group inline-flex items-center hover:text-gray-700">
                                 Repeat
@@ -138,106 +138,60 @@
                                 {% endif %}
                             </a>
                         </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Actions
                         </th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200" id="job-table-body">
-                    {% for job in jobs %}
-                        {% if date_filter == 'all' and current_sort == 'smart' %}
-                            {% if forloop.first %}
-                                {# First row: show Upcoming or Past header based on first job #}
-                                {% if job.is_past_event %}
-                                    <tr class="bg-gray-100 border-t-2 border-gray-300">
-                                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
-                                            Past Events
-                                        </td>
-                                    </tr>
-                                {% else %}
-                                    <tr class="bg-blue-50 border-t-2 border-blue-200">
-                                        <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
-                                            Upcoming Events
-                                        </td>
-                                    </tr>
-                                {% endif %}
-                            {% else %}
-                                {# Subsequent rows: insert Past header when is_past_event changes from 0 to 1 #}
-                                {% ifchanged job.is_past_event %}
-                                    {% if job.is_past_event %}
-                                        <tr class="bg-gray-100 border-t-2 border-gray-300">
-                                            <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
-                                                Past Events
-                                            </td>
-                                        </tr>
-                                    {% endif %}
-                                {% endifchanged %}
+                    {% if job_sections %}
+                        {# Unified rendering path for both search and standard modes #}
+                        {# Series headers appear exactly where the first matching occurrence would have #}
+                        
+                        {# Render Upcoming section if it has rows #}
+                        {% if job_sections.upcoming %}
+                            {% if date_filter == 'all' or is_grouped_search %}
+                                <tr class="bg-blue-50 border-t-2 border-blue-200">
+                                    <td colspan="7" class="px-6 py-2 text-sm font-semibold text-blue-700 uppercase tracking-wide">
+                                        Upcoming Events
+                                    </td>
+                                </tr>
                             {% endif %}
+                            {% for row in job_sections.upcoming %}
+                                {% if row.type == 'series' %}
+                                    {% include 'rental_scheduler/partials/series_header_row.html' with series=row.series %}
+                                {% else %}
+                                    {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+                                {% endif %}
+                            {% endfor %}
                         {% endif %}
-                        {% include 'rental_scheduler/partials/job_row.html' with job=job %}
-                    {% endfor %}
+                        
+                        {# Render Past section if it has rows #}
+                        {% if job_sections.past %}
+                            {% if date_filter == 'all' or is_grouped_search %}
+                                <tr class="bg-gray-100 border-t-2 border-gray-300">
+                                    <td colspan="7" class="px-6 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                                        Past Events
+                                    </td>
+                                </tr>
+                            {% endif %}
+                            {% for row in job_sections.past %}
+                                {% if row.type == 'series' %}
+                                    {% include 'rental_scheduler/partials/series_header_row.html' with series=row.series %}
+                                {% else %}
+                                    {% include 'rental_scheduler/partials/job_row.html' with job=row.job %}
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    {% else %}
+                        {# Fallback for empty job list #}
+                    {% endif %}
                 </tbody>
             </table>
         </div>
 
-        <!-- Pagination -->
-        {% if jobs.has_other_pages %}
-            <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-                <div class="flex-1 flex justify-between sm:hidden">
-                    {% if jobs.has_previous %}
-                        <a href="?page={{ jobs.previous_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-                           class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                            Previous
-                        </a>
-                    {% endif %}
-                    {% if jobs.has_next %}
-                        <a href="?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-                           class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                            Next
-                        </a>
-                    {% endif %}
-                </div>
-                <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                    <div>
-                        <p class="text-sm text-gray-700">
-                            Showing <span class="font-medium">{{ jobs.start_index }}</span> to 
-                            <span class="font-medium">{{ jobs.end_index }}</span> of 
-                            <span class="font-medium">{{ jobs.paginator.count }}</span> results
-                        </p>
-                    </div>
-                    <div>
-                        <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-                            {% if jobs.has_previous %}
-                                <a href="?page={{ jobs.previous_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-                                   class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
-                                    Previous
-                                </a>
-                            {% endif %}
-                            
-                            {% for num in jobs.paginator.page_range %}
-                                {% if jobs.number == num %}
-                                    <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-blue-50 text-sm font-medium text-blue-600">
-                                        {{ num }}
-                                    </span>
-                                {% elif num > jobs.number|add:'-3' and num < jobs.number|add:'3' %}
-                                    <a href="?page={{ num }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-                                       class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                        {{ num }}
-                                    </a>
-                                {% endif %}
-                            {% endfor %}
-                            
-                            {% if jobs.has_next %}
-                                <a href="?page={{ jobs.next_page_number }}&sort={{ current_sort }}&direction={{ current_direction }}{% if search_query %}&search={{ search_query }}{% endif %}{% for cal_id in selected_calendars %}&calendars={{ cal_id }}{% endfor %}{% if date_filter %}&date_filter={{ date_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-                                   class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
-                                    Next
-                                </a>
-                            {% endif %}
-                        </nav>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
+        <!-- Pagination Footer -->
+        {% include 'rental_scheduler/partials/job_list_pagination_footer.html' with oob=False %}
     {% else %}
         <div class="text-center py-12">
             <div class="text-gray-500 text-lg mb-4">No jobs found</div>

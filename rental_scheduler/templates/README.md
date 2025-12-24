@@ -23,20 +23,33 @@ rental_scheduler/templates/
     │   ├── button.html               # Button component
     │   ├── empty_state.html          # Empty state component
     │   ├── loading.html              # Loading component
-    │   ├── modal.html                # Modal component
     │   ├── page_header.html          # Page header component
     │   └── status_pill.html          # Status indicator
+    ├── includes/                      # Global UI shells included by base.html
+    │   ├── panel.html                # Floating Job Panel shell
+    │   └── workspace_bar.html        # Bottom Job Workspace tab bar
     ├── partials/                      # Template partials
     │   ├── invoice_line.html
     │   ├── invoice_line_form.html
     │   ├── job_list_table.html
     │   ├── job_row.html
-    │   └── work_order_line.html
+    │   ├── work_order_line.html
+    │   ├── workorder_line_row.html
+    │   ├── workorder_list_table.html
+    │   └── workorder_row.html
     ├── jobs/                          # Job-related templates
     │   ├── job_list.html
+    │   ├── _job_form_partial.html
+    │   ├── _job_detail_partial.html
+    │   ├── job_confirm_delete.html
+    │   ├── job_import.html
+    │   ├── job_import_json.html
+    │   ├── import_history.html
     │   ├── job_print_invoice.html
     │   ├── job_print_wo_customer.html
     │   └── job_print_wo.html
+    ├── call_reminders/                # Call reminder partials
+    │   └── _call_reminder_form_partial.html
     ├── invoices/                      # Invoice-related templates
     │   ├── invoice_confirm_delete.html
     │   ├── invoice_detail.html
@@ -55,7 +68,7 @@ rental_scheduler/templates/
     │   ├── calendar_confirm_delete.html
     │   ├── calendar_form.html
     │   ├── calendar_list.html
-    │   └── calendar.html
+    ├── calendar.html                  # Main calendar page
     └── home.html                      # Home page template
 ```
 
@@ -70,6 +83,7 @@ rental_scheduler/templates/
 ### Component Templates
 - **`components/`**: Reusable UI components that can be included in any template
 - **`partials/`**: Template fragments for specific functionality
+- **`includes/`**: Global shells included by `base.html` (Job Panel + Workspace bar)
 
 ### Feature-Specific Templates
 - **`jobs/`**: All job-related templates (CRUD operations, modals, prints)

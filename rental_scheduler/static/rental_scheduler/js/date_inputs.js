@@ -153,6 +153,97 @@
     return `${y}-${mo}-${d}T${h}:${mi}`;
   }
 
+  // ==========================================================================
+  // FLATPICKR ALT INPUT MARKER CLASS
+  // Used to reliably identify alt inputs for cleanup during draft restore.
+  // flatpickr's default altInputClass varies and doesn't include a stable marker.
+  // ==========================================================================
+  const ALT_INPUT_MARKER_CLASS = 'gts-flatpickr-alt';
+
+  /**
+   * Strip flatpickr-generated artifacts from a DOM element (or cloned element).
+   * This is critical for draft minimize/restore to work correctly.
+   * 
+   * Flatpickr with altInput:true creates a visible "alt input" and hides the original.
+   * If these artifacts are cached in draft HTML and restored, re-initialization
+   * will create DUPLICATE inputs (the restored alt + a new alt).
+   * 
+   * This function removes:
+   * - Alt inputs (by marker class or structural detection)
+   * - Init markers that prevent re-initialization
+   * - flatpickr classes from original inputs
+   * 
+   * @param {HTMLElement} rootEl - The root element to clean (e.g., panel body clone)
+   * @param {Object} opts - Options
+   * @param {boolean} opts.destroyLiveInstances - If true, also destroy live _flatpickr instances (use for live DOM cleanup, not clones)
+   */
+  function stripFlatpickrArtifacts(rootEl, opts) {
+    if (!rootEl) return;
+    opts = opts || {};
+
+    // 1) Remove alt inputs by marker class (our stable marker)
+    rootEl.querySelectorAll('.' + ALT_INPUT_MARKER_CLASS).forEach(function(altInput) {
+      altInput.remove();
+    });
+
+    // 2) Remove alt inputs by structural detection (fallback for old drafts / flatpickr's default behavior)
+    //    Alt inputs are <input> elements without a name attribute that appear after the original input.
+    //    We identify original inputs by data-fp-original="true" or by having a name + flatpickr-input class.
+    rootEl.querySelectorAll('input[data-fp-original="true"], input.flatpickr-input[name]').forEach(function(originalInput) {
+      // Remove all consecutive nameless input siblings after the original
+      let sibling = originalInput.nextElementSibling;
+      while (sibling && sibling.tagName === 'INPUT' && !sibling.name) {
+        const toRemove = sibling;
+        sibling = sibling.nextElementSibling;
+        toRemove.remove();
+      }
+    });
+
+    // 3) Also catch nameless inputs with flatpickr-input class (another pattern)
+    rootEl.querySelectorAll('input.flatpickr-input:not([name])').forEach(function(altInput) {
+      altInput.remove();
+    });
+
+    // 4) Remove schedule picker init marker
+    const scheduleContainer = rootEl.querySelector('#schedule-picker-container');
+    if (scheduleContainer) {
+      delete scheduleContainer.dataset.schedulePickerInit;
+      scheduleContainer.removeAttribute('data-schedule-picker-init');
+    }
+
+    // 5) Clean up flatpickr classes/markers from original inputs so they can re-init
+    rootEl.querySelectorAll('input[data-fp-original="true"], input.flatpickr-input').forEach(function(input) {
+      // Only clean inputs that have a name (are form fields, not alt inputs)
+      if (input.name) {
+        input.classList.remove('flatpickr-input');
+        input.removeAttribute('data-fp-original');
+        input.removeAttribute('readonly');
+        // Ensure type is text (flatpickr may have changed it)
+        if (input.type === 'hidden') {
+          input.type = 'text';
+        }
+      }
+    });
+
+    // 6) Remove any flatpickr calendar dropdowns that got cloned
+    rootEl.querySelectorAll('.flatpickr-calendar').forEach(function(cal) {
+      cal.remove();
+    });
+
+    // 7) If destroying live instances (for live DOM, not clones)
+    if (opts.destroyLiveInstances) {
+      rootEl.querySelectorAll('input').forEach(function(input) {
+        if (input._flatpickr && typeof input._flatpickr.destroy === 'function') {
+          try {
+            input._flatpickr.destroy();
+          } catch (e) {
+            // Ignore errors during cleanup
+          }
+        }
+      });
+    }
+  }
+
   /**
    * Build flatpickr configuration with friendly display format.
    * 
@@ -198,9 +289,15 @@
     // Force 12-hour time picker (AM/PM) when time is enabled
     const timeConfig = enableTime ? { time_24hr: false } : {};
 
+    // Build altInputClass: include our marker class plus the original input's classes
+    // This ensures the alt input looks like the original and can be reliably identified for cleanup
+    const originalClasses = inputEl.className || '';
+    const altInputClass = ALT_INPUT_MARKER_CLASS + ' ' + originalClasses;
+
     const config = Object.assign({}, baseConfig, timeConfig, {
       altInput: true,
       altFormat: altFormat,
+      altInputClass: altInputClass.trim(),
       allowInput: true,
       disableMobile: true,
       enableTime: enableTime,
@@ -210,6 +307,10 @@
         // Mark the original input so CSS can hide it
         if (instance.input) {
           instance.input.setAttribute('data-fp-original', 'true');
+        }
+        // Copy inline styles from original to alt input so it looks the same
+        if (instance.altInput && inputEl.style.cssText) {
+          instance.altInput.style.cssText = inputEl.style.cssText;
         }
         // Call original onReady if present
         if (opts.onReady) {
@@ -372,7 +473,10 @@
     formatISODateTimeLocal: formatISODateTimeLocal,
     buildFriendlyFlatpickrConfig: buildFriendlyFlatpickrConfig,
     initFriendlyDateInput: initFriendlyDateInput,
-    initFriendlyDateInputs: initFriendlyDateInputs
+    initFriendlyDateInputs: initFriendlyDateInputs,
+    // Flatpickr cleanup for draft restore
+    stripFlatpickrArtifacts: stripFlatpickrArtifacts,
+    ALT_INPUT_MARKER_CLASS: ALT_INPUT_MARKER_CLASS
   };
 
 })();
