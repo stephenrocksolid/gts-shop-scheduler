@@ -121,6 +121,24 @@ class TestJobCreatePartial:
         # Verify recurrence section renders
         assert 'recurrence-type' in content
 
+    def test_job_form_partial_scopes_compact_input_css_to_job_form_only(self, api_client, calendar):
+        """
+        Regression test:
+        The job form partial includes a <style> block to compact inputs. That CSS must be scoped to
+        the job form (data-gts-job-form) so it doesn't affect other forms on the page (e.g. job list search).
+        """
+        url = reverse('rental_scheduler:job_create_partial')
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        content = response.content.decode('utf-8')
+
+        # Must be scoped to the job form only
+        assert 'form[data-gts-job-form] input[type="text"]' in content
+
+        # Must NOT be a global "form input" rule (would affect the job list search form)
+        assert 'form input[type="text"]' not in content
+
 
 @pytest.mark.django_db
 class TestCallReminderCreatePartial:

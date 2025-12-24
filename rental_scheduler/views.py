@@ -217,10 +217,11 @@ def _build_workorder_normalized_search_annotation():
     return normalized
 
 
-def _group_jobs_into_series(jobs, now):
+def _build_series_collapsed_rows(jobs, now, *, date_filter='all', include_match_counts=False):
     """
-    Group jobs into recurring series for search result display.
+    Unified helper to collapse recurring series into header rows.
     
+    Used for both search results (with match counts) and standard Jobs list.
     Returns interleaved row items that preserve the original sort order,
     with series headers appearing exactly where the first matching occurrence
     would have appeared (collapse-in-place).
@@ -228,128 +229,15 @@ def _group_jobs_into_series(jobs, now):
     Args:
         jobs: List/queryset of Job objects (already sorted)
         now: Current datetime (for upcoming/past classification)
+        date_filter: Date filter ('all', 'future', 'past', 'two_years', 'custom')
+        include_match_counts: If True, compute match_count for each series (for search mode)
         
     Returns:
         dict with structure:
         {
-            'upcoming_rows': [
-                {'type': 'series', 'series': series_info},  # or
-                {'type': 'job', 'job': job},
-                ...
-            ],
-            'past_rows': [...],  # Same structure
-        }
-        
-    Where series_info is:
-        {
-            'parent_id': int,
-            'display_name': str,
-            'phone': str,
-            'calendar_name': str,
-            'calendar_color': str,
-            'recurrence_type': str,
-            'is_forever': bool,
-            'match_count': int,
-            'scope': 'upcoming' | 'past',
-        }
-    """
-    from rental_scheduler.utils.recurrence import is_forever_series
-    
-    # Track which series we've already emitted a header for (per scope)
-    # Key: (parent_id, scope), Value: series_info dict (we'll update match_count)
-    seen_series = {}
-    
-    # Output rows per scope
-    upcoming_rows = []
-    past_rows = []
-    
-    # First pass: collect match counts for each series
-    series_match_counts = {}  # (parent_id, scope) -> count
-    for job in jobs:
-        is_past = job.start_dt < now
-        scope = 'past' if is_past else 'upcoming'
-        
-        parent_id = None
-        if job.recurrence_parent_id:
-            parent_id = job.recurrence_parent_id
-        elif job.recurrence_rule:
-            parent_id = job.id
-            
-        if parent_id:
-            key = (parent_id, scope)
-            series_match_counts[key] = series_match_counts.get(key, 0) + 1
-    
-    # Second pass: build interleaved row items
-    for job in jobs:
-        is_past = job.start_dt < now
-        scope = 'past' if is_past else 'upcoming'
-        rows = past_rows if is_past else upcoming_rows
-        
-        # Determine if this is part of a recurring series
-        parent_id = None
-        parent = None
-        
-        if job.recurrence_parent_id:
-            parent_id = job.recurrence_parent_id
-            parent = job.recurrence_parent
-        elif job.recurrence_rule:
-            parent_id = job.id
-            parent = job
-        
-        if parent_id and parent:
-            # This is part of a recurring series
-            series_key = (parent_id, scope)
-            
-            if series_key not in seen_series:
-                # First occurrence of this series in this scope - emit header
-                series_info = {
-                    'parent_id': parent_id,
-                    'display_name': parent.display_name if hasattr(parent, 'display_name') else parent.business_name,
-                    'phone': parent.phone or '',
-                    'calendar_name': parent.calendar.name if parent.calendar else '',
-                    'calendar_color': parent.calendar.color if parent.calendar else '#6366F1',
-                    'recurrence_type': (parent.recurrence_rule or {}).get('type', 'recurring'),
-                    'is_forever': is_forever_series(parent) if parent.recurrence_rule else False,
-                    'match_count': series_match_counts.get(series_key, 1),
-                    'scope': scope,
-                }
-                seen_series[series_key] = series_info
-                rows.append({'type': 'series', 'series': series_info})
-            # else: we've already emitted a header for this series, skip this job
-            # (it's "collapsed" under the header)
-        else:
-            # Standalone (non-recurring) job - emit directly
-            rows.append({'type': 'job', 'job': job})
-    
-    return {
-        'upcoming_rows': upcoming_rows,
-        'past_rows': past_rows,
-    }
-
-
-def _collapse_jobs_into_series_standard(jobs, now, date_filter):
-    """
-    Collapse recurring series into header rows for standard (no-search) Jobs list.
-    
-    Unlike _group_jobs_into_series (used for search), this function:
-    - Operates on already-sorted jobs (no re-sorting)
-    - Positions series headers exactly where the first matching occurrence appears
-    - Splits into upcoming/past sections for 'all' date_filter
-    - Returns a single section for other filters
-    
-    Args:
-        jobs: List of Job objects (already sorted)
-        now: Current datetime (for upcoming/past classification)
-        date_filter: Current date filter ('all', 'future', 'past', 'two_years', 'custom')
-        
-    Returns:
-        dict with structure:
-        {
-            'sections': {
-                'upcoming': [...],  # list of row dicts (may be None if empty)
-                'past': [...],      # list of row dicts (may be None if empty)
-            },
-            'has_recurring': bool,  # True if any series headers were created
+            'upcoming': [...] or None,  # list of row dicts
+            'past': [...] or None,      # list of row dicts  
+            'has_recurring': bool,      # True if any series headers were created
         }
         
     Where each row dict is either:
@@ -359,7 +247,6 @@ def _collapse_jobs_into_series_standard(jobs, now, date_filter):
     And series_info contains:
         {
             'parent_id': int,
-            'parent': Job,          # The parent job object
             'display_name': str,
             'phone': str,
             'calendar_name': str,
@@ -367,8 +254,7 @@ def _collapse_jobs_into_series_standard(jobs, now, date_filter):
             'recurrence_type': str,
             'is_forever': bool,
             'scope': 'upcoming' | 'past',
-            'representative_start_dt': datetime,
-            'representative_end_dt': datetime,
+            'match_count': int (only if include_match_counts=True),
         }
     """
     from rental_scheduler.utils.recurrence import is_forever_series
@@ -389,115 +275,89 @@ def _collapse_jobs_into_series_standard(jobs, now, date_filter):
             return job
         return None
     
-    def determine_scope(job, job_is_past, date_filter):
+    def determine_scope(job, date_filter):
         """
         Determine the scope for a job based on date filter and job timing.
         
         Forever parents included by future filters may have start_dt < now
         but should still appear under 'upcoming'.
         """
-        parent = get_parent(job)
+        # Use annotated is_past_event if available, else compute
+        if hasattr(job, 'is_past_event'):
+            job_is_past = bool(job.is_past_event)
+        else:
+            job_is_past = job.start_dt < now
         
         # For future-oriented filters, forever parents go to 'upcoming' even if start_dt is past
         if date_filter in ('future', 'two_years'):
+            parent = get_parent(job)
             if parent and is_forever_series(parent):
                 return 'upcoming'
         
-        # For custom filter, check if it's future-oriented
-        # (simplified: if job is being returned by the filter, it's in scope)
-        
-        # Default: use actual timing
         return 'past' if job_is_past else 'upcoming'
     
-    def collapse_job_list(job_list, scope):
-        """Collapse a list of jobs, emitting series headers on first occurrence."""
-        rows = []
-        seen_series = set()  # Set of parent_ids already seen in this scope
-        
-        for job in job_list:
-            parent_id = get_parent_id(job)
-            parent = get_parent(job)
-            
-            if parent_id and parent:
-                # Part of a recurring series
-                if parent_id not in seen_series:
-                    # First occurrence - emit header
-                    seen_series.add(parent_id)
-                    series_info = {
-                        'parent_id': parent_id,
-                        'parent': parent,
-                        'display_name': parent.display_name if hasattr(parent, 'display_name') else parent.business_name,
-                        'phone': parent.get_phone() if hasattr(parent, 'get_phone') else (parent.phone or ''),
-                        'calendar_name': parent.calendar.name if parent.calendar else '',
-                        'calendar_color': parent.calendar.color if parent.calendar else '#6366F1',
-                        'recurrence_type': (parent.recurrence_rule or {}).get('type', 'recurring'),
-                        'is_forever': is_forever_series(parent) if parent.recurrence_rule else False,
-                        'scope': scope,
-                        'representative_start_dt': job.start_dt,
-                        'representative_end_dt': job.end_dt,
-                    }
-                    rows.append({'type': 'series', 'series': series_info})
-                # else: skip (collapsed under header)
-            else:
-                # Non-recurring job - emit directly
-                rows.append({'type': 'job', 'job': job})
-        
-        return rows
+    # Convert to list if needed
+    job_list = list(jobs) if hasattr(jobs, '__iter__') and not isinstance(jobs, list) else jobs
     
+    # First pass: collect match counts if needed (for search mode)
+    series_match_counts = {}
+    if include_match_counts:
+        for job in job_list:
+            scope = determine_scope(job, date_filter)
+            parent_id = get_parent_id(job)
+            if parent_id:
+                key = (parent_id, scope)
+                series_match_counts[key] = series_match_counts.get(key, 0) + 1
+    
+    # Second pass: build rows, splitting into upcoming/past sections
+    upcoming_rows = []
+    past_rows = []
+    seen_series = {}  # (parent_id, scope) -> True
     has_recurring = False
     
-    # Check if we need to split into upcoming/past sections
-    if date_filter == 'all':
-        # Split jobs into upcoming and past based on start_dt
-        upcoming_jobs = []
-        past_jobs = []
+    for job in job_list:
+        scope = determine_scope(job, date_filter)
+        rows = past_rows if scope == 'past' else upcoming_rows
         
-        for job in jobs:
-            # Use annotated is_past_event if available, else compute
-            if hasattr(job, 'is_past_event'):
-                is_past = bool(job.is_past_event)
-            else:
-                is_past = job.start_dt < now
+        parent_id = get_parent_id(job)
+        parent = get_parent(job)
+        
+        if parent_id and parent:
+            # Part of a recurring series
+            series_key = (parent_id, scope)
             
-            if is_past:
-                past_jobs.append(job)
-            else:
-                upcoming_jobs.append(job)
-        
-        # Collapse each section independently
-        upcoming_rows = collapse_job_list(upcoming_jobs, 'upcoming') if upcoming_jobs else None
-        past_rows = collapse_job_list(past_jobs, 'past') if past_jobs else None
-        
-        # Check if any series headers were created
-        if upcoming_rows:
-            has_recurring = any(r['type'] == 'series' for r in upcoming_rows)
-        if not has_recurring and past_rows:
-            has_recurring = any(r['type'] == 'series' for r in past_rows)
-        
-        return {
-            'sections': {
-                'upcoming': upcoming_rows,
-                'past': past_rows,
-            },
-            'has_recurring': has_recurring,
-        }
-    else:
-        # Single section (scope based on filter)
-        if date_filter == 'past':
-            scope = 'past'
+            if series_key not in seen_series:
+                # First occurrence - emit header
+                seen_series[series_key] = True
+                has_recurring = True
+                
+                series_info = {
+                    'parent_id': parent_id,
+                    'display_name': parent.display_name if hasattr(parent, 'display_name') else parent.business_name,
+                    'phone': parent.get_phone() if hasattr(parent, 'get_phone') else (parent.phone or ''),
+                    'calendar_name': parent.calendar.name if parent.calendar else '',
+                    'calendar_color': parent.calendar.color if parent.calendar else '#6366F1',
+                    'recurrence_type': (parent.recurrence_rule or {}).get('type', 'recurring'),
+                    'is_forever': is_forever_series(parent) if parent.recurrence_rule else False,
+                    'scope': scope,
+                }
+                
+                if include_match_counts:
+                    series_info['match_count'] = series_match_counts.get(series_key, 1)
+                
+                rows.append({'type': 'series', 'series': series_info})
+            # else: skip (collapsed under header)
         else:
-            scope = 'upcoming'
-        
-        rows = collapse_job_list(list(jobs), scope)
-        has_recurring = any(r['type'] == 'series' for r in rows)
-        
-        return {
-            'sections': {
-                scope: rows,
-                'past' if scope == 'upcoming' else 'upcoming': None,
-            },
-            'has_recurring': has_recurring,
-        }
+            # Non-recurring job - emit directly
+            rows.append({'type': 'job', 'job': job})
+    
+    # For non-'all' filters, only one section will have data
+    # Return None for empty sections to match expected behavior
+    return {
+        'upcoming': upcoming_rows if upcoming_rows else None,
+        'past': past_rows if past_rows else None,
+        'has_recurring': has_recurring,
+    }
 
 
 class HomeView(TemplateView):
@@ -828,41 +688,49 @@ class JobListView(ListView):
         # (used to show appropriate badge/info in templates)
         context['includes_forever_parents'] = getattr(self, '_includes_forever_parents', False)
         
-        # Group recurring series when search is active, or collapse series in standard mode
+        # Collapse recurring series into header rows (unified for both search and standard mode)
         search_query = context['search_query']
         jobs = context.get('jobs')
         now = timezone.now()
+        date_filter = context.get('date_filter', 'all')
         
-        if search_query:
-            if jobs:
-                # Get the job list from the page object
-                job_list = list(jobs.object_list) if hasattr(jobs, 'object_list') else list(jobs)
-                
-                # Group jobs into series for display
-                grouped = _group_jobs_into_series(job_list, now)
-                context['grouped_search'] = grouped
-                context['is_grouped_search'] = True
-                context['is_series_collapsed'] = False
-                
-                # For grouped search, we render series header rows instead of individual job rows
-                # The template will check is_grouped_search to decide how to render
-            else:
-                context['is_grouped_search'] = False
-                context['is_series_collapsed'] = False
-        else:
-            # Standard mode (no search): collapse recurring series into header rows
-            context['is_grouped_search'] = False
+        if jobs:
+            job_list = list(jobs.object_list) if hasattr(jobs, 'object_list') else list(jobs)
             
-            if jobs:
-                job_list = list(jobs.object_list) if hasattr(jobs, 'object_list') else list(jobs)
-                date_filter = context.get('date_filter', 'all')
-                
-                collapsed = _collapse_jobs_into_series_standard(job_list, now, date_filter)
-                context['standard_sections'] = collapsed['sections']
-                context['is_series_collapsed'] = collapsed['has_recurring'] or True  # Always use collapsed rendering
-            else:
-                context['is_series_collapsed'] = False
-                context['standard_sections'] = {'upcoming': None, 'past': None}
+            # Use unified helper for both modes
+            # Search mode includes match counts, standard mode doesn't
+            collapsed = _build_series_collapsed_rows(
+                job_list,
+                now,
+                date_filter=date_filter,
+                include_match_counts=bool(search_query),
+            )
+            
+            # Unified context for templates
+            context['job_sections'] = {
+                'upcoming': collapsed['upcoming'],
+                'past': collapsed['past'],
+            }
+            context['has_recurring'] = collapsed['has_recurring']
+            context['is_series_collapsed'] = True  # Always use collapsed rendering
+            
+            # Legacy context keys for backwards compatibility (remove after templates are updated)
+            context['is_grouped_search'] = bool(search_query)
+            context['grouped_search'] = {
+                'upcoming_rows': collapsed['upcoming'],
+                'past_rows': collapsed['past'],
+            }
+            context['standard_sections'] = {
+                'upcoming': collapsed['upcoming'],
+                'past': collapsed['past'],
+            }
+        else:
+            context['job_sections'] = {'upcoming': None, 'past': None}
+            context['has_recurring'] = False
+            context['is_series_collapsed'] = False
+            context['is_grouped_search'] = False
+            context['grouped_search'] = {'upcoming_rows': None, 'past_rows': None}
+            context['standard_sections'] = {'upcoming': None, 'past': None}
         
         # For load-more links: determine if last job on current page is a past event
         # (needed for boundary-safe section header insertion)

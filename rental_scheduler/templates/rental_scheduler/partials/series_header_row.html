@@ -1,15 +1,18 @@
-{# Series header row for grouped recurring search results #}
+{# Unified series header row for both search results and standard Jobs list #}
 {# This row represents a recurring series, not an individual occurrence #}
+{# Context: series dict with parent_id, display_name, phone, calendar_name, calendar_color, #}
+{#          recurrence_type, is_forever, scope, and optionally match_count (search mode) #}
 <tr class="series-header-row hover:bg-indigo-50 cursor-pointer border-l-4 border-indigo-500 bg-indigo-50/30 transition-opacity duration-200"
     id="series-row-{{ series.parent_id }}-{{ series.scope }}"
     data-series-id="{{ series.parent_id }}"
     data-scope="{{ series.scope }}"
     data-expanded="false"
-    data-match-count="{{ series.match_count }}"
+    {% if series.match_count %}data-match-count="{{ series.match_count }}"{% endif %}
     aria-expanded="false"
     aria-label="Expand recurring series: {{ series.display_name }}"
     role="button"
     tabindex="0">
+    {# Column 1: Customer name with expand controls #}
     <td class="px-6 py-4 whitespace-nowrap text-center">
         <div class="flex items-center justify-center gap-2">
             {# Expand arrow icon - rotates when expanded #}
@@ -29,20 +32,30 @@
             </div>
         </div>
     </td>
+    {# Column 2: Calendar badge #}
     <td class="px-6 py-4 whitespace-nowrap">
         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
               style="background-color: {{ series.calendar_color }}20; color: {{ series.calendar_color }};">
             {{ series.calendar_name }}
         </span>
     </td>
+    {# Column 3: Status - show match count (search mode) or "Recurring Series" (standard mode) #}
     <td class="px-6 py-4 whitespace-nowrap text-center">
-        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
-            {{ series.match_count }} match{{ series.match_count|pluralize:"es" }}
-        </span>
+        {% if series.match_count %}
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                {{ series.match_count }} match{{ series.match_count|pluralize:"es" }}
+            </span>
+        {% else %}
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                Recurring Series
+            </span>
+        {% endif %}
     </td>
+    {# Columns 4-5: Start/End dates replaced with "Click to expand" #}
     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center" colspan="2">
         <span class="expand-label text-indigo-600 font-medium">Click to expand</span>
     </td>
+    {# Column 6: Repeat type badge #}
     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">
         {% if series.is_forever %}
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800" title="Forever recurring series">
@@ -54,8 +67,8 @@
             </span>
         {% endif %}
     </td>
+    {# Column 7: Actions - no direct actions on header #}
     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
-        {# No actions on series header - expand/collapse only #}
         <span class="text-gray-400 text-xs">—</span>
     </td>
 </tr>

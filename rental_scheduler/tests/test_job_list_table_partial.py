@@ -866,3 +866,142 @@ def test_past_filter_only_shows_past_section(api_client, calendar):
     
     # Should have the past job
     assert "Past Job" in content
+
+
+@pytest.mark.django_db
+def test_standard_mode_series_header_shows_click_to_expand(api_client, calendar):
+    """
+    Regression test: In standard (no-search) mode, series headers should display
+    "Click to expand" instead of showing the first occurrence's start/end dates.
+    
+    This verifies the fix for the bug where standard mode series headers were
+    displaying the first occurrence's dates in the header row.
+    """
+    now = timezone.now()
+    
+    # Create a recurring parent
+    parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Recurring Series",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={'type': 'weekly', 'interval': 1, 'end': 'never'},
+    )
+    
+    url = reverse("rental_scheduler:job_list_table_partial")
+    response = api_client.get(url, {"date_filter": "future"})
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should have a series header row
+    assert 'series-header-row' in content, "Should render series header row"
+    
+    # Should have "Click to expand" text
+    assert 'Click to expand' in content, "Series header should show 'Click to expand'"
+    
+    # Should have "Recurring Series" badge (standard mode doesn't have match_count)
+    assert 'Recurring Series' in content, "Should show 'Recurring Series' badge in standard mode"
+    
+    # Should NOT have the series rendered as an individual job row with dates
+    # (The old bug was that the header displayed representative_start_dt/representative_end_dt)
+    assert f'id="job-row-{parent.id}"' not in content, "Parent should not appear as individual job row"
+
+
+@pytest.mark.django_db
+def test_search_mode_series_header_shows_match_count(api_client, calendar):
+    """
+    Regression test: In search mode, series headers should display the match count badge.
+    """
+    now = timezone.now()
+    
+    # Create a recurring parent with an instance
+    parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Searchable Series",
+        start_dt=now + timedelta(days=1),
+        end_dt=now + timedelta(days=1, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={'type': 'weekly', 'interval': 1, 'end': 'never'},
+    )
+    
+    # Create a materialized instance
+    Job.objects.create(
+        calendar=calendar,
+        business_name="Searchable Series",
+        start_dt=now + timedelta(days=8),
+        end_dt=now + timedelta(days=8, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_parent=parent,
+        recurrence_original_start=now + timedelta(days=8),
+    )
+    
+    url = reverse("rental_scheduler:job_list_table_partial")
+    response = api_client.get(url, {"date_filter": "future", "search": "Searchable"})
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should have a series header row
+    assert 'series-header-row' in content, "Should render series header row"
+    
+    # Should have "Click to expand" text
+    assert 'Click to expand' in content, "Series header should show 'Click to expand'"
+    
+    # Should have match count badge (search mode has match_count)
+    # Both parent and instance match, so we should have "2 matches"
+    assert 'matches' in content or 'match' in content, "Should show match count in search mode"
+
+
+@pytest.mark.django_db
+def test_htmx_chunk_uses_unified_job_sections(api_client, calendar):
+    """
+    Regression test: HTMX chunk requests should use the same unified job_sections
+    rendering as the full page, ensuring parity between initial load and load-more.
+    """
+    now = timezone.now()
+    
+    # Create enough jobs to span multiple pages
+    for i in range(30):
+        Job.objects.create(
+            calendar=calendar,
+            business_name=f"Job {i}",
+            start_dt=now + timedelta(days=i),
+            end_dt=now + timedelta(days=i, hours=1),
+            all_day=False,
+            status="uncompleted",
+        )
+    
+    # Create a recurring series
+    parent = Job.objects.create(
+        calendar=calendar,
+        business_name="Chunked Recurring",
+        start_dt=now + timedelta(days=50),
+        end_dt=now + timedelta(days=50, hours=2),
+        all_day=False,
+        status="uncompleted",
+        recurrence_rule={'type': 'weekly', 'interval': 1, 'end': 'never'},
+    )
+    
+    url = reverse("rental_scheduler:job_list_table_partial")
+    
+    # Make an HTMX request for page 2
+    response = api_client.get(
+        url,
+        {"date_filter": "future", "page": 2},
+        HTTP_HX_REQUEST="true"
+    )
+    
+    assert response.status_code == 200
+    content = response.content.decode("utf-8")
+    
+    # Should have the chunk wrapper
+    assert 'job-list-chunk-wrapper' in content, "Should have chunk wrapper for HTMX"
+    
+    # If the recurring series is on this page, it should have series header
+    if 'Chunked Recurring' in content:
+        assert 'series-header-row' in content, "Recurring series should be collapsed in HTMX chunks"
