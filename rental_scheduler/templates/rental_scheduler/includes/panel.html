@@ -313,6 +313,13 @@
       width: 100%;
     }
     
+    /* Override for schedule picker: allow shrinking within flex row */
+    #job-panel #schedule-picker-container .flatpickr-input {
+      width: auto;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    
     #job-panel .flatpickr-input:focus {
       outline: none;
       border-color: #3b82f6 !important;

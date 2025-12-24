@@ -142,10 +142,10 @@ Date Call Received
                    {% endif %}>
             All Day
           </label>
-          <div id="schedule-picker-container" style="flex: 1;">
+          <div id="schedule-picker-container" style="flex: 1; min-width: 0;">
             <!-- Start/End fields with per-input flatpickr -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
                 <label for="{{ form.start_dt.id_for_label }}"
                        style="font-weight: 600;
                               color: #374151;
@@ -161,6 +161,7 @@ Date Call Received
                        required
                        placeholder="Select date"
                        style="flex: 1;
+                              min-width: 0;
                               padding: 4px 8px;
                               border: 1px solid #d1d5db;
                               border-radius: 8px;
@@ -174,7 +175,7 @@ Date Call Received
                   </p>
                 {% endif %}
               </div>
-              <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
                 <label for="{{ form.end_dt.id_for_label }}"
                        style="font-weight: 600;
                               color: #374151;
@@ -190,6 +191,7 @@ Date Call Received
                        required
                        placeholder="Select date"
                        style="flex: 1;
+                              min-width: 0;
                               padding: 4px 8px;
                               border: 1px solid #d1d5db;
                               border-radius: 8px;

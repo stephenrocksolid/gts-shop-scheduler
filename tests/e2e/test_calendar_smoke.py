@@ -281,6 +281,98 @@ class TestJobPanel:
             timeout=5000,
         )
 
+    def test_job_panel_date_fields_responsive_layout(self, page: Page, server_url):
+        """
+        Start/End date fields should be side-by-side when panel is wide,
+        stacked when narrow, and never overflow the panel bounds.
+
+        Regression test for: End date field not resizing correctly with panel width.
+        """
+        page.goto(f"{server_url}/")
+        page.wait_for_selector("#calendar", timeout=10000)
+
+        # Open add job panel
+        add_button = page.locator(".fc-addJobButton-button")
+        if add_button.count() == 0:
+            pytest.skip("No add job button found in calendar toolbar")
+
+        add_button.click()
+        page.wait_for_selector("#job-panel", timeout=5000)
+
+        # Wait for form and flatpickr to initialize
+        page.wait_for_selector("#job-panel input[name='start_dt']", timeout=5000)
+        page.wait_for_timeout(500)
+
+        # Helper to get the visible input (original if visible, else its flatpickr alt sibling)
+        def get_visible_input_rect(input_name):
+            return page.evaluate(f"""
+                () => {{
+                    const orig = document.querySelector('#job-panel input[name="{input_name}"]');
+                    if (!orig) return null;
+
+                    const isVisible = (el) => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+
+                    // Check if original is visible
+                    if (isVisible(orig)) {{
+                        const rect = orig.getBoundingClientRect();
+                        return {{ top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }};
+                    }}
+
+                    // Otherwise use the flatpickr alt input (next sibling)
+                    const alt = orig.nextElementSibling;
+                    if (alt && isVisible(alt)) {{
+                        const rect = alt.getBoundingClientRect();
+                        return {{ top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }};
+                    }}
+
+                    return null;
+                }}
+            """)
+
+        # Test 1: Wide panel - Start and End should be on the same row
+        page.evaluate("document.querySelector('#job-panel').style.width = '520px'")
+        page.wait_for_timeout(100)  # Allow reflow
+
+        start_rect_wide = get_visible_input_rect("start_dt")
+        end_rect_wide = get_visible_input_rect("end_dt")
+
+        assert start_rect_wide is not None, "Start input should be visible at wide width"
+        assert end_rect_wide is not None, "End input should be visible at wide width"
+
+        # Same row means similar top values (within 10px tolerance for alignment differences)
+        assert abs(start_rect_wide["top"] - end_rect_wide["top"]) < 10, \
+            f"Wide panel: Start and End should be on same row. Start top={start_rect_wide['top']}, End top={end_rect_wide['top']}"
+
+        # Test 2: Narrow panel - End should be below Start (stacked layout)
+        page.evaluate("document.querySelector('#job-panel').style.width = '260px'")
+        page.wait_for_timeout(100)  # Allow reflow
+
+        start_rect_narrow = get_visible_input_rect("start_dt")
+        end_rect_narrow = get_visible_input_rect("end_dt")
+
+        assert start_rect_narrow is not None, "Start input should be visible at narrow width"
+        assert end_rect_narrow is not None, "End input should be visible at narrow width"
+
+        # Stacked means End is below Start (End top > Start bottom, approximately)
+        assert end_rect_narrow["top"] > start_rect_narrow["top"] + 10, \
+            f"Narrow panel: End should be below Start. Start top={start_rect_narrow['top']}, End top={end_rect_narrow['top']}"
+
+        # Test 3: End input should not overflow the panel body bounds
+        panel_body_rect = page.evaluate("""
+            () => {
+                const panelBody = document.querySelector('#job-panel .panel-body');
+                if (!panelBody) return null;
+                const rect = panelBody.getBoundingClientRect();
+                return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left };
+            }
+        """)
+
+        assert panel_body_rect is not None, "Panel body should exist"
+
+        # End input right edge should be within panel body (with small tolerance for padding/borders)
+        assert end_rect_narrow["right"] <= panel_body_rect["right"] + 2, \
+            f"End input should not overflow panel. End right={end_rect_narrow['right']}, Panel right={panel_body_rect['right']}"
+
 
 class TestDraftWorkspaceFlow:
     """Test draft minimize → workspace tab → reload → restore flow."""
