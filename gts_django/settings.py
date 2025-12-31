@@ -322,11 +322,20 @@ LOGS_DIR.mkdir(exist_ok=True)
 
 # CSRF Settings
 CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
+    # LAN / production
+    'http://192.168.1.230:8002',
+    'http://gts-server.lan:8002',
+    'http://gts-server:8002',
+
+    # local dev
+    'http://localhost:8002',
+    'http://127.0.0.1:8002',
+
+    # optional
     'https://*.ngrok-free.app',
     'http://*.ngrok-free.app',
 ]
+
 
 # Ensure CSRF cookie settings are appropriate for development
 CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
