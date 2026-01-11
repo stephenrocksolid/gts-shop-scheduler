@@ -13,8 +13,7 @@ class JobForm(forms.ModelForm):
         required=True,
         max_length=150,
         widget=forms.TextInput(attrs={
-            'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-            'placeholder': 'Enter business name'
+            'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
         })
     )
     
@@ -75,68 +74,53 @@ class JobForm(forms.ModelForm):
             }),
             # business_name widget is defined in the class body (not here) to ensure required=True
             'contact_name': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'Enter contact name'
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'phone': forms.TextInput(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
                 'type': 'tel',
-                'placeholder': '555-123-4567',
                 'inputmode': 'numeric',
-                'maxlength': '14',
+                'maxlength': '14'
             }),
             'address_line1': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'Street address'
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'address_line2': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'Apt, suite, etc.'
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'city': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'City'
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'state': forms.TextInput(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'State',
                 'maxlength': '2'
             }),
             'postal_code': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'ZIP code'
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'all_day': forms.CheckboxInput(attrs={
                 'class': 'rounded border-gray-300 text-blue-600 focus:ring-blue-500',
                 'onchange': 'toggleTimeInputs(this)'
             }),
             'trailer_color': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'Trailer color'
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'trailer_serial': forms.TextInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'placeholder': 'Serial number'
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
-            'trailer_details': forms.Textarea(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'rows': 3,
-                'placeholder': 'Additional trailer details'
+            'trailer_details': forms.TextInput(attrs={
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'notes': forms.Textarea(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'rows': 3,
-                'placeholder': 'General job notes'
+                'rows': 3
             }),
             'repair_notes': forms.Textarea(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'rows': 3,
-                'placeholder': 'Detailed repair notes'
+                'rows': 3
             }),
-            'quote': forms.NumberInput(attrs={
-                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500',
-                'step': '0.01',
-                'placeholder': '0.00'
+            'quote': forms.TextInput(attrs={
+                'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
             }),
             'status': forms.Select(attrs={
                 'class': 'w-full rounded-xl border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'

@@ -54,8 +54,8 @@
                         window.JobPanel.clearUnsavedChanges();
                     }
                     
-                    // Close panel/workspace tab unless we're switching jobs
-                    if (window.JobPanel && !window.JobPanel.isSwitchingJobs) {
+                    // Close panel/workspace tab unless we're switching jobs or printing
+                    if (window.JobPanel && !window.JobPanel.isSwitchingJobs && !window.JobPanel.isPrinting) {
                         const currentJobId = window.JobPanel.currentJobId;
                         const currentDraftId = window.JobPanel.currentDraftId;
 
@@ -195,14 +195,14 @@
         GTS.initOnce('job_form_print', function() {
             /**
              * Print via hidden iframe
+             * @param {string} url - The print URL
+             * @param {function} [onComplete] - Optional callback when print dialog closes
              */
-            function printViaIframe(url) {
+            function printViaIframe(url, onComplete) {
                 console.log('Print via iframe:', url);
 
-                // Close the Job Panel before printing
-                if (window.JobPanel) {
-                    window.JobPanel.close();
-                }
+                // Note: We intentionally do NOT close the Job Panel here.
+                // The job should remain open in the workspace after printing.
 
                 // Remove any existing iframe
                 let oldFrame = document.getElementById('printFrame');
@@ -237,6 +237,11 @@
                                 iframeWindow.focus();
                                 iframeWindow.print();
                                 console.log('Print dialog triggered');
+
+                                // Call onComplete callback after print dialog (print is sync, blocks until closed)
+                                if (onComplete) {
+                                    onComplete();
+                                }
                             } else {
                                 throw new Error('Could not access iframe window');
                             }
@@ -244,6 +249,11 @@
                             console.error('Error printing:', error);
                             alert('Unable to print directly. Opening in new window...');
                             window.open(url, '_blank');
+
+                            // Still call onComplete on error
+                            if (onComplete) {
+                                onComplete();
+                            }
                         }
                     }, 500);
                 };
@@ -260,6 +270,11 @@
             function saveJobThenPrint(form, jobId, printType) {
                 console.log('Saving job form before printing...');
 
+                // Set flag to prevent panel from auto-closing after save
+                if (window.JobPanel) {
+                    window.JobPanel.isPrinting = true;
+                }
+
                 // Show loading state on the print button
                 const printBtn = document.querySelector('[data-print-type="' + printType + '"]');
                 const originalText = printBtn ? printBtn.textContent : '';
@@ -274,15 +289,45 @@
                 if (hxPost) {
                     // Define the success handler
                     const handleAfterRequest = function(event) {
-                        // Get the job ID from the form after save
+                        // Get the job ID - try multiple sources
                         let actualJobId = jobId;
-                        const jobIdInput = form.querySelector('input[name="job_id"]');
-                        if (jobIdInput && jobIdInput.value) {
-                            actualJobId = jobIdInput.value;
+                        
+                        // 1. Try to get from HX-Trigger header (jobSaved event contains jobId)
+                        if (event.detail.xhr) {
+                            const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
+                            if (triggerHeader) {
+                                try {
+                                    const triggerData = JSON.parse(triggerHeader);
+                                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
+                                        actualJobId = triggerData.jobSaved.jobId;
+                                        console.log('Got job ID from HX-Trigger:', actualJobId);
+                                    }
+                                } catch (e) {
+                                    console.log('Could not parse HX-Trigger header');
+                                }
+                            }
+                            
+                            // 2. Try to extract from response HTML (OOB swap includes job_id input)
+                            if (!actualJobId || actualJobId === '0') {
+                                const responseText = event.detail.xhr.responseText;
+                                const match = responseText.match(/name="job_id"\s+value="(\d+)"/);
+                                if (match && match[1]) {
+                                    actualJobId = match[1];
+                                    console.log('Got job ID from response HTML:', actualJobId);
+                                }
+                            }
+                        }
+                        
+                        // 3. Fallback: check form's hidden input (for existing jobs)
+                        if (!actualJobId || actualJobId === '0') {
+                            const jobIdInput = form.querySelector('input[name="job_id"]');
+                            if (jobIdInput && jobIdInput.value) {
+                                actualJobId = jobIdInput.value;
+                            }
                         }
 
                         if (event.detail.successful) {
-                            console.log('Job saved successfully, now printing...');
+                            console.log('Job saved successfully, now printing with job ID:', actualJobId);
 
                             // Clear unsaved changes tracking
                             if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
@@ -292,10 +337,52 @@
                             // Remove the event listener
                             document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
 
+                            if (!actualJobId || actualJobId === '0') {
+                                console.error('Could not determine job ID after save');
+                                alert('Job saved but could not determine job ID for printing. Please try printing again.');
+                                if (printBtn) {
+                                    printBtn.textContent = originalText;
+                                    printBtn.disabled = false;
+                                }
+                                if (window.JobPanel) {
+                                    window.JobPanel.isPrinting = false;
+                                }
+                                return;
+                            }
+
                             var url = GTS.urls.jobPrint(actualJobId, printType);
-                            printViaIframe(url);
+                            
+                            // Print first, then reload the panel after print completes
+                            printViaIframe(url, function() {
+                                // Restore button state after print dialog closes
+                                if (printBtn) {
+                                    printBtn.textContent = originalText;
+                                    printBtn.disabled = false;
+                                }
+                                // Clear printing flag
+                                if (window.JobPanel) {
+                                    window.JobPanel.isPrinting = false;
+                                }
+                                
+                                // Reload the panel with the saved job to show updated state
+                                if (window.JobPanel && GTS.urls.jobCreatePartial) {
+                                    window.JobPanel.setTitle('Edit Job');
+                                    window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: actualJobId }));
+                                    window.JobPanel.setCurrentJobId(actualJobId);
+                                }
+                                
+                                // Refresh calendar events
+                                if (window.jobCalendar && window.jobCalendar.calendar) {
+                                    window.jobCalendar.calendar.refetchEvents();
+                                }
+                            });
                         } else {
                             console.error('Failed to save job:', event.detail);
+
+                            // Clear printing flag on error
+                            if (window.JobPanel) {
+                                window.JobPanel.isPrinting = false;
+                            }
 
                             let errorMsg = 'Failed to save job. Please check all required fields and try again.';
                             if (event.detail.xhr && event.detail.xhr.responseText) {
@@ -330,13 +417,29 @@
                             if (response.ok) {
                                 console.log('Job saved successfully, now printing...');
                                 var url = GTS.urls.jobPrint(jobId, printType);
-                                printViaIframe(url);
+                                printViaIframe(url, function() {
+                                    // Restore button state after print dialog closes
+                                    if (printBtn) {
+                                        printBtn.textContent = originalText;
+                                        printBtn.disabled = false;
+                                    }
+                                    // Clear printing flag
+                                    if (window.JobPanel) {
+                                        window.JobPanel.isPrinting = false;
+                                    }
+                                });
                             } else {
                                 throw new Error('Save failed - status ' + response.status);
                             }
                         })
                         .catch(function(error) {
                             console.error('Failed to save job:', error);
+
+                            // Clear printing flag on error
+                            if (window.JobPanel) {
+                                window.JobPanel.isPrinting = false;
+                            }
+
                             alert('Failed to save job. Please check all required fields and try again.');
                             if (printBtn) {
                                 printBtn.textContent = originalText;
@@ -369,6 +472,23 @@
                     } else {
                         // No job ID or job ID is 0 - can't print
                         alert('Please save the job first before printing.');
+                    }
+                }
+
+                // Check if clicked element is a save-and-print button
+                const saveAndPrintBtn = e.target.closest('.save-and-print-btn');
+                if (saveAndPrintBtn && !saveAndPrintBtn.disabled) {
+                    GTS.dom.stop(e);
+                    const printType = saveAndPrintBtn.getAttribute('data-print-type') || 'wo';
+                    const form = saveAndPrintBtn.closest('form');
+                    
+                    if (form) {
+                        // Get job ID from form (may be empty for new jobs)
+                        const jobIdInput = form.querySelector('input[name="job_id"]');
+                        const jobId = jobIdInput ? jobIdInput.value : '0';
+                        
+                        console.log('Save & Print button clicked - saving and printing...');
+                        saveJobThenPrint(form, jobId, printType);
                     }
                 }
             });
