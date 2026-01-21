@@ -114,7 +114,7 @@
                 displayEventTime: true,
                 eventDisplay: 'block', // Force block display to ensure colors always show (not dot events)
                 // Event ordering: sort by start time, then by title for consistent display
-                eventOrder: 'start,-duration,allDay,title'
+                eventOrder: 'start,-duration,allDay,title',
                 eventTimeFormat: {
                     hour: 'numeric',
                     minute: '2-digit',
