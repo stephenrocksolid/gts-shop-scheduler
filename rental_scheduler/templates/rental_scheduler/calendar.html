@@ -493,6 +493,17 @@
     /* Prevent event harnesses from expanding the cell */
     .fc-daygrid-event-harness {
         margin: 1px 0 !important;
+        position: relative !important;
+    }
+
+    /* CRITICAL: Force absolutely positioned event harnesses to be relative instead
+       This prevents events from overlapping when there are many events on a day.
+       FullCalendar uses .fc-daygrid-event-harness-abs for multi-day events and
+       stacked events, but this causes overlap issues with our scrollable day cells. */
+    .fc-daygrid-event-harness-abs {
+        position: relative !important;
+        inset: unset !important;
+        margin: 1px 0 !important;
     }
 
     /* Prevent more link from expanding */
