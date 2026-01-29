@@ -20,8 +20,11 @@
         if (!GTS.initOnce) return;
         GTS.initOnce('work_order_page_v2', function() {
             initCustomerUI();
+            initEmployeesModalUI();
             initLineItemsUI();
             initTotalsUI();
+            initSaveGuard();
+            initUnsavedChangesGuard();
         });
     });
 
@@ -343,6 +346,11 @@
                     els.clearBtn.classList.add('hidden');
                 }
             }
+            // Notify save guard of customer change
+            if (typeof window.__woUpdateSaveButton === 'function') {
+                window.__woUpdateSaveButton();
+            }
+            document.dispatchEvent(new CustomEvent('wo-customer-changed'));
         }
 
         function clearSelected() {
@@ -626,6 +634,147 @@
     }
 
     // =========================================================================
+    // Employees Modal UI
+    // =========================================================================
+
+    function initEmployeesModalUI() {
+        var lastActiveElement = null;
+        var previousBodyOverflow = '';
+        var modalKeydownHandler = null;
+
+        function getEls() {
+            return {
+                modal: document.querySelector('[data-wo-employees-modal]'),
+                modalBackdrop: document.querySelector('[data-wo-employees-modal-backdrop]'),
+                modalClose: document.querySelector('[data-wo-employees-modal-close]'),
+                modalPanel: document.querySelector('[data-wo-employees-modal-panel]'),
+                modalBody: document.getElementById('wo-employees-modal-body'),
+            };
+        }
+
+        function getFocusableElements(container) {
+            if (!container) return [];
+            var selectors = [
+                'a[href]',
+                'button:not([disabled])',
+                'textarea:not([disabled])',
+                'input:not([disabled])',
+                'select:not([disabled])',
+                '[tabindex]:not([tabindex="-1"])'
+            ];
+            return Array.prototype.slice.call(container.querySelectorAll(selectors.join(','))).filter(function(el) {
+                return !el.hasAttribute('aria-hidden');
+            });
+        }
+
+        function lockBodyScroll() {
+            previousBodyOverflow = document.body.style.overflow || '';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function unlockBodyScroll() {
+            document.body.style.overflow = previousBodyOverflow;
+            previousBodyOverflow = '';
+        }
+
+        function attachModalKeydown() {
+            var els = getEls();
+            if (!els.modal || !els.modalPanel || modalKeydownHandler) return;
+
+            modalKeydownHandler = function(e) {
+                if (e.key === 'Escape') {
+                    closeModal();
+                    return;
+                }
+
+                if (e.key !== 'Tab') return;
+                var focusable = getFocusableElements(els.modalPanel);
+                if (!focusable.length) return;
+
+                var first = focusable[0];
+                var last = focusable[focusable.length - 1];
+
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            };
+            document.addEventListener('keydown', modalKeydownHandler);
+        }
+
+        function detachModalKeydown() {
+            if (modalKeydownHandler) {
+                document.removeEventListener('keydown', modalKeydownHandler);
+                modalKeydownHandler = null;
+            }
+        }
+
+        function openModal(triggerEl) {
+            var els = getEls();
+            if (!els.modal) return;
+            lastActiveElement = triggerEl || document.activeElement;
+
+            show(els.modal);
+            lockBodyScroll();
+            attachModalKeydown();
+
+            // Focus the panel initially (will be moved to first input after HTMX loads content)
+            if (els.modalPanel) {
+                els.modalPanel.focus();
+            }
+        }
+
+        function closeModal() {
+            var els = getEls();
+            if (!els.modal || els.modal.classList.contains('hidden')) return;
+            hide(els.modal);
+            detachModalKeydown();
+            unlockBodyScroll();
+            if (lastActiveElement && typeof lastActiveElement.focus === 'function') {
+                lastActiveElement.focus();
+            }
+        }
+
+        // Open modal when clicking manage employees buttons
+        document.body.addEventListener('click', function(e) {
+            var openBtn = closest(e.target, '[data-wo-employees-open]');
+            if (openBtn) {
+                openModal(openBtn);
+                return;
+            }
+
+            var closeBtn = closest(e.target, '[data-wo-employees-modal-close]');
+            if (closeBtn) {
+                closeModal();
+                return;
+            }
+
+            var backdrop = closest(e.target, '[data-wo-employees-modal-backdrop]');
+            if (backdrop) {
+                closeModal();
+                return;
+            }
+        });
+
+        // After HTMX swaps content into modal body, focus the employee name input
+        document.body.addEventListener('htmx:afterSwap', function(e) {
+            var els = getEls();
+            if (e.target === els.modalBody) {
+                // Focus the employee name input for quick data entry
+                var nameInput = document.querySelector('[data-wo-emp-name-input]');
+                if (nameInput) {
+                    setTimeout(function() {
+                        nameInput.focus();
+                    }, 50);
+                }
+            }
+        });
+    }
+
+    // =========================================================================
     // Line items UI (items search/select, add/remove)
     // =========================================================================
 
@@ -859,6 +1008,204 @@
         if (typeof window.__woRecomputeTotals === 'function') {
             window.__woRecomputeTotals();
         }
+    }
+
+    // =========================================================================
+    // Save Guard (require customer before save)
+    // =========================================================================
+
+    function initSaveGuard() {
+        var form = document.querySelector('[data-wo-main-form]');
+        var orgIdInput = document.querySelector('[data-wo-customer-org-id]');
+        var saveBtn = document.querySelector('[data-wo-save-btn]');
+        var searchInput = document.querySelector('[data-wo-customer-search]');
+
+        if (!form || !orgIdInput || !saveBtn) return;
+
+        function updateSaveButtonState() {
+            var hasCustomer = orgIdInput.value && orgIdInput.value.trim() !== '';
+            saveBtn.disabled = !hasCustomer;
+        }
+
+        // Initial state
+        updateSaveButtonState();
+
+        // Watch for changes to customer selection (via hidden input value changes)
+        var lastValue = orgIdInput.value;
+        var checkInterval = setInterval(function() {
+            if (orgIdInput.value !== lastValue) {
+                lastValue = orgIdInput.value;
+                updateSaveButtonState();
+            }
+        }, 100);
+
+        // Also listen for custom event from customer UI
+        document.addEventListener('wo-customer-changed', function() {
+            updateSaveButtonState();
+        });
+
+        // Prevent form submission without customer
+        form.addEventListener('submit', function(e) {
+            var hasCustomer = orgIdInput.value && orgIdInput.value.trim() !== '';
+            if (!hasCustomer) {
+                e.preventDefault();
+                if (GTS && GTS.showToast) {
+                    GTS.showToast('Select a customer before saving.', 'error');
+                }
+                if (searchInput) {
+                    searchInput.focus();
+                }
+                return false;
+            }
+        });
+
+        // Expose function for external updates
+        window.__woUpdateSaveButton = updateSaveButtonState;
+    }
+
+    // =========================================================================
+    // Unsaved Changes Guard (prompt on Back click)
+    // =========================================================================
+
+    function initUnsavedChangesGuard() {
+        var form = document.querySelector('[data-wo-main-form]');
+        var modal = document.querySelector('[data-wo-unsaved-modal]');
+        var backdrop = document.querySelector('[data-wo-unsaved-backdrop]');
+        var panel = document.querySelector('[data-wo-unsaved-panel]');
+        var cancelBtn = document.querySelector('[data-wo-unsaved-cancel]');
+        var discardBtn = document.querySelector('[data-wo-unsaved-discard]');
+        var saveBackBtn = document.querySelector('[data-wo-unsaved-save-back]');
+        var closeBtn = document.querySelector('[data-wo-unsaved-close]');
+        var afterSaveInput = document.querySelector('[data-wo-after-save]');
+
+        if (!form || !backLink || !modal) return;
+
+        var isDirty = false;
+        var backHref = null;
+        var lastActiveElement = null;
+        var modalKeydownHandler = null;
+
+        // Track initial form state
+        var initialFormData = new FormData(form);
+        var initialFormString = Array.from(initialFormData.entries()).map(function(pair) {
+            return pair[0] + '=' + (pair[1] || '');
+        }).sort().join('&');
+
+        function checkDirty() {
+            var currentFormData = new FormData(form);
+            var currentFormString = Array.from(currentFormData.entries()).map(function(pair) {
+                return pair[0] + '=' + (pair[1] || '');
+            }).sort().join('&');
+            isDirty = currentFormString !== initialFormString;
+        }
+
+        function showModal() {
+            if (!modal || !modal.classList.contains('hidden')) return;
+            lastActiveElement = document.activeElement;
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+            attachModalKeydown();
+            if (panel) {
+                panel.focus();
+            }
+        }
+
+        function hideModal() {
+            if (!modal || modal.classList.contains('hidden')) return;
+            modal.classList.add('hidden');
+            document.body.style.overflow = '';
+            detachModalKeydown();
+            if (lastActiveElement && typeof lastActiveElement.focus === 'function') {
+                lastActiveElement.focus();
+            }
+        }
+
+        function attachModalKeydown() {
+            if (modalKeydownHandler) return;
+            modalKeydownHandler = function(e) {
+                if (e.key === 'Escape') {
+                    hideModal();
+                }
+            };
+            document.addEventListener('keydown', modalKeydownHandler);
+        }
+
+        function detachModalKeydown() {
+            if (modalKeydownHandler) {
+                document.removeEventListener('keydown', modalKeydownHandler);
+                modalKeydownHandler = null;
+            }
+        }
+
+        // Track form changes (only for fields with name attribute, ignore search)
+        form.addEventListener('input', function(e) {
+            var target = e.target;
+            if (target && target.matches && target.matches('[data-wo-customer-search]')) {
+                return; // Ignore search input
+            }
+            if (target && target.hasAttribute && target.hasAttribute('name')) {
+                checkDirty();
+            }
+        });
+
+        form.addEventListener('change', function(e) {
+            var target = e.target;
+            if (target && target.hasAttribute && target.hasAttribute('name')) {
+                checkDirty();
+            }
+        });
+
+        // Intercept Back link click
+        var actualBackLink = document.querySelector('[data-wo-back-link]');
+        if (actualBackLink) {
+            actualBackLink.addEventListener('click', function(e) {
+                checkDirty();
+                if (isDirty) {
+                    e.preventDefault();
+                    backHref = actualBackLink.href;
+                    showModal();
+                }
+            });
+        }
+
+        // Modal actions
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', hideModal);
+        }
+        if (closeBtn) {
+            closeBtn.addEventListener('click', hideModal);
+        }
+        if (backdrop) {
+            backdrop.addEventListener('click', hideModal);
+        }
+
+        if (discardBtn) {
+            discardBtn.addEventListener('click', function() {
+                isDirty = false;
+                hideModal();
+                if (backHref) {
+                    window.location.href = backHref;
+                }
+            });
+        }
+
+        if (saveBackBtn && afterSaveInput) {
+            saveBackBtn.addEventListener('click', function() {
+                afterSaveInput.value = 'back';
+                hideModal();
+                // Use requestSubmit to trigger normal validation and submit handlers
+                if (form.requestSubmit) {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
+            });
+        }
+
+        // Reset dirty state on successful form submission
+        form.addEventListener('submit', function() {
+            isDirty = false;
+        });
     }
 })();
 

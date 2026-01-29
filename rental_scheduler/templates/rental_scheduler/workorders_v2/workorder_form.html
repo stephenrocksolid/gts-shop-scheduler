@@ -8,20 +8,20 @@
   <div class="flex items-start justify-between gap-4 mb-6">
     <div>
       <h1 class="text-2xl font-semibold text-gray-900">
-        {% if work_order %}Work Order #{{ work_order.number }}{% else %}Create Work Order{% endif %}
+        Work Order: {{ job.display_name }}{% if job.phone %} ({{ job.phone }}){% endif %}
       </h1>
-      <p class="text-sm text-gray-600">
-        Job: {{ job.display_name }}
-      </p>
     </div>
 
     <div class="flex items-center gap-2">
-      <a href="{{ back_url }}" class="wo-btn wo-btn-outline gap-1.5">
+      <a href="{{ back_url }}" class="wo-btn wo-btn-outline gap-1.5" data-wo-back-link>
         <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
           <path fill-rule="evenodd" d="M17 10a1 1 0 01-1 1H7.414l3.293 3.293a1 1 0 01-1.414 1.414l-5-5a1 1 0 010-1.414l5-5a1 1 0 011.414 1.414L7.414 9H16a1 1 0 011 1z" clip-rule="evenodd" />
         </svg>
         <span>{{ back_label }}</span>
       </a>
+      <button type="submit" form="workorder-form" class="wo-btn wo-btn-primary" data-wo-save-btn {% if not initial.customer_org_id %}disabled{% endif %}>
+        Save
+      </button>
       {% if work_order %}
         <a href="{% url 'rental_scheduler:workorder_pdf' work_order.pk %}" class="wo-btn wo-btn-outline gap-1.5">
           <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -45,9 +45,10 @@
     </div>
   {% endif %}
 
-  <form method="post" class="space-y-6">
+  <form method="post" class="space-y-6" id="workorder-form" data-wo-main-form>
     {% csrf_token %}
     {% if next_value %}<input type="hidden" name="next" value="{{ next_value }}">{% endif %}
+    <input type="hidden" name="after_save" value="" data-wo-after-save />
 
     <div class="wo-card divide-y divide-gray-100">
       <div class="wo-section px-6 pt-6">
@@ -88,39 +89,13 @@
               </button>
               <span class="wo-pill wo-pill-muted empty:hidden" data-wo-customer-selected aria-live="polite"></span>
             </div>
+            {% if errors.customer_org_id %}
+              <p class="mt-1 text-sm text-red-600">{{ errors.customer_org_id }}</p>
+            {% endif %}
           </div>
 
           <div>
-            <label class="wo-label flex items-center justify-between" for="wo-job-by">
-              <span>Job By</span>
-              <a
-                href="{% url 'rental_scheduler:workorder_employee_settings' %}"
-                class="text-xs font-normal text-blue-700 hover:underline"
-              >
-                Manage employees
-              </a>
-            </label>
-            <select
-              id="wo-job-by"
-              name="job_by_id"
-              class="wo-select mt-2"
-            >
-              <option value="">—</option>
-              {% for emp in employees %}
-                <option value="{{ emp.id }}" {% if initial.job_by_id|stringformat:"s" == emp.id|stringformat:"s" %}selected{% endif %}>
-                  {{ emp.name }}
-                </option>
-              {% endfor %}
-            </select>
-            {% if not employees %}
-              <p class="wo-help">
-                No employees configured yet.
-                <a href="{% url 'rental_scheduler:workorder_employee_settings' %}" class="text-blue-700 hover:underline">
-                  Add employees
-                </a>
-                to populate this list.
-              </p>
-            {% endif %}
+            {% include "rental_scheduler/workorders_v2/partials/job_by_field.html" %}
           </div>
         </div>
       </div>
@@ -204,18 +179,13 @@
                   type="text"
                   name="discount_value"
                   value="{{ initial.discount_value|default:'0.00' }}"
-                  class="wo-input flex-1 text-right tabular-nums"
+                  class="wo-input w-28 flex-none text-right tabular-nums"
                   placeholder="0.00"
+                  inputmode="decimal"
                 />
               </div>
               <p class="wo-help">Discounts apply before totals are finalized on save.</p>
             </fieldset>
-          </div>
-
-          <div class="flex items-center justify-end">
-            <button type="submit" class="wo-btn wo-btn-primary">
-              Save
-            </button>
           </div>
         </div>
       </div>
@@ -452,6 +422,66 @@
         <button type="submit" class="wo-btn wo-btn-primary" data-wo-customer-modal-submit>Save</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Employees modal -->
+<div class="wo-customer-modal hidden" data-wo-employees-modal>
+  <div class="wo-customer-modal__overlay" data-wo-employees-modal-backdrop></div>
+  <div
+    class="wo-customer-modal__panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="wo-employees-modal-title"
+    aria-describedby="wo-employees-modal-subtitle"
+    tabindex="-1"
+    data-wo-employees-modal-panel
+  >
+    <div class="wo-customer-modal__header">
+      <div>
+        <h2 class="wo-customer-modal__title" id="wo-employees-modal-title">Manage Employees</h2>
+        <p class="wo-customer-modal__subtitle" id="wo-employees-modal-subtitle">Manage the employee list for the "Job By" field.</p>
+      </div>
+      <button type="button" class="wo-customer-modal__close" data-wo-employees-modal-close aria-label="Close">
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+        </svg>
+      </button>
+    </div>
+    <div class="wo-customer-modal__body" id="wo-employees-modal-body">
+      <!-- Content loaded via HTMX -->
+    </div>
+    </div>
+  </div>
+
+<!-- Unsaved changes modal -->
+<div class="wo-customer-modal hidden" data-wo-unsaved-modal>
+  <div class="wo-customer-modal__overlay" data-wo-unsaved-backdrop></div>
+  <div
+    class="wo-customer-modal__panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="wo-unsaved-modal-title"
+    aria-describedby="wo-unsaved-modal-description"
+    tabindex="-1"
+    data-wo-unsaved-panel
+  >
+    <div class="wo-customer-modal__header">
+      <div>
+        <h2 class="wo-customer-modal__title" id="wo-unsaved-modal-title">Unsaved Changes</h2>
+        <p class="wo-customer-modal__subtitle" id="wo-unsaved-modal-description">You have unsaved changes. What would you like to do?</p>
+      </div>
+      <button type="button" class="wo-customer-modal__close" data-wo-unsaved-close aria-label="Close">
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+        </svg>
+      </button>
+    </div>
+    <div class="wo-customer-modal__footer">
+      <button type="button" class="wo-btn wo-btn-outline" data-wo-unsaved-cancel>Cancel</button>
+      <button type="button" class="wo-btn wo-btn-outline" data-wo-unsaved-discard>Discard Changes</button>
+      <button type="button" class="wo-btn wo-btn-primary" data-wo-unsaved-save-back>Save & Go Back</button>
+    </div>
   </div>
 </div>
 {% endblock %}

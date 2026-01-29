@@ -204,11 +204,15 @@ def _render_workorder_v2_form(
     
     employees = WorkOrderEmployee.objects.filter(is_active=True).order_by("name")
     back_ctx = _get_workorder_back_context(request, job_id=job.pk)
+    # Title format: "Work Order: Customer (Phone)" to match header
+    title = f"Work Order: {job.display_name}"
+    if job.phone:
+        title += f" ({job.phone})"
     return render(
         request,
         "rental_scheduler/workorders_v2/workorder_form.html",
         {
-            "title": "Work Order" if work_order else "Create Work Order",
+            "title": title,
             "job": job,
             "work_order": work_order,
             "employees": employees,
@@ -225,6 +229,8 @@ def _render_workorder_v2_form(
 @require_http_methods(["GET", "POST"])
 @csrf_protect
 def workorder_employee_settings(request):
+    is_htmx = request.headers.get('HX-Request') == 'true'
+    
     if request.method == "POST":
         action = str(request.POST.get("action", "")).strip()
 
@@ -257,24 +263,68 @@ def workorder_employee_settings(request):
                     state_label = "Active" if is_active else "Inactive"
                     messages.success(request, f"Updated {employee.name} → {state_label}.")
 
+        elif action == "rename":
+            employee_id_raw = str(request.POST.get("employee_id", "")).strip()
+            name = str(request.POST.get("name", "")).strip()
+            if not employee_id_raw:
+                messages.error(request, "Missing employee id.")
+            elif not name:
+                messages.error(request, "Employee name is required.")
+            else:
+                try:
+                    employee_id = int(employee_id_raw)
+                    employee = WorkOrderEmployee.objects.get(pk=employee_id)
+                except (ValueError, WorkOrderEmployee.DoesNotExist):
+                    messages.error(request, "Employee not found.")
+                else:
+                    # Check for case-insensitive duplicate, excluding current employee
+                    if WorkOrderEmployee.objects.filter(name__iexact=name).exclude(pk=employee_id).exists():
+                        messages.error(request, "Employee already exists.")
+                    elif employee.name == name:
+                        messages.info(request, "No changes made.")
+                    else:
+                        old_name = employee.name
+                        employee.name = name
+                        employee.save(update_fields=["name", "updated_at"])
+                        messages.success(request, f"Renamed {old_name} → {name}.")
+
         else:
             messages.error(request, "Unknown action.")
 
-        return redirect("rental_scheduler:workorder_employee_settings")
+        # HTMX requests: return modal body partial (no redirect)
+        # Non-HTMX: redirect as before
+        if not is_htmx:
+            return redirect("rental_scheduler:workorder_employee_settings")
+        # Fall through to render the modal body partial below
 
+    # Prepare context
     employees = WorkOrderEmployee.objects.all().order_by("name")
+    active_employees = WorkOrderEmployee.objects.filter(is_active=True).order_by("name")
     active_count = WorkOrderEmployee.objects.filter(is_active=True).count()
     inactive_count = WorkOrderEmployee.objects.filter(is_active=False).count()
+    
+    context = {
+        "title": "Work Order Employees",
+        "employees": employees,
+        "active_employees": active_employees,
+        "active_count": active_count,
+        "inactive_count": inactive_count,
+        "total_count": active_count + inactive_count,
+    }
+    
+    # HTMX requests: return modal body partial
+    if is_htmx:
+        return render(
+            request,
+            "rental_scheduler/workorders_v2/partials/workorder_employee_settings_modal_body.html",
+            context,
+        )
+    
+    # Non-HTMX: return full page
     return render(
         request,
         "rental_scheduler/workorders_v2/workorder_employee_settings.html",
-        {
-            "title": "Work Order Employees",
-            "employees": employees,
-            "active_count": active_count,
-            "inactive_count": inactive_count,
-            "total_count": active_count + inactive_count,
-        },
+        context,
     )
 
 
@@ -392,6 +442,11 @@ def workorder_new(request):
         wo.save()
 
     messages.success(request, f"Work Order #{wo.number} created.")
+    # Handle redirect after save
+    after_save = request.POST.get("after_save", "").strip()
+    if after_save == "back":
+        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
+        return redirect(back_ctx["back_url"])
     # Preserve 'next' param for back navigation
     next_url = request.POST.get("next") or request.GET.get("next") or ""
     edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
@@ -438,7 +493,9 @@ def workorder_edit(request, pk: int):
     job_by_id_raw = str(request.POST.get("job_by_id", "")).strip()
 
     customer_org_id = None
-    if customer_org_id_raw:
+    if not customer_org_id_raw:
+        errors["customer_org_id"] = "Customer is required."
+    else:
         try:
             customer_org_id = int(customer_org_id_raw)
         except (TypeError, ValueError):
@@ -500,6 +557,11 @@ def workorder_edit(request, pk: int):
         wo.save()
 
     messages.success(request, f"Work Order #{wo.number} saved.")
+    # Handle redirect after save
+    after_save = request.POST.get("after_save", "").strip()
+    if after_save == "back":
+        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
+        return redirect(back_ctx["back_url"])
     # Preserve 'next' param for back navigation
     next_url = request.POST.get("next") or request.GET.get("next") or ""
     edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])

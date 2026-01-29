@@ -1,0 +1,46 @@
+<div id="wo-job-by-field">
+  <div class="flex items-center justify-between mb-2">
+    <label class="wo-label" for="wo-job-by">Job By</label>
+    <button
+      type="button"
+      class="wo-btn wo-btn-outline text-xs px-2 py-1"
+      data-wo-employees-open
+      hx-get="{% url 'rental_scheduler:workorder_employee_settings' %}"
+      hx-target="#wo-employees-modal-body"
+      hx-swap="innerHTML"
+    >
+      <svg class="h-3.5 w-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+      </svg>
+      Manage employees
+    </button>
+  </div>
+  <select
+    id="wo-job-by"
+    name="job_by_id"
+    class="wo-select"
+  >
+    <option value="">—</option>
+    {% for emp in employees %}
+      <option value="{{ emp.id }}" {% if initial.job_by_id|stringformat:"s" == emp.id|stringformat:"s" %}selected{% endif %}>
+        {{ emp.name }}
+      </option>
+    {% endfor %}
+  </select>
+  {% if not employees %}
+    <p class="wo-help">
+      No employees configured yet.
+      <button
+        type="button"
+        class="text-blue-700 hover:underline"
+        data-wo-employees-open
+        hx-get="{% url 'rental_scheduler:workorder_employee_settings' %}"
+        hx-target="#wo-employees-modal-body"
+        hx-swap="innerHTML"
+      >
+        Add employees
+      </button>
+      to populate this list.
+    </p>
+  {% endif %}
+</div>

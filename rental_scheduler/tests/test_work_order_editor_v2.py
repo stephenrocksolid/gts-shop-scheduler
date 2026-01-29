@@ -49,7 +49,7 @@ def test_workorder_new_post_creates_work_order_v2_and_lines(api_client, job):
             "trailer_make_model": "Model X",
             "trailer_color": "Red",
             "trailer_serial": "SER-1",
-            "customer_org_id": "",
+            "customer_org_id": "123",
             "job_by_id": "",
             "discount_type": "amount",
             "discount_value": "0.00",
@@ -93,7 +93,7 @@ def test_workorder_edit_updates_lines_and_discount(api_client, job):
             "trailer_make_model": "",
             "trailer_color": "",
             "trailer_serial": "",
-            "customer_org_id": "",
+            "customer_org_id": "456",
             "job_by_id": "",
             "discount_type": "percent",
             "discount_value": "10.00",
@@ -270,3 +270,157 @@ def test_workorder_edit_renders_next_in_hidden_field(api_client, job):
 
     # Should have hidden input with next value
     assert f'name="next" value="{calendar_url}?open_job={job.id}"' in html
+
+
+# =============================================================================
+# Customer requirement tests
+# =============================================================================
+
+
+@pytest.mark.django_db
+def test_workorder_new_requires_customer(api_client, job):
+    """POST without customer_org_id should re-render with error."""
+    url = reverse("rental_scheduler:workorder_new") + f"?job={job.id}"
+
+    resp = api_client.post(
+        url,
+        data={
+            "notes": "Test",
+            "trailer_make_model": "",
+            "trailer_color": "",
+            "trailer_serial": "",
+            "customer_org_id": "",
+            "job_by_id": "",
+            "discount_type": "amount",
+            "discount_value": "0.00",
+            "line_itemid": ["123"],
+            "line_itemnumber_snapshot": ["PN-123"],
+            "line_description_snapshot": ["Test"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
+        },
+    )
+
+    assert resp.status_code == 200
+    html = resp.content.decode("utf-8")
+    assert "Customer is required" in html
+
+
+@pytest.mark.django_db
+def test_workorder_edit_requires_customer(api_client, job):
+    """POST edit without customer_org_id should re-render with error."""
+    from rental_scheduler.models import WorkOrderNumberSequence, WorkOrderV2
+
+    WorkOrderNumberSequence.get_solo(start_number=800)
+    wo = WorkOrderV2.objects.create(
+        job=job,
+        customer_org_id=999,
+        discount_type="amount",
+        discount_value=Decimal("0.00"),
+    )
+
+    url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
+
+    resp = api_client.post(
+        url,
+        data={
+            "notes": "Updated",
+            "trailer_make_model": "",
+            "trailer_color": "",
+            "trailer_serial": "",
+            "customer_org_id": "",
+            "job_by_id": "",
+            "discount_type": "amount",
+            "discount_value": "0.00",
+            "line_itemid": ["123"],
+            "line_itemnumber_snapshot": ["PN-123"],
+            "line_description_snapshot": ["Test"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
+        },
+    )
+
+    assert resp.status_code == 200
+    html = resp.content.decode("utf-8")
+    assert "Customer is required" in html
+
+
+# =============================================================================
+# Save & go back redirect tests
+# =============================================================================
+
+
+@pytest.mark.django_db
+def test_workorder_new_save_and_go_back_redirects_to_back_url(api_client, job):
+    """POST with after_save=back should redirect to back_url."""
+    from rental_scheduler.models import WorkOrderNumberSequence
+
+    WorkOrderNumberSequence.get_solo(start_number=900)
+    calendar_url = reverse("rental_scheduler:calendar")
+    url = reverse("rental_scheduler:workorder_new") + f"?job={job.id}&next={calendar_url}"
+
+    resp = api_client.post(
+        url,
+        data={
+            "notes": "Test",
+            "trailer_make_model": "",
+            "trailer_color": "",
+            "trailer_serial": "",
+            "customer_org_id": "789",
+            "job_by_id": "",
+            "discount_type": "amount",
+            "discount_value": "0.00",
+            "after_save": "back",
+            "line_itemid": ["123"],
+            "line_itemnumber_snapshot": ["PN-123"],
+            "line_description_snapshot": ["Test"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
+        },
+    )
+
+    assert resp.status_code == 302
+    # Should redirect to calendar with open_job param
+    assert calendar_url in resp.url
+    assert f"open_job={job.id}" in resp.url
+
+
+@pytest.mark.django_db
+def test_workorder_edit_save_and_go_back_redirects_to_back_url(api_client, job):
+    """POST edit with after_save=back should redirect to back_url."""
+    from rental_scheduler.models import WorkOrderNumberSequence, WorkOrderV2
+
+    WorkOrderNumberSequence.get_solo(start_number=1000)
+    wo = WorkOrderV2.objects.create(
+        job=job,
+        customer_org_id=111,
+        discount_type="amount",
+        discount_value=Decimal("0.00"),
+    )
+
+    job_list_url = reverse("rental_scheduler:job_list")
+    url = reverse("rental_scheduler:workorder_edit", args=[wo.pk]) + f"?next={job_list_url}"
+
+    resp = api_client.post(
+        url,
+        data={
+            "notes": "Updated",
+            "trailer_make_model": "",
+            "trailer_color": "",
+            "trailer_serial": "",
+            "customer_org_id": "222",
+            "job_by_id": "",
+            "discount_type": "amount",
+            "discount_value": "0.00",
+            "after_save": "back",
+            "line_itemid": ["123"],
+            "line_itemnumber_snapshot": ["PN-123"],
+            "line_description_snapshot": ["Test"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
+        },
+    )
+
+    assert resp.status_code == 302
+    # Should redirect to job list (back_url)
+    assert job_list_url in resp.url
