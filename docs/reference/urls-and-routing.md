@@ -44,6 +44,9 @@ The repo enforces this with:
   - `workOrderNewBase` - `/workorders/new/` (base URL; expects query `job=...`)
   - `workOrderEditTemplate` - `/workorders/{pk}/edit/` (template)
   - `workOrderPdfTemplate` - `/workorders/{pk}/pdf/` (template)
+  - Optional return navigation:
+    - Work Order v2 pages accept `next=<path>` (validated same-host) to control the "Back" link.
+    - When `next` points to the calendar, Work Order v2 appends `open_job=<job_id>` so the calendar page can re-open that job in the panel/workspace.
 
 - Classic Accounting APIs (Jan 2026):
   - `accountingCustomerSearch` - `/api/accounting/customers/search/`

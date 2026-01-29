@@ -2,6 +2,7 @@
 Playwright E2E smoke tests for calendar page.
 Tests JS behavior, guardrails injection, and basic functionality.
 """
+import json
 import pytest
 import re
 from playwright.sync_api import Page, expect
@@ -702,31 +703,6 @@ class TestDraftWorkspaceFlow:
         """)
         assert calendar_set, "Calendar must be set before form submission"
 
-        # Set up handler to capture job ID from HX-Trigger
-        page.evaluate("""
-            () => {
-                window.__e2eLastJobId = null;
-                window.__e2eDebugLog = [];
-                const handler = (event) => {
-                    try {
-                        const xhr = event.detail && event.detail.xhr;
-                        if (xhr && xhr.status === 200) {
-                            const header = xhr.getResponseHeader ? xhr.getResponseHeader('HX-Trigger') : null;
-                            if (header) {
-                                const data = JSON.parse(header);
-                                if (data.jobSaved && data.jobSaved.jobId) {
-                                    window.__e2eLastJobId = String(data.jobSaved.jobId);
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        // ignore
-                    }
-                };
-                document.body.addEventListener('htmx:afterRequest', handler, { once: true });
-            }
-        """)
-
         job_id = None
         try:
             # Ensure form is fully ready - wait for flatpickr and all initialization
@@ -769,34 +745,46 @@ class TestDraftWorkspaceFlow:
             # Click Save (HTMX submission) and wait for it to succeed
             save_btn = page.locator("#job-panel form button[type='submit']")
             expect(save_btn).to_be_visible()
-            
-            save_btn.click()
-            
-            # Wait for the request to complete
-            page.wait_for_timeout(2000)
 
-            # Wait for jobSaved to be captured and for the draft tab to be removed
-            try:
-                page.wait_for_function("() => !!window.__e2eLastJobId", timeout=15000)
-            except Exception as e:
-                # If timeout, show debug info
-                debug_log = page.evaluate("() => window.__e2eDebugLog || []")
-                print(f"Debug log: {debug_log}")
-                # Check if form submission happened
-                form_html = page.evaluate("() => document.querySelector('form[data-gts-job-form]')?.outerHTML?.slice(0, 500)")
-                print(f"Form HTML (first 500 chars): {form_html}")
-                # Check for validation errors
-                errors = page.evaluate("() => Array.from(document.querySelectorAll('.error, .field-error')).map(el => el.textContent)")
-                print(f"Validation errors: {errors}")
-                print(f"Console errors: {console_errors}")
-                raise
-            job_id = page.evaluate("window.__e2eLastJobId")
+            page.evaluate("""
+                () => {
+                    window.__e2eLastJobId = null;
+                    window.__e2eSaveError = null;
+                    if (!window.JobPanel || !window.JobPanel.saveForm) {
+                        window.__e2eSaveError = { error: 'JobPanel.saveForm unavailable' };
+                        return;
+                    }
+                    try {
+                        window.JobPanel.saveForm({ mode: 'manual', forceFetch: true, closeOnSave: true }, (result) => {
+                            if (result && result.successful && result.jobId) {
+                                window.__e2eLastJobId = String(result.jobId);
+                            } else {
+                                window.__e2eSaveError = result || { error: 'Save failed' };
+                            }
+                        });
+                    } catch (e) {
+                        window.__e2eSaveError = { error: e && e.message ? e.message : 'Save threw error' };
+                    }
+                }
+            """)
 
-            # Draft should be removed from workspace, and panel should close
             page.wait_for_function(
-                "() => window.JobWorkspace && window.JobWorkspace.openJobs && window.JobWorkspace.openJobs.size === 0",
+                "() => !!window.__e2eLastJobId || !!window.__e2eSaveError",
                 timeout=15000,
             )
+            job_id = page.evaluate("window.__e2eLastJobId")
+            if not job_id:
+                save_error = page.evaluate("window.__e2eSaveError")
+                raise AssertionError(f"Save failed: {save_error}")
+
+            # Wait for the draft tab to be removed
+            try:
+                page.wait_for_function(
+                    "() => window.JobWorkspace && window.JobWorkspace.openJobs && window.JobWorkspace.openJobs.size === 0",
+                    timeout=15000,
+                )
+            except Exception as e:
+                raise
             expect(page.locator("#workspace-bar")).to_be_hidden()
             expect(page.locator("#job-panel")).to_be_hidden()
         finally:

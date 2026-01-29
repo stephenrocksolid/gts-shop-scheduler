@@ -23,6 +23,70 @@
             initScrollPrevention();
             initPopoverObserver();
             initSearchPanel();
+            initOpenJobFromUrl();
+        });
+    }
+
+    // ========================================================================
+    // RETURN NAV: OPEN JOB FROM URL
+    // Supports `?open_job=<job_id>` so Work Order pages can return to the
+    // calendar and re-open the originating job in the panel.
+    // ========================================================================
+
+    function initOpenJobFromUrl() {
+        GTS.initOnce('calendar_open_job_from_url', function() {
+            const params = new URLSearchParams(window.location.search);
+            const jobId = params.get('open_job');
+            if (!jobId || !/^\d+$/.test(jobId)) {
+                return;
+            }
+
+            function openJob() {
+                // Prefer JobWorkspace so the tab bar stays in sync.
+                if (window.JobWorkspace && typeof window.JobWorkspace.openJob === 'function') {
+                    window.JobWorkspace.openJob(jobId, {
+                        customerName: 'Job',
+                        trailerColor: '',
+                        calendarColor: '#3B82F6'
+                    });
+                    return true;
+                }
+
+                // Fallback: open directly in JobPanel.
+                if (window.JobPanel && GTS.urls && typeof GTS.urls.jobCreatePartial === 'function') {
+                    window.JobPanel.setTitle('Edit Job');
+                    window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
+                    if (window.JobPanel.setCurrentJobId) {
+                        window.JobPanel.setCurrentJobId(jobId);
+                    }
+                    return true;
+                }
+
+                return false;
+            }
+
+            function clearParamFromUrl() {
+                params.delete('open_job');
+                const newQuery = params.toString();
+                const newUrl = window.location.pathname + (newQuery ? '?' + newQuery : '') + window.location.hash;
+                if (window.history && window.history.replaceState) {
+                    window.history.replaceState({}, '', newUrl);
+                }
+            }
+
+            // Try immediately; if globals aren't ready yet, retry briefly.
+            let tries = 0;
+            const maxTries = 20;
+            (function tryOpen() {
+                if (openJob()) {
+                    clearParamFromUrl();
+                    return;
+                }
+                tries += 1;
+                if (tries < maxTries) {
+                    setTimeout(tryOpen, 50);
+                }
+            })();
         });
     }
 

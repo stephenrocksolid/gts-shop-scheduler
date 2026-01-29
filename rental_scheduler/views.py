@@ -118,7 +118,7 @@ def _parse_line_items_from_post(request) -> list[dict]:
     return lines
 
 
-def _get_workorder_back_context(request) -> dict:
+def _get_workorder_back_context(request, *, job_id: int | None = None) -> dict:
     """
     Compute back_url and back_label for Work Order pages.
 
@@ -128,6 +128,34 @@ def _get_workorder_back_context(request) -> dict:
       - back_label: human-readable label based on the URL
       - next_value: the raw validated value (to embed in form for POST round-trip)
     """
+
+    def _with_query(url: str, extra_params: dict[str, str | int]) -> str:
+        """
+        Merge query params into a URL while preserving existing duplicates for
+        keys we don't touch (e.g., calendars=1&calendars=2).
+        """
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+        parts = urlsplit(url)
+        existing_pairs = parse_qsl(parts.query, keep_blank_values=True)
+        extra_keys = set(extra_params.keys())
+
+        merged_pairs = [(k, v) for (k, v) in existing_pairs if k not in extra_keys]
+        for k, v in extra_params.items():
+            if v is None or v == "":
+                continue
+            merged_pairs.append((k, str(v)))
+
+        return urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path,
+                urlencode(merged_pairs, doseq=True),
+                parts.fragment,
+            )
+        )
+
     next_url = request.GET.get("next") or request.POST.get("next") or ""
     fallback = reverse("rental_scheduler:job_list")
 
@@ -142,11 +170,17 @@ def _get_workorder_back_context(request) -> dict:
         back_url = fallback
 
     # Determine label
+    from urllib.parse import urlsplit
+
     calendar_url = reverse("rental_scheduler:calendar")
     job_list_url = reverse("rental_scheduler:job_list")
-    if back_url.startswith(calendar_url):
+    back_path = urlsplit(back_url).path
+
+    if back_path.startswith(calendar_url):
         back_label = "Back to Calendar"
-    elif back_url.startswith(job_list_url):
+        if job_id:
+            back_url = _with_query(back_url, {"open_job": job_id})
+    elif back_path.startswith(job_list_url):
         back_label = "Back to Jobs"
     else:
         back_label = "Back"
@@ -167,7 +201,7 @@ def _render_workorder_v2_form(
     errors: dict | None = None,
 ):
     employees = WorkOrderEmployee.objects.filter(is_active=True).order_by("name")
-    back_ctx = _get_workorder_back_context(request)
+    back_ctx = _get_workorder_back_context(request, job_id=job.pk)
     return render(
         request,
         "rental_scheduler/workorders_v2/workorder_form.html",
@@ -181,6 +215,62 @@ def _render_workorder_v2_form(
             "back_url": back_ctx["back_url"],
             "back_label": back_ctx["back_label"],
             "next_value": back_ctx["next_value"],
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+@csrf_protect
+def workorder_employee_settings(request):
+    if request.method == "POST":
+        action = str(request.POST.get("action", "")).strip()
+
+        if action == "add":
+            name = str(request.POST.get("name", "")).strip()
+            if not name:
+                messages.error(request, "Employee name is required.")
+            elif WorkOrderEmployee.objects.filter(name__iexact=name).exists():
+                messages.error(request, "Employee already exists.")
+            else:
+                WorkOrderEmployee.objects.create(name=name, is_active=True)
+                messages.success(request, f"Added employee: {name}.")
+
+        elif action == "set_active":
+            employee_id_raw = str(request.POST.get("employee_id", "")).strip()
+            is_active_raw = str(request.POST.get("is_active", "")).strip().lower()
+            if not employee_id_raw:
+                messages.error(request, "Missing employee id.")
+            else:
+                try:
+                    employee_id = int(employee_id_raw)
+                    employee = WorkOrderEmployee.objects.get(pk=employee_id)
+                except (ValueError, WorkOrderEmployee.DoesNotExist):
+                    messages.error(request, "Employee not found.")
+                else:
+                    is_active = is_active_raw in {"1", "true", "yes", "on"}
+                    if employee.is_active != is_active:
+                        employee.is_active = is_active
+                        employee.save(update_fields=["is_active", "updated_at"])
+                    state_label = "Active" if is_active else "Inactive"
+                    messages.success(request, f"Updated {employee.name} → {state_label}.")
+
+        else:
+            messages.error(request, "Unknown action.")
+
+        return redirect("rental_scheduler:workorder_employee_settings")
+
+    employees = WorkOrderEmployee.objects.all().order_by("name")
+    active_count = WorkOrderEmployee.objects.filter(is_active=True).count()
+    inactive_count = WorkOrderEmployee.objects.filter(is_active=False).count()
+    return render(
+        request,
+        "rental_scheduler/workorders_v2/workorder_employee_settings.html",
+        {
+            "title": "Work Order Employees",
+            "employees": employees,
+            "active_count": active_count,
+            "inactive_count": inactive_count,
+            "total_count": active_count + inactive_count,
         },
     )
 

@@ -19,6 +19,7 @@ from .views import (
     JobListTablePartialView,
     JobDeleteView,
     JobPrintInvoiceView,
+    workorder_employee_settings,
     workorder_new,
     workorder_edit,
     workorder_pdf,
@@ -107,6 +108,7 @@ urlpatterns = [
     path('jobs/<int:job_id>/call-reminder/update/', job_call_reminder_update, name='job_call_reminder_update'),
     
     # Work Order URLs (v2)
+    path('settings/workorders/employees/', workorder_employee_settings, name='workorder_employee_settings'),
     path('workorders/new/', workorder_new, name='workorder_new'),
     path('workorders/<int:pk>/edit/', workorder_edit, name='workorder_edit'),
     # PDF print (v2)

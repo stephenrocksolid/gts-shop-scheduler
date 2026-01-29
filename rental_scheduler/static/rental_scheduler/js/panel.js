@@ -993,7 +993,7 @@
        */
       saveForm(optionsOrCallback, callback) {
         // Handle backwards compatibility: saveForm(callback) vs saveForm(options, callback)
-        let options = { mode: 'autosave' };
+        let options = { mode: 'autosave', forceFetch: false, closeOnSave: false };
         if (typeof optionsOrCallback === 'function') {
           callback = optionsOrCallback;
         } else if (optionsOrCallback && typeof optionsOrCallback === 'object') {
@@ -1055,7 +1055,27 @@
         const hasHtmxPost = form.hasAttribute('hx-post') || form.hasAttribute('hx-put') ||
           form.hasAttribute('hx-patch') || form.hasAttribute('hx-delete');
 
-        if (typeof htmx !== 'undefined' && hasHtmxPost) {
+        const closeAfterSave = () => {
+          if (self.isSwitchingJobs || self.isPrinting) return;
+          const currentJobId = self.currentJobId;
+          const currentDraftId = window.JobPanel ? window.JobPanel.currentDraftId : null;
+          const activeJobId = window.JobWorkspace ? window.JobWorkspace.activeJobId : null;
+
+          if (currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob && window.JobWorkspace.hasJob(currentJobId)) {
+            window.JobWorkspace.closeJob(currentJobId);
+          } else if (currentDraftId && window.JobWorkspace && window.JobWorkspace.hasJob && window.JobWorkspace.hasJob(currentDraftId)) {
+            window.JobWorkspace.closeJob(currentDraftId);
+            window.JobPanel.currentDraftId = null;
+          } else if (activeJobId && window.JobWorkspace && window.JobWorkspace.hasJob && window.JobWorkspace.hasJob(activeJobId)) {
+            window.JobWorkspace.closeJob(activeJobId);
+          } else if (window.JobPanel && window.JobPanel.close) {
+            window.JobPanel.close(true);
+          }
+        };
+
+        const useHtmx = typeof htmx !== 'undefined' && hasHtmxPost && !options.forceFetch;
+
+        if (useHtmx) {
           // Use HTMX submission - it won't navigate because the form has hx-* attrs
           const afterRequestHandler = (event) => {
             const xhr = event.detail.xhr;
@@ -1169,6 +1189,10 @@
                 // Migrate warning key from temp to job ID
                 if (jobId && window.migrateWarningKeyToJobId) {
                   window.migrateWarningKeyToJobId(form, jobId);
+                }
+
+                if (options.closeOnSave) {
+                  closeAfterSave();
                 }
               } else {
                 console.error('Form submission failed with status:', result.status);
@@ -1822,11 +1846,14 @@
       const sanitizedHtml = GTS.htmlState.sanitizeDraftHtml(html);
       target.innerHTML = sanitizedHtml;
 
-      // Re-run HTMX processing ONLY on the inner form content, not the panel body
-      // This ensures hx-* on form elements work, without activating hx-get behavior on panel body
+      // Re-run HTMX processing on restored content
+      // Process the form first, then the panel body (hx-trigger=refresh prevents click reloads)
       if (typeof htmx !== 'undefined') {
         const contentRoot = target.querySelector('form') || target.firstElementChild || target;
         htmx.process(contentRoot);
+        if (contentRoot !== target) {
+          htmx.process(target);
+        }
       }
 
       executeOperation(() => {
@@ -1867,8 +1894,8 @@
     hasUnsavedChanges: () => {
       return panelInstance.hasUnsavedChanges();
     },
-    saveForm: (callback) => {
-      executeOperation(() => panelInstance.saveForm(callback));
+    saveForm: (optionsOrCallback, callback) => {
+      executeOperation(() => panelInstance.saveForm(optionsOrCallback, callback));
     },
     get currentJobId() {
       return panelInstance.currentJobId;

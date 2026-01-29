@@ -6,6 +6,7 @@ Tests that delete works via modal without page navigation on both:
 
 Regression test for: Full-page redirect to /jobs/<id>/delete/ confirmation page.
 """
+import re
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -143,7 +144,9 @@ class TestDeleteModalCalendarSearch:
             cancel_btn.click()
 
             # Modal should be hidden
-            expect(page.locator("#gts-modal-root")).to_have_class(/hidden/)
+            expect(page.locator("#gts-modal-root")).to_have_class(
+                re.compile(r"(^|\s)hidden(\s|$)")
+            )
 
             # Now click delete again and confirm
             delete_btn.click()
@@ -439,7 +442,9 @@ class TestDeleteModalRecurring:
 
             # Cancel the modal
             page.locator("#gts-modal-root [data-modal-cancel]").click()
-            expect(page.locator("#gts-modal-root")).to_have_class(/hidden/)
+            expect(page.locator("#gts-modal-root")).to_have_class(
+                re.compile(r"(^|\s)hidden(\s|$)")
+            )
 
         finally:
             # Cleanup: delete the entire series

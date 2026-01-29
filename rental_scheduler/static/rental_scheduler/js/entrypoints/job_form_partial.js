@@ -58,6 +58,7 @@
                     if (window.JobPanel && !window.JobPanel.isSwitchingJobs && !window.JobPanel.isPrinting) {
                         const currentJobId = window.JobPanel.currentJobId;
                         const currentDraftId = window.JobPanel.currentDraftId;
+                        const activeJobId = window.JobWorkspace ? window.JobWorkspace.activeJobId : null;
 
                         // Prefer closing by real job ID if present in workspace
                         if (currentJobId && window.JobWorkspace && window.JobWorkspace.hasJob && window.JobWorkspace.hasJob(currentJobId)) {
@@ -66,6 +67,9 @@
                             // Draft (minimized new job) flow: close/remove the draft tab on successful save
                             window.JobWorkspace.closeJob(currentDraftId);
                             window.JobPanel.currentDraftId = null;
+                        } else if (activeJobId && window.JobWorkspace && window.JobWorkspace.hasJob && window.JobWorkspace.hasJob(activeJobId)) {
+                            // Fallback: close the active workspace tab if it exists
+                            window.JobWorkspace.closeJob(activeJobId);
                         } else {
                             // Fallback: just close the panel
                             window.JobPanel.close(true); // true = skip unsaved check

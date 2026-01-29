@@ -122,7 +122,7 @@
 }
 
 .day-cell.weekend {
-    @apply bg-gray-25;
+    @apply bg-gray-50;
 }
 
 .day-cell.weekend:hover {
@@ -284,7 +284,7 @@
 }
 
 .completion-overlay {
-    @apply absolute inset-0 bg-green-100 bg-opacity-50 flex items-center justify-center;
+    @apply absolute inset-0 bg-green-100/50 flex items-center justify-center;
     @apply pointer-events-none;
 }
 
@@ -511,7 +511,7 @@
 /* ===== DRAG AND DROP STATES ===== */
 .day-cell.drag-over {
     @apply bg-blue-100 border-blue-400;
-    @apply ring-2 ring-blue-500 ring-opacity-50;
+    @apply ring-2 ring-blue-500/50;
 }
 
 .day-cell.drag-over .day-number {

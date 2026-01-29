@@ -210,7 +210,7 @@ def test_workorder_new_back_link_uses_next_param_for_calendar(api_client, job):
     resp = api_client.get(url)
     html = resp.content.decode("utf-8")
 
-    assert f'href="{calendar_url}"' in html
+    assert f'href="{calendar_url}?open_job={job.id}"' in html
     assert "Back to Calendar" in html
 
 
@@ -263,4 +263,4 @@ def test_workorder_edit_renders_next_in_hidden_field(api_client, job):
     html = resp.content.decode("utf-8")
 
     # Should have hidden input with next value
-    assert f'name="next" value="{calendar_url}"' in html
+    assert f'name="next" value="{calendar_url}?open_job={job.id}"' in html

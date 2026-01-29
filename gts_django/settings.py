@@ -196,13 +196,18 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = []
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-#IMPORTANT: This is to make that the static files get collected with a hashed filename!!!!!
+# IMPORTANT: Use unhashed static storage in DEBUG for fast iteration.
+staticfiles_backend = (
+    "django.contrib.staticfiles.storage.StaticFilesStorage"
+    if DEBUG
+    else "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+)
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
+        "BACKEND": staticfiles_backend,
     },
 }
 

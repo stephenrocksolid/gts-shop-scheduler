@@ -251,10 +251,10 @@ class TestRecurrencePreviewOccurrences:
 
 @pytest.mark.django_db
 class TestJobRowExpandControl:
-    """Test that job rows render with expand control for forever series."""
+    """Test that series header rows render for recurring series."""
 
     def test_forever_series_row_has_expand_button(self, api_client, calendar):
-        """Forever series job row should include the expand button."""
+        """Forever series should render a series header row with forever badge."""
         tz = timezone.get_current_timezone()
         now = timezone.now()
         start = timezone.make_aware(
@@ -282,16 +282,16 @@ class TestJobRowExpandControl:
         assert response.status_code == 200
         content = response.content.decode("utf-8")
         
-        # Should have the expand button with correct data attribute
-        assert 'expand-occurrences-btn' in content
-        assert f'data-parent-id="{parent.id}"' in content
-        # Should have the forever-series-row class
-        assert 'forever-series-row' in content
-        # Should have the data-forever-parent attribute
-        assert 'data-forever-parent="1"' in content
+        expected_scope = 'past' if start < now else 'upcoming'
+
+        # Series should render as a header row (collapsed view)
+        assert f'id="series-row-{parent.id}-{expected_scope}"' in content
+        assert f'data-series-id="{parent.id}"' in content
+        # Forever series should include the forever badge
+        assert 'title="Forever recurring series"' in content
 
     def test_finite_series_row_has_no_expand_button(self, api_client, calendar):
-        """Finite recurring series should NOT have an expand button."""
+        """Finite recurring series should render a header without forever badge."""
         tz = timezone.get_current_timezone()
         now = timezone.now()
         start = timezone.make_aware(
@@ -319,6 +319,11 @@ class TestJobRowExpandControl:
         assert response.status_code == 200
         content = response.content.decode("utf-8")
         
-        # Should NOT have forever-series-row class or expand button for this job
-        assert 'data-forever-parent="1"' not in content
+        expected_scope = 'past' if start < now else 'upcoming'
+
+        # Series header row should exist for the finite series
+        assert f'id="series-row-{parent.id}-{expected_scope}"' in content
+        assert f'data-series-id="{parent.id}"' in content
+        # Finite series should not show the forever badge
+        assert 'title="Forever recurring series"' not in content
 

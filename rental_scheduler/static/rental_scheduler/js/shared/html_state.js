@@ -68,6 +68,11 @@
                 }
             });
 
+            // Remove HTMX processed markers so restored drafts rebind correctly
+            doc.querySelectorAll('[data-hx-processed]').forEach(function(el) {
+                el.removeAttribute('data-hx-processed');
+            });
+
             // Return the sanitized body innerHTML
             return doc.body.innerHTML;
         } catch (e) {

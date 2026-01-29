@@ -297,7 +297,7 @@
 
 /* ===== MODAL COMPONENTS ===== */
 .modal-overlay {
-    @apply fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity;
+    @apply fixed inset-0 bg-gray-500/75 transition-opacity;
 }
 
 .modal-container {
@@ -362,7 +362,7 @@
 }
 
 .filter-chip-count {
-    @apply bg-white bg-opacity-75 px-1.5 py-0.5 rounded-full text-xs font-medium;
+    @apply bg-white/75 px-1.5 py-0.5 rounded-full text-xs font-medium;
 }
 
 .filter-actions {
@@ -763,5 +763,3 @@ body.workspace-active {
     font-size: 100%;
     padding-top: 6px;
 }
-
-

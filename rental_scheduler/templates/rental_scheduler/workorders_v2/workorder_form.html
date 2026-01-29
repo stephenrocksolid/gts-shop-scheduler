@@ -70,7 +70,15 @@
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700">Job By</label>
+          <label class="flex items-center justify-between text-sm font-medium text-gray-700">
+            <span>Job By</span>
+            <a
+              href="{% url 'rental_scheduler:workorder_employee_settings' %}"
+              class="text-xs font-normal text-blue-700 hover:underline"
+            >
+              Manage employees
+            </a>
+          </label>
           <select
             name="job_by_id"
             class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -82,6 +90,15 @@
               </option>
             {% endfor %}
           </select>
+          {% if not employees %}
+            <p class="mt-2 text-xs text-gray-500">
+              No employees configured yet.
+              <a href="{% url 'rental_scheduler:workorder_employee_settings' %}" class="text-blue-700 hover:underline">
+                Add employees
+              </a>
+              to populate this list.
+            </p>
+          {% endif %}
         </div>
       </div>
 
