@@ -9,17 +9,20 @@ Optimized for performance:
 import json
 import logging
 import re
+from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, timedelta
 
 from django import forms
 from django.contrib import messages
+from django.conf import settings
 from django.db import models, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
@@ -40,8 +43,677 @@ from rental_scheduler.utils.events import (
 )
 from rental_scheduler.utils.phone import format_phone
 
-from .forms import CalendarImportForm, JobForm, WorkOrderForm, WorkOrderLineForm
-from .models import Calendar, Invoice, Job, WorkOrder
+from .forms import CalendarImportForm, JobForm
+from .models import (
+    Calendar,
+    Invoice,
+    Job,
+    WorkOrderCompanyProfile,
+    WorkOrderEmployee,
+    WorkOrderLineV2,
+    WorkOrderV2,
+)
+
+# ============================================================================
+# Work Order (v2) / Classic Accounting helpers
+# ============================================================================
+
+
+def _accounting_is_configured() -> bool:
+    """
+    Return True when Classic Accounting DB is configured for real use.
+
+    In tests/CI/dev without Classic env vars, we configure a placeholder SQLite
+    DB for the alias; in that case we must not attempt to query Classic tables.
+    """
+
+    accounting_db = (settings.DATABASES or {}).get("accounting") or {}
+    return accounting_db.get("ENGINE") == "django.db.backends.postgresql"
+
+
+def _parse_decimal(value: str, *, field_name: str) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise forms.ValidationError(f"Invalid number for {field_name}.")
+
+
+def _parse_line_items_from_post(request) -> list[dict]:
+    itemids = request.POST.getlist("line_itemid")
+    qtys = request.POST.getlist("line_qty")
+    prices = request.POST.getlist("line_price")
+    itemnumbers = request.POST.getlist("line_itemnumber_snapshot")
+    descs = request.POST.getlist("line_description_snapshot")
+
+    # Normalize lengths (missing lists become empty strings)
+    max_len = max(len(itemids), len(qtys), len(prices), len(itemnumbers), len(descs), 0)
+
+    def _get(lst, idx):
+        return lst[idx] if idx < len(lst) else ""
+
+    lines: list[dict] = []
+    for i in range(max_len):
+        raw_itemid = str(_get(itemids, i)).strip()
+        if not raw_itemid:
+            continue
+
+        try:
+            itemid = int(raw_itemid)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(f"Invalid itemid at line {i + 1}.")
+
+        qty = _parse_decimal(_get(qtys, i), field_name=f"qty (line {i + 1})")
+        price = _parse_decimal(_get(prices, i), field_name=f"price (line {i + 1})")
+
+        lines.append(
+            {
+                "itemid": itemid,
+                "qty": qty,
+                "price": price,
+                "itemnumber_snapshot": str(_get(itemnumbers, i)).strip(),
+                "description_snapshot": str(_get(descs, i)).strip(),
+            }
+        )
+
+    return lines
+
+
+def _get_workorder_back_context(request) -> dict:
+    """
+    Compute back_url and back_label for Work Order pages.
+
+    Reads the 'next' query param (GET or POST), validates it is same-host,
+    and returns a dict with:
+      - back_url: validated URL or fallback to job_list
+      - back_label: human-readable label based on the URL
+      - next_value: the raw validated value (to embed in form for POST round-trip)
+    """
+    next_url = request.GET.get("next") or request.POST.get("next") or ""
+    fallback = reverse("rental_scheduler:job_list")
+
+    # Validate: must be same-host (no open redirect)
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        back_url = next_url
+    else:
+        back_url = fallback
+
+    # Determine label
+    calendar_url = reverse("rental_scheduler:calendar")
+    job_list_url = reverse("rental_scheduler:job_list")
+    if back_url.startswith(calendar_url):
+        back_label = "Back to Calendar"
+    elif back_url.startswith(job_list_url):
+        back_label = "Back to Jobs"
+    else:
+        back_label = "Back"
+
+    return {
+        "back_url": back_url,
+        "back_label": back_label,
+        "next_value": back_url if back_url != fallback else "",
+    }
+
+
+def _render_workorder_v2_form(
+    request,
+    *,
+    job: Job,
+    work_order: WorkOrderV2 | None,
+    initial: dict | None = None,
+    errors: dict | None = None,
+):
+    employees = WorkOrderEmployee.objects.filter(is_active=True).order_by("name")
+    back_ctx = _get_workorder_back_context(request)
+    return render(
+        request,
+        "rental_scheduler/workorders_v2/workorder_form.html",
+        {
+            "title": "Work Order" if work_order else "Create Work Order",
+            "job": job,
+            "work_order": work_order,
+            "employees": employees,
+            "initial": initial or {},
+            "errors": errors or {},
+            "back_url": back_ctx["back_url"],
+            "back_label": back_ctx["back_label"],
+            "next_value": back_ctx["next_value"],
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+@csrf_protect
+def workorder_new(request):
+    job_id = request.GET.get("job")
+    if not job_id:
+        return HttpResponse("Missing required query param: job", status=400)
+
+    job = get_object_or_404(Job, pk=job_id)
+
+    existing = WorkOrderV2.objects.filter(job=job).first()
+    if existing:
+        # Preserve 'next' param for back navigation
+        next_url = request.GET.get("next") or ""
+        edit_url = reverse("rental_scheduler:workorder_edit", args=[existing.pk])
+        if next_url:
+            from urllib.parse import urlencode
+
+            edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
+        return redirect(edit_url)
+
+    if request.method == "GET":
+        initial = {
+            "notes": job.repair_notes or "",
+            "trailer_make_model": job.trailer_details or "",
+            "trailer_color": job.trailer_color or "",
+            "trailer_serial": job.trailer_serial or "",
+            "discount_type": "amount",
+            "discount_value": "0.00",
+            "customer_org_id": "",
+            "job_by_id": "",
+        }
+        return _render_workorder_v2_form(request, job=job, work_order=None, initial=initial)
+
+    # POST: create work order + lines (transactional)
+    errors: dict = {}
+    try:
+        lines = _parse_line_items_from_post(request)
+    except forms.ValidationError as e:
+        errors["lines"] = str(e)
+        lines = []
+
+    notes = request.POST.get("notes", "")
+    trailer_make_model = request.POST.get("trailer_make_model", "")
+    trailer_color = request.POST.get("trailer_color", "")
+    trailer_serial = request.POST.get("trailer_serial", "")
+    discount_type = request.POST.get("discount_type", "amount")
+    discount_value_raw = request.POST.get("discount_value", "0.00")
+    customer_org_id_raw = str(request.POST.get("customer_org_id", "")).strip()
+    job_by_id_raw = str(request.POST.get("job_by_id", "")).strip()
+
+    customer_org_id = None
+    if customer_org_id_raw:
+        try:
+            customer_org_id = int(customer_org_id_raw)
+        except (TypeError, ValueError):
+            errors["customer_org_id"] = "Customer ID must be an integer."
+
+    job_by = None
+    if job_by_id_raw:
+        try:
+            job_by = WorkOrderEmployee.objects.get(pk=int(job_by_id_raw))
+        except (WorkOrderEmployee.DoesNotExist, TypeError, ValueError):
+            errors["job_by_id"] = "Invalid employee."
+
+    try:
+        discount_value = _parse_decimal(discount_value_raw, field_name="discount")
+    except forms.ValidationError as e:
+        errors["discount_value"] = str(e)
+        discount_value = Decimal("0.00")
+
+    if errors:
+        return _render_workorder_v2_form(
+            request,
+            job=job,
+            work_order=None,
+            initial=request.POST.dict(),
+            errors=errors,
+        )
+
+    with transaction.atomic():
+        # Create with temporary discount to avoid invalid intermediate totals while lines are created.
+        temp_discount_value = discount_value
+        if discount_type == WorkOrderV2.DISCOUNT_TYPE_AMOUNT and discount_value > 0 and lines:
+            temp_discount_value = Decimal("0.00")
+
+        wo = WorkOrderV2.objects.create(
+            job=job,
+            customer_org_id=customer_org_id,
+            job_by=job_by,
+            notes=notes,
+            trailer_make_model=trailer_make_model,
+            trailer_color=trailer_color,
+            trailer_serial=trailer_serial,
+            discount_type=discount_type,
+            discount_value=temp_discount_value,
+        )
+
+        # Create lines
+        for line in lines:
+            WorkOrderLineV2.objects.create(
+                work_order=wo,
+                itemid=line["itemid"],
+                qty=line["qty"],
+                price=line["price"],
+                itemnumber_snapshot=line["itemnumber_snapshot"],
+                description_snapshot=line["description_snapshot"],
+            )
+
+        # Apply final discount + persist totals
+        wo.discount_type = discount_type
+        wo.discount_value = discount_value
+        wo.save()
+
+    messages.success(request, f"Work Order #{wo.number} created.")
+    # Preserve 'next' param for back navigation
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
+    if next_url:
+        from urllib.parse import urlencode
+
+        edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
+    return redirect(edit_url)
+
+
+@require_http_methods(["GET", "POST"])
+@csrf_protect
+def workorder_edit(request, pk: int):
+    wo = get_object_or_404(WorkOrderV2.objects.select_related("job").prefetch_related("lines"), pk=pk)
+    job = wo.job
+
+    if request.method == "GET":
+        initial = {
+            "notes": wo.notes,
+            "trailer_make_model": wo.trailer_make_model,
+            "trailer_color": wo.trailer_color,
+            "trailer_serial": wo.trailer_serial,
+            "discount_type": wo.discount_type,
+            "discount_value": str(wo.discount_value),
+            "customer_org_id": wo.customer_org_id or "",
+            "job_by_id": wo.job_by_id or "",
+        }
+        return _render_workorder_v2_form(request, job=job, work_order=wo, initial=initial)
+
+    errors: dict = {}
+    try:
+        lines = _parse_line_items_from_post(request)
+    except forms.ValidationError as e:
+        errors["lines"] = str(e)
+        lines = []
+
+    notes = request.POST.get("notes", "")
+    trailer_make_model = request.POST.get("trailer_make_model", "")
+    trailer_color = request.POST.get("trailer_color", "")
+    trailer_serial = request.POST.get("trailer_serial", "")
+    discount_type = request.POST.get("discount_type", "amount")
+    discount_value_raw = request.POST.get("discount_value", "0.00")
+    customer_org_id_raw = str(request.POST.get("customer_org_id", "")).strip()
+    job_by_id_raw = str(request.POST.get("job_by_id", "")).strip()
+
+    customer_org_id = None
+    if customer_org_id_raw:
+        try:
+            customer_org_id = int(customer_org_id_raw)
+        except (TypeError, ValueError):
+            errors["customer_org_id"] = "Customer ID must be an integer."
+
+    job_by = None
+    if job_by_id_raw:
+        try:
+            job_by = WorkOrderEmployee.objects.get(pk=int(job_by_id_raw))
+        except (WorkOrderEmployee.DoesNotExist, TypeError, ValueError):
+            errors["job_by_id"] = "Invalid employee."
+
+    try:
+        discount_value = _parse_decimal(discount_value_raw, field_name="discount")
+    except forms.ValidationError as e:
+        errors["discount_value"] = str(e)
+        discount_value = Decimal("0.00")
+
+    if errors:
+        return _render_workorder_v2_form(
+            request,
+            job=job,
+            work_order=wo,
+            initial=request.POST.dict(),
+            errors=errors,
+        )
+
+    with transaction.atomic():
+        # Replace all lines (simpler, deterministic server-side totals)
+        WorkOrderLineV2.objects.filter(work_order=wo).delete()
+
+        # Use temporary discount while lines are created to avoid invalid intermediate totals
+        temp_discount_value = discount_value
+        if discount_type == WorkOrderV2.DISCOUNT_TYPE_AMOUNT and discount_value > 0 and lines:
+            temp_discount_value = Decimal("0.00")
+
+        wo.customer_org_id = customer_org_id
+        wo.job_by = job_by
+        wo.notes = notes
+        wo.trailer_make_model = trailer_make_model
+        wo.trailer_color = trailer_color
+        wo.trailer_serial = trailer_serial
+        wo.discount_type = discount_type
+        wo.discount_value = temp_discount_value
+        wo.save()
+
+        for line in lines:
+            WorkOrderLineV2.objects.create(
+                work_order=wo,
+                itemid=line["itemid"],
+                qty=line["qty"],
+                price=line["price"],
+                itemnumber_snapshot=line["itemnumber_snapshot"],
+                description_snapshot=line["description_snapshot"],
+            )
+
+        wo.discount_type = discount_type
+        wo.discount_value = discount_value
+        wo.save()
+
+    messages.success(request, f"Work Order #{wo.number} saved.")
+    # Preserve 'next' param for back navigation
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
+    if next_url:
+        from urllib.parse import urlencode
+
+        edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
+    return redirect(edit_url)
+
+
+@require_http_methods(["GET"])
+def accounting_customers_search(request):
+    if not _accounting_is_configured():
+        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
+
+    q = (request.GET.get("q") or "").strip()
+
+    from accounting_integration.models import Org
+
+    qs = Org.objects.using("accounting").filter(orgdiscriminator="CUST")
+    if q:
+        qs = qs.filter(
+            models.Q(orgname__icontains=q)
+            | models.Q(phone1__icontains=q)
+            | models.Q(contact1__icontains=q)
+            | models.Q(email__icontains=q)
+        )
+
+    results = []
+    for org in qs.order_by("orgname")[:20]:
+        results.append(
+            {
+                "org_id": org.org_id,
+                "name": org.orgname or "",
+                "phone": org.phone1 or "",
+                "contact": org.contact1 or "",
+                "email": org.email or "",
+            }
+        )
+
+    return JsonResponse({"results": results})
+
+
+@require_http_methods(["GET"])
+def accounting_items_search(request):
+    if not _accounting_is_configured():
+        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
+
+    q = (request.GET.get("q") or "").strip()
+
+    from accounting_integration.models import ItmItems
+
+    qs = ItmItems.objects.using("accounting").all()
+    if q:
+        qs = qs.filter(models.Q(itemnumber__icontains=q) | models.Q(salesdesc__icontains=q))
+
+    results = []
+    for item in qs.order_by("itemnumber")[:20]:
+        results.append(
+            {
+                "itemid": item.itemid,
+                "itemnumber": item.itemnumber,
+                "salesdesc": item.salesdesc,
+                # Send price as string to preserve precision in JSON
+                "price": str(item.price),
+            }
+        )
+
+    return JsonResponse({"results": results})
+
+
+def _classic_customer_payload(data: dict) -> dict:
+    """Normalize Classic customer payload from JSON/form data."""
+    return {
+        "name": (data.get("name") or data.get("orgname") or "").strip(),
+        "phone": (data.get("phone") or data.get("phone1") or "").strip(),
+        "contact": (data.get("contact") or data.get("contact1") or "").strip(),
+        "email": (data.get("email") or "").strip(),
+        "address_line1": (data.get("address_line1") or data.get("streetone") or "").strip(),
+        "address_line2": (data.get("address_line2") or data.get("streettwo") or "").strip(),
+        "city": (data.get("city") or data.get("txtcity") or "").strip(),
+        "state": (data.get("state") or data.get("txtstate") or "").strip(),
+        "zip": (data.get("zip") or data.get("txtzip") or "").strip(),
+    }
+
+
+def _create_unique_classic_orgname(name: str) -> str:
+    """
+    Classic uniqueness constraint: (orgdiscriminator, orgname, org_name_extension).
+
+    We keep org_name_extension blank and add a numeric suffix to orgname when needed.
+    """
+    from accounting_integration.models import Org
+
+    base = (name or "").strip()[:60]
+    if not base:
+        return ""
+
+    candidate = base[:60]
+    if not Org.objects.using("accounting").filter(
+        orgdiscriminator="CUST",
+        orgname=candidate,
+        org_name_extension="",
+    ).exists():
+        return candidate
+
+    suffix_num = 2
+    while suffix_num < 1000:
+        suffix = f" ({suffix_num})"
+        max_base = 60 - len(suffix)
+        candidate = base[:max_base] + suffix
+        if not Org.objects.using("accounting").filter(
+            orgdiscriminator="CUST",
+            orgname=candidate,
+            org_name_extension="",
+        ).exists():
+            return candidate
+        suffix_num += 1
+
+    return base[:50] + f" #{suffix_num}"[:10]
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def accounting_customers_create(request):
+    if not _accounting_is_configured():
+        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
+
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}") if request.content_type == "application/json" else request.POST
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+    payload = _classic_customer_payload(data)
+    if not payload["name"]:
+        return JsonResponse({"error": "Customer name is required."}, status=400)
+
+    from accounting_integration.models import Org, OrgAddress
+
+    with transaction.atomic(using="accounting"):
+        now = timezone.now()
+
+        org = Org(
+            orgdiscriminator="CUST",
+            orgname=_create_unique_classic_orgname(payload["name"]),
+            org_name_extension="",
+            active=True,
+            autoactive=False,
+            balance=Decimal("0.00"),
+            createdate=now,
+            phone1=payload["phone"][:45],
+            contact1=payload["contact"][:45],
+            email=payload["email"][:300],
+            fax1="",
+            is_cash_customer=False,
+            taxable=True,
+            is_no_charge_sales=False,
+            notes=None,
+            alertnotes=None,
+            exported=None,
+            fiscalmonth=None,
+            taxmonth=None,
+            logo=None,
+            companyname="",
+            creditlimit=Decimal("0.0000"),
+            tax_exempt_expiration_date=None,
+            tax_exempt_number="",
+            eligible1099=False,
+            taxidno=None,
+            lastfcdate=None,
+        )
+        org.save(using="accounting")
+
+        # Create BILLTO address
+        OrgAddress.objects.using("accounting").create(
+            addresstype="BILLTO",
+            active=True,
+            addrname=None,
+            streetone=payload["address_line1"][:60],
+            streettwo=payload["address_line2"][:60],
+            txtcity=payload["city"][:60],
+            txtstate=payload["state"][:25],
+            txtzip=payload["zip"][:45],
+            txtcountry=None,
+            createdate=now,
+            moddate=None,
+            is_default=True,
+            orgid=org,
+        )
+
+    return JsonResponse({"org_id": org.org_id})
+
+
+@require_http_methods(["POST"])
+@csrf_protect
+def accounting_customers_update(request, orgid: int):
+    if not _accounting_is_configured():
+        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
+
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}") if request.content_type == "application/json" else request.POST
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+    payload = _classic_customer_payload(data)
+    if not payload["name"]:
+        return JsonResponse({"error": "Customer name is required."}, status=400)
+
+    from accounting_integration.models import Org, OrgAddress
+
+    with transaction.atomic(using="accounting"):
+        org = get_object_or_404(Org.objects.using("accounting"), org_id=orgid)
+
+        # Name may need uniquing if changed
+        desired_name = _create_unique_classic_orgname(payload["name"])
+        org.orgname = desired_name
+        org.phone1 = payload["phone"][:45]
+        org.contact1 = payload["contact"][:45]
+        org.email = payload["email"][:300]
+        org.moddate = timezone.now()
+        org.save(using="accounting")
+
+        address = (
+            OrgAddress.objects.using("accounting")
+            .filter(orgid=org, addresstype="BILLTO")
+            .order_by("-is_default", "-gen_addr_id")
+            .first()
+        )
+        if address:
+            address.streetone = payload["address_line1"][:60]
+            address.streettwo = payload["address_line2"][:60]
+            address.txtcity = payload["city"][:60]
+            address.txtstate = payload["state"][:25]
+            address.txtzip = payload["zip"][:45]
+            address.moddate = timezone.now()
+            address.save(using="accounting")
+        else:
+            OrgAddress.objects.using("accounting").create(
+                addresstype="BILLTO",
+                active=True,
+                addrname=None,
+                streetone=payload["address_line1"][:60],
+                streettwo=payload["address_line2"][:60],
+                txtcity=payload["city"][:60],
+                txtstate=payload["state"][:25],
+                txtzip=payload["zip"][:45],
+                txtcountry=None,
+                createdate=timezone.now(),
+                moddate=None,
+                is_default=True,
+                orgid=org,
+            )
+
+    return JsonResponse({"org_id": org.org_id})
+
+
+@require_http_methods(["GET"])
+def workorder_pdf(request, pk: int):
+    """
+    Render Work Order PDF via WeasyPrint.
+    """
+    from django.template.loader import render_to_string
+    from django.utils.text import slugify
+    from weasyprint import HTML
+
+    wo = get_object_or_404(
+        WorkOrderV2.objects.select_related("job", "job_by").prefetch_related("lines"),
+        pk=pk,
+    )
+
+    company = WorkOrderCompanyProfile.get_solo()
+
+    # Classic Accounting customer lookup (optional)
+    customer_name = ""
+    customer_phone = ""
+    customer_contact = ""
+    customer_email = ""
+
+    if wo.customer_org_id and _accounting_is_configured():
+        from accounting_integration.models import Org
+
+        org = Org.objects.using("accounting").filter(org_id=wo.customer_org_id).first()
+        if org:
+            customer_name = org.orgname or ""
+            customer_phone = org.phone1 or ""
+            customer_contact = org.contact1 or ""
+            customer_email = org.email or ""
+
+    context = {
+        "work_order": wo,
+        "lines": list(wo.lines.all()),
+        "company": company,
+        "customer_name": customer_name,
+        "customer_phone": customer_phone,
+        "customer_contact": customer_contact,
+        "customer_email": customer_email,
+    }
+
+    html = render_to_string("rental_scheduler/workorders_v2/workorder_pdf.html", context)
+
+    base_url = request.build_absolute_uri("/")
+    pdf = HTML(string=html, base_url=base_url).write_pdf()
+
+    filename = f"work-order-{slugify(str(wo.number))}.pdf"
+    response = HttpResponse(pdf, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{filename}"'
+    return response
 
 logger = logging.getLogger(__name__)
 
@@ -152,69 +824,6 @@ def _build_normalized_search_annotation():
     
     return normalized
 
-
-def _build_workorder_normalized_search_annotation():
-    """
-    Build a Django annotation for WorkOrder search that concatenates and normalizes 
-    searchable fields from both WorkOrder and related Job.
-    
-    Similar to _build_normalized_search_annotation but for WorkOrder model.
-    """
-    from django.db.models.functions import Coalesce, Concat, Lower, Replace
-    
-    # Helper to wrap field with Coalesce to handle nulls and cast to TextField
-    def field_expr(field_name):
-        return Coalesce(
-            models.F(field_name),
-            models.Value(''),
-            output_field=models.TextField()
-        )
-    
-    # Concatenate WorkOrder and related Job fields with a separator
-    concat_expr = Concat(
-        models.Value('|', output_field=models.TextField()),
-        field_expr('wo_number'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('notes'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__business_name'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__contact_name'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__phone'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__address_line1'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__city'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__trailer_color'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__trailer_serial'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__trailer_details'),
-        models.Value('|', output_field=models.TextField()),
-        field_expr('job__repair_notes'),
-        models.Value('|', output_field=models.TextField()),
-        output_field=models.TextField(),
-    )
-    
-    # Lowercase
-    lower_expr = Lower(concat_expr, output_field=models.TextField())
-    
-    # Remove common punctuation and spaces for normalized comparison
-    normalized = Replace(lower_expr, models.Value('.'), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value(','), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value('-'), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value('('), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value(')'), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value("'"), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value('"'), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value('/'), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value('\\'), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value(' '), models.Value(''), output_field=models.TextField())
-    normalized = Replace(normalized, models.Value('+'), models.Value(''), output_field=models.TextField())
-    
-    return normalized
 
 
 def _build_series_collapsed_rows(jobs, now, *, date_filter='all', include_match_counts=False):
@@ -908,32 +1517,6 @@ class JobDeleteView(DeleteView):
 
 
 # Print Views
-@method_decorator(xframe_options_exempt, name='dispatch')
-class JobPrintWOView(DetailView):
-    """Print work order view"""
-    model = Job
-    template_name = 'rental_scheduler/jobs/job_print_wo.html'
-    context_object_name = 'job'
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Work Order'
-        return context
-
-
-@method_decorator(xframe_options_exempt, name='dispatch')
-class JobPrintWOCustomerView(DetailView):
-    """Print customer copy work order view"""
-    model = Job
-    template_name = 'rental_scheduler/jobs/job_print_wo_customer.html'
-    context_object_name = 'job'
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Customer Work Order'
-        return context
-
-
 @method_decorator(xframe_options_exempt, name='dispatch')
 class JobPrintInvoiceView(DetailView):
     """Print invoice view"""
@@ -2216,217 +2799,6 @@ def delete_job_api(request, job_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-# Work Order Views
-class WorkOrderListView(ListView):
-    """List all work orders with filtering, search, and sorting capabilities"""
-    model = WorkOrder
-    template_name = 'rental_scheduler/workorders/workorder_list.html'
-    context_object_name = 'work_orders'
-    paginate_by = 25
-    
-    def get_queryset(self):
-        """Filter and sort work orders based on query parameters"""
-        queryset = WorkOrder.objects.select_related('job__calendar').filter(job__is_deleted=False)
-        
-        # Filter by job status
-        status = self.request.GET.get('status')
-        if status:
-            queryset = queryset.filter(job__status=status)
-        
-        # Filter by calendar
-        calendar_id = self.request.GET.get('calendar')
-        if calendar_id:
-            queryset = queryset.filter(job__calendar_id=calendar_id)
-        
-        # Unified search across multiple fields with punctuation-insensitive matching
-        # and smart fallback (strict AND first, then broaden to OR if no results)
-        search = self.request.GET.get('search', '').strip()
-        self._search_widened = False  # Track if we had to broaden the search
-        
-        if search:
-            # Tokenize search query (punctuation-insensitive)
-            tokens = _tokenize_search_query(search)
-            
-            if tokens:
-                # Annotate with normalized search blob for punctuation-insensitive comparison
-                queryset = queryset.annotate(
-                    _search_blob=_build_workorder_normalized_search_annotation()
-                )
-                
-                # Build strict AND filter (all tokens must be present)
-                strict_filter = models.Q()
-                for token in tokens:
-                    strict_filter &= models.Q(_search_blob__icontains=token)
-                
-                # Try strict AND filter first
-                strict_queryset = queryset.filter(strict_filter)
-                
-                # Check if strict filter returns any results
-                if strict_queryset.exists():
-                    queryset = strict_queryset
-                elif len(tokens) > 1:
-                    # Fall back to OR filter (any token matches)
-                    broad_filter = models.Q()
-                    for token in tokens:
-                        broad_filter |= models.Q(_search_blob__icontains=token)
-                    
-                    queryset = queryset.filter(broad_filter)
-                    self._search_widened = True
-                else:
-                    # Single token with no matches - keep the strict (empty) result
-                    queryset = strict_queryset
-        
-        # Sorting
-        sort_by = self.request.GET.get('sort', '-wo_date')
-        sort_direction = self.request.GET.get('direction', 'desc')
-        
-        # Validate sort field
-        allowed_sort_fields = {
-            'wo_number': 'wo_number',
-            'wo_date': 'wo_date',
-            'job__business_name': 'job__business_name',
-            'job__contact_name': 'job__contact_name',
-            'job__status': 'job__status',
-            'job__calendar__name': 'job__calendar__name',
-            'created_at': 'created_at',
-        }
-        
-        if sort_by in allowed_sort_fields:
-            sort_field = allowed_sort_fields[sort_by]
-            if sort_direction == 'desc':
-                sort_field = f'-{sort_field}'
-            queryset = queryset.order_by(sort_field)
-        else:
-            # Default sorting
-            queryset = queryset.order_by('-wo_date')
-        
-        return queryset
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Work Orders'
-        context['calendars'] = Calendar.objects.filter(is_active=True)
-        context['status_choices'] = Job.STATUS_CHOICES
-        
-        # Add sorting context
-        context['current_sort'] = self.request.GET.get('sort', 'wo_date')
-        context['current_direction'] = self.request.GET.get('direction', 'desc')
-        
-        # Add filter context for maintaining state
-        context['current_filters'] = {
-            'search': self.request.GET.get('search', ''),
-            'status': self.request.GET.get('status', ''),
-            'calendar': self.request.GET.get('calendar', ''),
-        }
-        
-        # Add search widened flag (True if fallback to OR matching was used)
-        context['search_widened'] = getattr(self, '_search_widened', False)
-        
-        return context
-
-
-class WorkOrderDetailView(DetailView):
-    """View work order details"""
-    model = WorkOrder
-    template_name = 'rental_scheduler/workorders/workorder_detail.html'
-    context_object_name = 'work_order'
-    
-    def get_queryset(self):
-        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = f'Work Order: {self.object.wo_number}'
-        return context
-
-
-class WorkOrderCreateView(CreateView):
-    """Create a new work order"""
-    model = WorkOrder
-    form_class = WorkOrderForm
-    template_name = 'rental_scheduler/workorders/workorder_form.html'
-    success_url = reverse_lazy('rental_scheduler:workorder_list')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Create Work Order'
-        return context
-    
-    def form_valid(self, form):
-        messages.success(self.request, f'Work Order "{form.instance.wo_number}" created successfully.')
-        return super().form_valid(form)
-
-
-class WorkOrderUpdateView(UpdateView):
-    """Update an existing work order"""
-    model = WorkOrder
-    form_class = WorkOrderForm
-    template_name = 'rental_scheduler/workorders/workorder_form.html'
-    success_url = reverse_lazy('rental_scheduler:workorder_list')
-    
-    def get_queryset(self):
-        return WorkOrder.objects.select_related('job__calendar')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = f'Update Work Order: {self.object.wo_number}'
-        return context
-    
-    def form_valid(self, form):
-        messages.success(self.request, f'Work Order "{form.instance.wo_number}" updated successfully.')
-        return super().form_valid(form)
-
-
-class WorkOrderDeleteView(DeleteView):
-    """Delete a work order"""
-    model = WorkOrder
-    template_name = 'rental_scheduler/workorders/workorder_confirm_delete.html'
-    success_url = reverse_lazy('rental_scheduler:workorder_list')
-    
-    def get_queryset(self):
-        return WorkOrder.objects.select_related('job__calendar')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = f'Delete Work Order: {self.object.wo_number}'
-        return context
-    
-    def delete(self, request, *args, **kwargs):
-        work_order = self.get_object()
-        messages.success(request, f'Work Order "{work_order.wo_number}" deleted successfully.')
-        return super().delete(request, *args, **kwargs)
-
-
-class WorkOrderPrintView(DetailView):
-    """Print work order view"""
-    model = WorkOrder
-    template_name = 'rental_scheduler/workorders/workorder_print.html'
-    context_object_name = 'work_order'
-    
-    def get_queryset(self):
-        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Work Order'
-        return context
-
-
-class WorkOrderCustomerPrintView(DetailView):
-    """Print customer copy work order view"""
-    model = WorkOrder
-    template_name = 'rental_scheduler/workorders/workorder_customer_print.html'
-    context_object_name = 'work_order'
-    
-    def get_queryset(self):
-        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Customer Work Order'
-        return context
-
-
 # Invoice Views  
 class InvoiceListView(ListView):
     """List all invoices"""
@@ -2467,12 +2839,15 @@ def job_create_partial(request):
     call_reminder_notes = ''
     recurrence_meta = None
     
+    work_order_v2 = None
+
     # Check if editing existing job
     if 'edit' in request.GET:
         try:
             job_id = int(request.GET['edit'])
             job = get_object_or_404(Job, pk=job_id)
             form = JobForm(instance=job)
+            work_order_v2 = WorkOrderV2.objects.filter(job=job).first()
             
             # Compute recurrence metadata for display
             recurrence_meta = get_recurrence_meta(job)
@@ -2528,6 +2903,7 @@ def job_create_partial(request):
         'form': form,
         'call_reminder_notes': call_reminder_notes,
         'recurrence_meta': recurrence_meta,
+        'work_order_v2': work_order_v2,
     })
 
 
@@ -2983,48 +3359,6 @@ def job_detail_api(request, pk):
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-
-
-@csrf_protect
-@require_http_methods(["POST"])
-def workorder_add_line_api(request, pk):
-    """API endpoint to add a line item to a work order"""
-    try:
-        # Get the work order
-        work_order = get_object_or_404(WorkOrder, pk=pk)
-        
-        # Create form with the submitted data
-        form = WorkOrderLineForm(request.POST)
-        
-        if form.is_valid():
-            # Save the line item with the work order
-            line_item = form.save(commit=False)
-            line_item.work_order = work_order
-            line_item.save()
-            
-            # Render the new line item HTML
-            from django.template.loader import render_to_string
-            line_html = render_to_string('rental_scheduler/partials/workorder_line_row.html', {
-                'line': line_item
-            })
-            
-            return JsonResponse({
-                'status': 'success',
-                'message': 'Line item added successfully',
-                'line_html': line_html,
-                'total_amount': str(work_order.total_amount)
-            })
-        else:
-            return JsonResponse({
-                'status': 'error',
-                'error': 'Validation failed: ' + ', '.join([f"{field}: {', '.join(errors)}" for field, errors in form.errors.items()])
-            }, status=400)
-            
-    except Exception as e:
-        return JsonResponse({
-            'status': 'error',
-            'error': f'Failed to add line item: {str(e)}'
-        }, status=500)
 
 
 def extract_phone_from_text(text):

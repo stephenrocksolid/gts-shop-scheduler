@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Work Order {{ work_order.number }}</title>
+    <style>
+      @page { size: letter; margin: 18mm; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #111827; }
+      h1, h2, h3 { margin: 0; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; }
+      .company { font-size: 12px; line-height: 1.4; }
+      .wo-meta { text-align: right; }
+      .section { margin-top: 16px; }
+      .label { font-weight: 600; color: #374151; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { border-bottom: 1px solid #e5e7eb; padding: 6px 4px; text-align: left; }
+      th { background: #f9fafb; font-weight: 600; font-size: 11px; }
+      .totals { margin-top: 12px; width: 100%; }
+      .totals td { border: none; padding: 2px 0; }
+      .right { text-align: right; }
+      .muted { color: #6b7280; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="company">
+        <h2>{{ company.name|default:"GTS" }}</h2>
+        {% if company.slogan %}<div class="muted">{{ company.slogan }}</div>{% endif %}
+        <div>
+          {{ company.address_line1 }}{% if company.address_line2 %}, {{ company.address_line2 }}{% endif %}<br>
+          {{ company.city }}{% if company.state %}, {{ company.state }}{% endif %} {{ company.zip }}
+        </div>
+        <div>
+          {% if company.tel %}Tel: {{ company.tel }}{% endif %}
+          {% if company.fax %} | Fax: {{ company.fax }}{% endif %}
+        </div>
+        {% if company.email %}<div>{{ company.email }}</div>{% endif %}
+      </div>
+
+      <div class="wo-meta">
+        <h1>Work Order</h1>
+        <div class="label"># {{ work_order.number }}</div>
+        <div class="muted">Date: {{ work_order.created_at|date:"F j, Y" }}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div><span class="label">Customer:</span> {{ customer_name }}</div>
+      {% if customer_phone %}<div><span class="label">Phone:</span> {{ customer_phone }}</div>{% endif %}
+      {% if customer_contact %}<div><span class="label">Contact:</span> {{ customer_contact }}</div>{% endif %}
+      {% if customer_email %}<div><span class="label">Email:</span> {{ customer_email }}</div>{% endif %}
+    </div>
+
+    <div class="section">
+      <div><span class="label">Job By:</span> {% if work_order.job_by %}{{ work_order.job_by.name }}{% endif %}</div>
+      <div><span class="label">Notes:</span> {{ work_order.notes }}</div>
+      <div><span class="label">Make/Model:</span> {{ work_order.trailer_make_model }}</div>
+      <div><span class="label">Color:</span> {{ work_order.trailer_color }}</div>
+      <div><span class="label">Serial:</span> {{ work_order.trailer_serial }}</div>
+    </div>
+
+    <div class="section">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 10%;">Qty</th>
+            <th style="width: 20%;">Part #</th>
+            <th>Description</th>
+            <th style="width: 15%;" class="right">Price</th>
+            <th style="width: 15%;" class="right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+            <tr>
+              <td>{{ line.qty }}</td>
+              <td>{{ line.itemnumber_snapshot }}</td>
+              <td>{{ line.description_snapshot }}</td>
+              <td class="right">{{ line.price }}</td>
+              <td class="right">{{ line.amount }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <table class="totals">
+        <tr>
+          <td class="right label">Subtotal:</td>
+          <td class="right" style="width: 120px;">{{ work_order.subtotal }}</td>
+        </tr>
+        <tr>
+          <td class="right label">Discount:</td>
+          <td class="right">{{ work_order.discount_amount }}</td>
+        </tr>
+        <tr>
+          <td class="right label">Total:</td>
+          <td class="right"><strong>{{ work_order.total }}</strong></td>
+        </tr>
+      </table>
+    </div>
+  </body>
+</html>

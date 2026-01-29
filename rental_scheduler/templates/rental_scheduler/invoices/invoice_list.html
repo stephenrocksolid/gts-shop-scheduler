@@ -64,10 +64,7 @@
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                     {% if invoice.work_order %}
-                                        <a href="{% url 'rental_scheduler:workorder_detail' invoice.work_order.pk %}" 
-                                           class="text-indigo-600 hover:text-indigo-900">
-                                            {{ invoice.work_order.wo_number }}
-                                        </a>
+                                        {{ invoice.work_order.wo_number }}
                                     {% else %}
                                         <span class="text-gray-400">-</span>
                                     {% endif %}
@@ -173,9 +170,9 @@
                     <h3 class="mt-2 text-sm font-medium text-gray-900">No invoices</h3>
                     <p class="mt-1 text-sm text-gray-500">Get started by creating an invoice from a work order.</p>
                     <div class="mt-6">
-                        <a href="{% url 'rental_scheduler:workorder_list' %}" 
+                        <a href="{% url 'rental_scheduler:job_list' %}" 
                            class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            View Work Orders
+                            View Jobs
                         </a>
                     </div>
                 </div>

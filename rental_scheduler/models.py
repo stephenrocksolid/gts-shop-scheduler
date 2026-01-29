@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from datetime import datetime, date
@@ -10,6 +10,7 @@ from django.utils import timezone
 import time
 from decimal import Decimal
 from rental_scheduler.utils.datetime import format_local
+from rental_scheduler.utils.work_orders import compute_work_order_totals, quantize_money
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
 
@@ -665,6 +666,360 @@ class CallReminder(models.Model):
         if self.job:
             return f"Call Reminder for {self.job.business_name} on {self.reminder_date}"
         return f"Call Reminder on {self.reminder_date}"
+
+
+class WorkOrderCompanyProfile(models.Model):
+    """
+    Singleton-style company profile for Work Order rendering.
+
+    This is owned by the scheduler DB (not Classic Accounting).
+    """
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+
+    name = models.CharField(max_length=200, blank=True, default="")
+    slogan = models.CharField(max_length=200, blank=True, default="")
+
+    address_line1 = models.CharField(max_length=200, blank=True, default="")
+    address_line2 = models.CharField(max_length=200, blank=True, default="")
+    city = models.CharField(max_length=100, blank=True, default="")
+    state = models.CharField(max_length=50, blank=True, default="")
+    zip = models.CharField(max_length=20, blank=True, default="")
+
+    tel = models.CharField(max_length=45, blank=True, default="")
+    fax = models.CharField(max_length=45, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Work Order Company Profile"
+        verbose_name_plural = "Work Order Company Profile"
+
+    def __str__(self):
+        return self.name or "Work Order Company Profile"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _created = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        # Enforce singleton PK
+        self.pk = 1
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class WorkOrderEmployee(models.Model):
+    """Employee name list for the Work Order "Job By" field."""
+
+    name = models.CharField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Work Order Employee"
+        verbose_name_plural = "Work Order Employees"
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class WorkOrderNumberSequence(models.Model):
+    """
+    Concurrency-safe Work Order number allocator.
+
+    Singleton-style (pk=1). Allocation must happen inside a transaction and use
+    select_for_update to avoid duplicates under concurrent requests.
+    """
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+
+    start_number = models.PositiveIntegerField(default=1)
+    next_number = models.PositiveIntegerField(default=1)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Work Order Number Sequence"
+        verbose_name_plural = "Work Order Number Sequence"
+
+    def __str__(self):
+        return f"Next WO#: {self.next_number}"
+
+    @classmethod
+    def get_solo(cls, *, start_number=None):
+        defaults = None
+        if start_number is not None:
+            defaults = {"start_number": start_number, "next_number": start_number}
+        obj, _created = cls.objects.get_or_create(
+            pk=1,
+            defaults=defaults or {"start_number": 1, "next_number": 1},
+        )
+        return obj
+
+    @classmethod
+    def allocate_work_order_number(cls):
+        with transaction.atomic():
+            seq, _created = cls.objects.select_for_update().get_or_create(
+                pk=1,
+                defaults={"start_number": 1, "next_number": 1},
+            )
+            number = seq.next_number
+            seq.next_number = number + 1
+            seq.save(update_fields=["next_number"])
+            return number
+
+    def save(self, *args, **kwargs):
+        # Enforce singleton PK
+        self.pk = 1
+
+        # Keep next_number at/above start_number when editing start_number
+        if self.next_number < self.start_number:
+            self.next_number = self.start_number
+
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class WorkOrderV2(models.Model):
+    """
+    New Work Order domain model (v2) for the Work Order revamp.
+
+    This is intentionally parallel to the legacy WorkOrder/WorkOrderLine models
+    so we can migrate the UI safely before deleting the old codepaths.
+    """
+
+    DISCOUNT_TYPE_AMOUNT = "amount"
+    DISCOUNT_TYPE_PERCENT = "percent"
+    DISCOUNT_TYPE_CHOICES = (
+        (DISCOUNT_TYPE_AMOUNT, "Amount ($)"),
+        (DISCOUNT_TYPE_PERCENT, "Percent (%)"),
+    )
+
+    job = models.OneToOneField(
+        "Job",
+        on_delete=models.CASCADE,
+        related_name="work_order_v2",
+        help_text="Associated job for this work order (v2)",
+    )
+
+    number = models.PositiveIntegerField(
+        unique=True,
+        help_text="Auto-incrementing Work Order number (integer)",
+    )
+
+    # Classic Accounting linkage (Org.org_id)
+    customer_org_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Classic Accounting customer org_id (nullable until selected)",
+    )
+
+    job_by = models.ForeignKey(
+        WorkOrderEmployee,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="work_orders_v2",
+        help_text='Employee who the job is "by" (nullable)',
+    )
+
+    notes = models.TextField(blank=True, default="")
+
+    trailer_make_model = models.TextField(blank=True, default="")
+    trailer_color = models.CharField(max_length=100, blank=True, default="")
+    trailer_serial = models.CharField(max_length=100, blank=True, default="")
+
+    discount_type = models.CharField(
+        max_length=10,
+        choices=DISCOUNT_TYPE_CHOICES,
+        default=DISCOUNT_TYPE_AMOUNT,
+    )
+    discount_value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Work Order (v2)"
+        verbose_name_plural = "Work Orders (v2)"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"WO #{self.number} - {self.job.display_name}"
+
+    def clean(self):
+        super().clean()
+
+        # Percent discount contract: 0–100
+        if self.discount_type == self.DISCOUNT_TYPE_PERCENT:
+            if self.discount_value is None:
+                return
+            if self.discount_value < 0 or self.discount_value > Decimal("100.00"):
+                raise ValidationError({"discount_value": "Percent discount must be between 0 and 100."})
+
+        # Amount discount contract: non-negative (upper bound validated when totals recomputed)
+        if self.discount_type == self.DISCOUNT_TYPE_AMOUNT:
+            if self.discount_value is not None and self.discount_value < 0:
+                raise ValidationError({"discount_value": "Discount cannot be negative."})
+
+        # Classic Accounting validation (only when configured for the real external DB)
+        if self.customer_org_id:
+            from django.conf import settings
+
+            accounting_db = (settings.DATABASES or {}).get("accounting") or {}
+            if accounting_db.get("ENGINE") == "django.db.backends.postgresql":
+                from accounting_integration.models import Org
+
+                try:
+                    exists = Org.objects.using("accounting").filter(org_id=self.customer_org_id).exists()
+                except Exception as e:
+                    raise ValidationError({"customer_org_id": f"Unable to validate Classic customer: {e}"})
+
+                if not exists:
+                    raise ValidationError({"customer_org_id": "Customer does not exist in Classic Accounting."})
+
+    def recalculate_totals(self, *, save: bool = False):
+        # IMPORTANT: do not rely on the related-manager cache (prefetch_related)
+        # when computing totals. Always query the DB for current line items.
+        line_items = (
+            WorkOrderLineV2.objects.filter(work_order_id=self.pk).only("qty", "price")
+            if self.pk
+            else []
+        )
+        subtotal, discount_amount, total = compute_work_order_totals(
+            line_items=line_items,
+            discount_type=self.discount_type,
+            discount_value=self.discount_value,
+        )
+
+        self.subtotal = subtotal
+        self.discount_amount = discount_amount
+        self.total = total
+
+        if save and self.pk:
+            WorkOrderV2.objects.filter(pk=self.pk).update(
+                subtotal=subtotal,
+                discount_amount=discount_amount,
+                total=total,
+            )
+
+    def save(self, *args, **kwargs):
+        creating = self._state.adding
+
+        if creating and not self.number:
+            self.number = WorkOrderNumberSequence.allocate_work_order_number()
+
+        # Ensure discount_value is stored as 2-decimal money/percent
+        self.discount_value = quantize_money(self.discount_value)
+
+        self.full_clean()
+        result = super().save(*args, **kwargs)
+
+        # Keep stored totals in sync (safe even if there are no lines yet)
+        if self.pk:
+            self.recalculate_totals(save=True)
+
+        return result
+
+
+class WorkOrderLineV2(models.Model):
+    """Work Order line item (v2), linked to Classic Accounting items."""
+
+    work_order = models.ForeignKey(
+        WorkOrderV2,
+        on_delete=models.CASCADE,
+        related_name="lines",
+    )
+
+    # Classic Accounting linkage (ItmItems.itemid)
+    itemid = models.PositiveIntegerField()
+    itemnumber_snapshot = models.CharField(max_length=60, blank=True, default="")
+    description_snapshot = models.CharField(max_length=3000, blank=True, default="")
+
+    qty = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("1.00"))
+    price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Work Order Line (v2)"
+        verbose_name_plural = "Work Order Lines (v2)"
+        ordering = ["created_at"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(qty__gt=0), name="workorderlinev2_qty_gt_0"),
+            models.CheckConstraint(condition=models.Q(price__gte=0), name="workorderlinev2_price_gte_0"),
+            models.CheckConstraint(condition=models.Q(amount__gte=0), name="workorderlinev2_amount_gte_0"),
+        ]
+
+    def __str__(self):
+        return f"Item {self.itemid} - Qty {self.qty} @ {self.price}"
+
+    def clean(self):
+        super().clean()
+        if self.qty is not None and self.qty <= 0:
+            raise ValidationError({"qty": "Quantity must be greater than zero."})
+        if self.price is not None and self.price < 0:
+            raise ValidationError({"price": "Price cannot be negative."})
+
+        # Classic Accounting item existence validation (only when configured)
+        if self.itemid:
+            from django.conf import settings
+
+            accounting_db = (settings.DATABASES or {}).get("accounting") or {}
+            if accounting_db.get("ENGINE") == "django.db.backends.postgresql":
+                from accounting_integration.models import ItmItems
+
+                try:
+                    exists = ItmItems.objects.using("accounting").filter(itemid=self.itemid).exists()
+                except Exception as e:
+                    raise ValidationError({"itemid": f"Unable to validate Classic item: {e}"})
+
+                if not exists:
+                    raise ValidationError({"itemid": "Item does not exist in Classic Accounting."})
+
+    def save(self, *args, **kwargs):
+        # Compute server-side amount (ignore client)
+        if self.qty is not None and self.price is not None:
+            self.amount = quantize_money(self.qty * self.price)
+
+        self.full_clean()
+        result = super().save(*args, **kwargs)
+
+        # Keep parent totals in sync
+        if self.work_order_id:
+            self.work_order.recalculate_totals(save=True)
+
+        return result
+
+    def delete(self, *args, **kwargs):
+        work_order_id = self.work_order_id
+        result = super().delete(*args, **kwargs)
+
+        # Keep parent totals in sync after deletion
+        if work_order_id:
+            wo = WorkOrderV2.objects.filter(pk=work_order_id).first()
+            if wo:
+                wo.recalculate_totals(save=True)
+
+        return result
 
 
 class WorkOrder(models.Model):

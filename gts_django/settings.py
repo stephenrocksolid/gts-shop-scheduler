@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'rental_scheduler',
+    'accounting_integration',
 ]
 
 MIDDLEWARE = [
@@ -110,6 +111,33 @@ else:
             'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
+
+
+# Classic Accounting database (optional; configured via env vars)
+#
+# This repo needs the alias to exist so router/config tests can validate setup.
+# When Classic env vars aren't present (e.g. CI/tests), we point it at SQLite so
+# Django doesn't require a live external database just to boot.
+if os.getenv("ACCOUNTING_DB_NAME"):
+    DATABASES["accounting"] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("ACCOUNTING_DB_NAME"),
+        "USER": os.getenv("ACCOUNTING_DB_USER", "postgres"),
+        "PASSWORD": os.getenv("ACCOUNTING_DB_PASSWORD", ""),
+        "HOST": os.getenv("ACCOUNTING_DB_HOST", "localhost"),
+        "PORT": os.getenv("ACCOUNTING_DB_PORT", "5432"),
+        "OPTIONS": {
+            "connect_timeout": 10,
+        },
+    }
+else:
+    DATABASES["accounting"] = {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "accounting.sqlite3",
+    }
+
+# Database Routers (route accounting_integration models to "accounting")
+DATABASE_ROUTERS = ["accounting_integration.router.AccountingRouter"]
 
 
 # Cache configuration for calendar API performance

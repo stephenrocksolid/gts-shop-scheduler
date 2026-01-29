@@ -33,10 +33,12 @@ FORBIDDEN_PATTERNS = [
     # Direct API routes
     r"['\"`]/api/jobs/",
     r"['\"`]/api/recurrence/",
+    r"['\"`]/api/accounting/",
     # Direct page routes
     r"['\"`]/jobs/",
     r"['\"`]/calendars/",
     r"['\"`]/call-reminders/",
+    r"['\"`]/workorders/",
 ]
 
 # Files to exclude from scanning (e.g., legacy config that's out of scope)

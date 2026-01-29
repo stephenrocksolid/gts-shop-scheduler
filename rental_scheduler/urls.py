@@ -18,16 +18,10 @@ from .views import (
     JobListView,
     JobListTablePartialView,
     JobDeleteView,
-    JobPrintWOView,
-    JobPrintWOCustomerView,
     JobPrintInvoiceView,
-    WorkOrderListView,
-    WorkOrderDetailView,
-    WorkOrderCreateView,
-    WorkOrderUpdateView,
-    WorkOrderDeleteView,
-    WorkOrderPrintView,
-    WorkOrderCustomerPrintView,
+    workorder_new,
+    workorder_edit,
+    workorder_pdf,
     InvoiceListView,
     InvoiceDetailView,
     job_create_partial,
@@ -36,7 +30,10 @@ from .views import (
     job_create_api,
     job_update_api,
     job_detail_api,
-    workorder_add_line_api,
+    accounting_customers_search,
+    accounting_customers_create,
+    accounting_customers_update,
+    accounting_items_search,
     calendar_import,
     import_history,
     revert_import,
@@ -93,8 +90,6 @@ urlpatterns = [
     path('jobs/export/', export_jobs, name='job_export'),
     path('jobs/export/<int:calendar_id>/', export_jobs, name='job_export_calendar'),
     path('jobs/<int:pk>/delete/', JobDeleteView.as_view(), name='job_delete'),
-    path('jobs/<int:pk>/print/wo/', JobPrintWOView.as_view(), name='job_print_wo'),
-    path('jobs/<int:pk>/print/wo-customer/', JobPrintWOCustomerView.as_view(), name='job_print_wo_customer'),
     path('jobs/<int:pk>/print/invoice/', JobPrintInvoiceView.as_view(), name='job_print_invoice'),
     
     # Job Modal URLs
@@ -111,20 +106,21 @@ urlpatterns = [
     path('call-reminders/<int:pk>/delete/', call_reminder_delete, name='call_reminder_delete'),
     path('jobs/<int:job_id>/call-reminder/update/', job_call_reminder_update, name='job_call_reminder_update'),
     
-    # Work Order URLs
-    path('workorders/', WorkOrderListView.as_view(), name='workorder_list'),
-    path('workorders/create/', WorkOrderCreateView.as_view(), name='workorder_create'),
-    path('workorders/<int:pk>/', WorkOrderDetailView.as_view(), name='workorder_detail'),
-    path('workorders/<int:pk>/edit/', WorkOrderUpdateView.as_view(), name='workorder_update'),
-    path('workorders/<int:pk>/delete/', WorkOrderDeleteView.as_view(), name='workorder_delete'),
-    path('workorders/<int:pk>/print/', WorkOrderPrintView.as_view(), name='workorder_print'),
-    path('workorders/<int:pk>/print/customer/', WorkOrderCustomerPrintView.as_view(), name='workorder_customer_print'),
+    # Work Order URLs (v2)
+    path('workorders/new/', workorder_new, name='workorder_new'),
+    path('workorders/<int:pk>/edit/', workorder_edit, name='workorder_edit'),
+    # PDF print (v2)
+    path('workorders/<int:pk>/pdf/', workorder_pdf, name='workorder_pdf'),
     
     # Invoice Management URLs
     path('invoices/', InvoiceListView.as_view(), name='invoice_list'),
     path('invoices/<int:pk>/', InvoiceDetailView.as_view(), name='invoice_detail'),
     
     # API endpoints
-    path('api/workorders/<int:pk>/add-line/', workorder_add_line_api, name='workorder_add_line_api'),
+    # Accounting-backed APIs (Classic Accounting)
+    path('api/accounting/customers/search/', accounting_customers_search, name='accounting_customers_search'),
+    path('api/accounting/customers/create/', accounting_customers_create, name='accounting_customers_create'),
+    path('api/accounting/customers/<int:orgid>/update/', accounting_customers_update, name='accounting_customers_update'),
+    path('api/accounting/items/search/', accounting_items_search, name='accounting_items_search'),
     path('api/send-error-report/', error_views.send_error_report, name='send_error_report'),
 ]

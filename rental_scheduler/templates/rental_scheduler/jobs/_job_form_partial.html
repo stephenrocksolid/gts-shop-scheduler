@@ -856,48 +856,53 @@ Quote Amount
               justify-content: center;
               padding-top: 4px;
               flex-wrap: wrap">
-    <button type="button"
-            class="print-btn
-                   {% if not form.instance.pk %}
-                     btn-disabled
-                   {% endif %}"
-            data-job-id="{{ form.instance.pk|default:'0' }}"
-            data-print-type="wo"
-            style="padding: 4px 12px;
-                   border: 1px solid #d1d5db;
-                   border-radius: 6px;
-                   background: #ffffff;
-                   color: #374151;
-                   font-weight: 500;
-                   font-size: 12px;
-                   cursor: pointer;
-                   transition: all 0.2s"
-            {% if not form.instance.pk %}
-              disabled
-            {% endif %}>
-      Print WO
-    </button>
-    <button type="button"
-            class="print-btn
-                   {% if not form.instance.pk %}
-                     btn-disabled
-                   {% endif %}"
-            data-job-id="{{ form.instance.pk|default:'0' }}"
-            data-print-type="wo-customer"
-            style="padding: 4px 12px;
-                   border: 1px solid #d1d5db;
-                   border-radius: 6px;
-                   background: #ffffff;
-                   color: #374151;
-                   font-weight: 500;
-                   font-size: 12px;
-                   cursor: pointer;
-                   transition: all 0.2s"
-            {% if not form.instance.pk %}
-              disabled
-            {% endif %}>
-      Print Customer WO
-    </button>
+    {% if form.instance.pk %}
+      {% if work_order_v2 %}
+        <button type="button"
+                data-wo-action="edit"
+                data-wo-id="{{ work_order_v2.pk }}"
+                style="padding: 4px 12px;
+                       border: 1px solid #d1d5db;
+                       border-radius: 6px;
+                       background: #ffffff;
+                       color: #374151;
+                       font-weight: 500;
+                       font-size: 12px;
+                       cursor: pointer;
+                       transition: all 0.2s">
+          Edit WO
+        </button>
+        <button type="button"
+                data-wo-action="print"
+                data-wo-id="{{ work_order_v2.pk }}"
+                style="padding: 4px 12px;
+                       border: 1px solid #d1d5db;
+                       border-radius: 6px;
+                       background: #ffffff;
+                       color: #374151;
+                       font-weight: 500;
+                       font-size: 12px;
+                       cursor: pointer;
+                       transition: all 0.2s">
+          Print WO
+        </button>
+      {% else %}
+        <button type="button"
+                data-wo-action="create"
+                data-job-id="{{ form.instance.pk }}"
+                style="padding: 4px 12px;
+                       border: 1px solid #d1d5db;
+                       border-radius: 6px;
+                       background: #ffffff;
+                       color: #374151;
+                       font-weight: 500;
+                       font-size: 12px;
+                       cursor: pointer;
+                       transition: all 0.2s">
+          Create WO
+        </button>
+      {% endif %}
+    {% endif %}
     <button type="button"
             class="print-btn
                    {% if not form.instance.pk %}
@@ -1001,22 +1006,24 @@ Quote Amount
             onmouseout="this.style.backgroundColor='#3b82f6'">
       Save Job
     </button>
-    <button type="button"
-            class="save-and-print-btn"
-            data-print-type="wo"
-            style="padding: 4px 12px;
-                   border: none;
-                   border-radius: 6px;
-                   background: #16a34a;
-                   color: #ffffff;
-                   font-weight: 500;
-                   font-size: 12px;
-                   cursor: pointer;
-                   transition: all 0.2s"
-            onmouseover="this.style.backgroundColor='#15803d'"
-            onmouseout="this.style.backgroundColor='#16a34a'">
-      Save & Print WO
-    </button>
+    {% if not work_order_v2 %}
+      <button type="button"
+              class="save-and-create-wo-btn"
+              data-wo-action="save-create"
+              style="padding: 4px 12px;
+                     border: none;
+                     border-radius: 6px;
+                     background: #16a34a;
+                     color: #ffffff;
+                     font-weight: 500;
+                     font-size: 12px;
+                     cursor: pointer;
+                     transition: all 0.2s"
+              onmouseover="this.style.backgroundColor='#15803d'"
+              onmouseout="this.style.backgroundColor='#16a34a'">
+        Save & Create WO
+      </button>
+    {% endif %}
   </div>
 </form>
 

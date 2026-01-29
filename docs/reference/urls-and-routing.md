@@ -1,6 +1,6 @@
 # URLs and Routing (Backend ↔ Frontend)
 
-Last updated: 2025-12-22
+Last updated: 2026-01-27
 
 This document defines the **single source of truth** for URLs used by JavaScript and how to safely add/change routes.
 
@@ -40,11 +40,32 @@ The repo enforces this with:
   - `recurrencePreview` - GET preview of upcoming virtual occurrences
   - `seriesOccurrences` - GET expanded occurrence rows for grouped search (added Dec 2025)
 
+- Work Orders (revamp, Jan 2026):
+  - `workOrderNewBase` - `/workorders/new/` (base URL; expects query `job=...`)
+  - `workOrderEditTemplate` - `/workorders/{pk}/edit/` (template)
+  - `workOrderPdfTemplate` - `/workorders/{pk}/pdf/` (template)
+
+- Classic Accounting APIs (Jan 2026):
+  - `accountingCustomerSearch` - `/api/accounting/customers/search/`
+  - `accountingCustomerCreate` - `/api/accounting/customers/create/`
+  - `accountingCustomerUpdateTemplate` - `/api/accounting/customers/{orgid}/update/` (template)
+  - `accountingItemSearch` - `/api/accounting/items/search/`
+
 `shared/urls.js` wraps these into convenient functions, e.g.:
 
 - `GTS.urls.jobCreatePartial({ edit: jobId })`
 - `GTS.urls.jobDetailApi(jobId)`
 - `GTS.urls.jobDeleteRecurring(jobId)` - added Dec 2025
+
+- Work Orders:
+  - `GTS.urls.workOrderNew({ job: jobId })`
+  - `GTS.urls.workOrderEdit(pk)`
+  - `GTS.urls.workOrderPdf(pk)`
+
+- Accounting:
+  - `GTS.urls.accountingCustomerUpdate(orgid)`
+  - `GTS.urls.accountingCustomerSearchUrl({ q: '...' })`
+  - `GTS.urls.accountingItemSearchUrl({ q: '...' })`
 
 ## How to add a new backend endpoint that JS will call
 

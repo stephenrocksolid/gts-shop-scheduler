@@ -1,5 +1,18 @@
 from django.contrib import admin
-from .models import Calendar, Job, WorkOrder, WorkOrderLine, Invoice, InvoiceLine, StatusChange
+from .models import (
+    Calendar,
+    Job,
+    WorkOrder,
+    WorkOrderLine,
+    WorkOrderV2,
+    WorkOrderLineV2,
+    Invoice,
+    InvoiceLine,
+    StatusChange,
+    WorkOrderCompanyProfile,
+    WorkOrderEmployee,
+    WorkOrderNumberSequence,
+)
 
 # Register your models here.
 
@@ -174,6 +187,97 @@ class WorkOrderLineAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Return work order lines with related data"""
         return super().get_queryset(request).select_related('work_order__job__calendar')
+
+
+@admin.register(WorkOrderV2)
+class WorkOrderV2Admin(admin.ModelAdmin):
+    """Admin configuration for WorkOrderV2."""
+
+    list_display = ("number", "job", "customer_org_id", "job_by", "subtotal", "total", "created_at")
+    list_filter = ("discount_type", "created_at")
+    search_fields = ("number", "job__business_name", "notes")
+    ordering = ("-created_at",)
+
+    fieldsets = (
+        ("Linkage", {"fields": ("job", "number", "customer_org_id", "job_by")}),
+        (
+            "Job snapshot",
+            {"fields": ("notes", "trailer_make_model", "trailer_color", "trailer_serial")},
+        ),
+        ("Discount", {"fields": ("discount_type", "discount_value")}),
+        ("Totals", {"fields": ("subtotal", "discount_amount", "total"), "classes": ("collapse",)}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    readonly_fields = ("subtotal", "discount_amount", "total", "created_at", "updated_at")
+
+
+@admin.register(WorkOrderLineV2)
+class WorkOrderLineV2Admin(admin.ModelAdmin):
+    """Admin configuration for WorkOrderLineV2."""
+
+    list_display = ("work_order", "itemid", "qty", "price", "amount", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("itemid", "itemnumber_snapshot", "description_snapshot", "work_order__number")
+    ordering = ("-created_at",)
+
+    readonly_fields = ("amount", "created_at", "updated_at")
+
+
+@admin.register(WorkOrderCompanyProfile)
+class WorkOrderCompanyProfileAdmin(admin.ModelAdmin):
+    """Admin configuration for WorkOrderCompanyProfile (singleton)."""
+
+    fieldsets = (
+        ("Company", {"fields": ("name", "slogan")}),
+        (
+            "Address",
+            {"fields": ("address_line1", "address_line2", "city", "state", "zip")},
+        ),
+        ("Contact", {"fields": ("tel", "fax", "email")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        # Enforce singleton (pk=1)
+        return not WorkOrderCompanyProfile.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        # Keep singleton row stable; allow editing instead
+        return False
+
+
+@admin.register(WorkOrderEmployee)
+class WorkOrderEmployeeAdmin(admin.ModelAdmin):
+    """Admin configuration for WorkOrderEmployee."""
+
+    list_display = ("name", "is_active", "created_at")
+    list_filter = ("is_active", "created_at")
+    search_fields = ("name",)
+    ordering = ("name",)
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(WorkOrderNumberSequence)
+class WorkOrderNumberSequenceAdmin(admin.ModelAdmin):
+    """Admin configuration for WorkOrderNumberSequence (singleton)."""
+
+    fieldsets = (
+        ("Work Order Numbering", {"fields": ("start_number", "next_number")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        # Enforce singleton (pk=1)
+        return not WorkOrderNumberSequence.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        # Keep singleton row stable; allow editing instead
+        return False
 
 
 @admin.register(Invoice)

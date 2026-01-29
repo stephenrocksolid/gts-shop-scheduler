@@ -1,0 +1,305 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-6">
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-2xl font-semibold text-gray-900">
+        {% if work_order %}Work Order #{{ work_order.number }}{% else %}Create Work Order{% endif %}
+      </h1>
+      <p class="text-sm text-gray-600">
+        Job: {{ job.display_name }}
+      </p>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <a href="{{ back_url }}" class="text-sm text-blue-700 hover:underline">{{ back_label }}</a>
+      {% if work_order %}
+        <a href="{% url 'rental_scheduler:workorder_pdf' work_order.pk %}" class="text-sm text-blue-700 hover:underline">Print PDF</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if errors %}
+    <div class="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+      <div class="font-semibold mb-1">Please fix the errors below.</div>
+      <ul class="list-disc pl-5 space-y-1">
+        {% for key, msg in errors.items %}
+          <li><span class="font-semibold">{{ key }}</span>: {{ msg }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <form method="post" class="space-y-6">
+    {% csrf_token %}
+    {% if next_value %}<input type="hidden" name="next" value="{{ next_value }}">{% endif %}
+
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="md:col-span-2">
+          <label class="block text-sm font-medium text-gray-700">Customer</label>
+
+          <!-- Hidden org id posted to server -->
+          <input type="hidden" name="customer_org_id" value="{{ initial.customer_org_id|default:'' }}" data-wo-customer-org-id />
+
+          <!-- Search/select UI -->
+          <div class="relative mt-1">
+            <input
+              type="text"
+              class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              placeholder="Search Classic customers..."
+              autocomplete="off"
+              data-wo-customer-search
+            />
+            <div class="absolute z-20 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg hidden" data-wo-customer-results></div>
+          </div>
+
+          <div class="mt-2 flex items-center gap-2">
+            <button type="button" class="text-sm text-blue-700 hover:underline" data-wo-customer-create>
+              Create new customer
+            </button>
+            <button type="button" class="text-sm text-blue-700 hover:underline disabled:text-gray-400 disabled:no-underline" data-wo-customer-edit disabled>
+              Edit selected
+            </button>
+            <span class="text-sm text-gray-600" data-wo-customer-selected></span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Job By</label>
+          <select
+            name="job_by_id"
+            class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          >
+            <option value="">—</option>
+            {% for emp in employees %}
+              <option value="{{ emp.id }}" {% if initial.job_by_id|stringformat:"s" == emp.id|stringformat:"s" %}selected{% endif %}>
+                {{ emp.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="md:col-span-3">
+          <label class="block text-sm font-medium text-gray-700">Notes</label>
+          <textarea
+            name="notes"
+            rows="3"
+            class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          >{{ initial.notes|default:'' }}</textarea>
+        </div>
+
+        <div class="md:col-span-1">
+          <label class="block text-sm font-medium text-gray-700">Make / Model</label>
+          <input
+            type="text"
+            name="trailer_make_model"
+            value="{{ initial.trailer_make_model|default:'' }}"
+            class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+        <div class="md:col-span-1">
+          <label class="block text-sm font-medium text-gray-700">Color</label>
+          <input
+            type="text"
+            name="trailer_color"
+            value="{{ initial.trailer_color|default:'' }}"
+            class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+        <div class="md:col-span-1">
+          <label class="block text-sm font-medium text-gray-700">Serial #</label>
+          <input
+            type="text"
+            name="trailer_serial"
+            value="{{ initial.trailer_serial|default:'' }}"
+            class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Discount type</label>
+          <select
+            name="discount_type"
+            class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          >
+            <option value="amount" {% if initial.discount_type == "amount" %}selected{% endif %}>$</option>
+            <option value="percent" {% if initial.discount_type == "percent" %}selected{% endif %}>%</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Discount value</label>
+          <input
+            type="text"
+            name="discount_value"
+            value="{{ initial.discount_value|default:'0.00' }}"
+            class="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+        <div class="flex items-end justify-end">
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold text-gray-900">Line items</h2>
+        <p class="text-sm text-gray-500">Items come from Classic Accounting.</p>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-left text-gray-600">
+            <tr class="border-b">
+              <th class="py-2 pr-3">Item ID</th>
+              <th class="py-2 pr-3">Part #</th>
+              <th class="py-2 pr-3">Description</th>
+              <th class="py-2 pr-3">Qty</th>
+              <th class="py-2 pr-3">Price</th>
+              <th class="py-2 pr-3">Amount</th>
+              <th class="py-2 pr-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if work_order and work_order.lines.all %}
+              {% for line in work_order.lines.all %}
+                <tr class="border-b" data-wo-line-row>
+                  <td class="py-2 pr-3">
+                    <input name="line_itemid" value="{{ line.itemid }}" class="w-24 rounded-md border-gray-300" data-wo-itemid />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <div class="relative">
+                      <input name="line_itemnumber_snapshot" value="{{ line.itemnumber_snapshot }}" class="w-40 rounded-md border-gray-300" data-wo-itemnumber />
+                      <div class="absolute z-10 mt-1 w-96 rounded-md border border-gray-200 bg-white shadow-lg hidden" data-wo-item-results></div>
+                    </div>
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input name="line_description_snapshot" value="{{ line.description_snapshot }}" class="w-full rounded-md border-gray-300" data-wo-description />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input name="line_qty" value="{{ line.qty }}" class="w-24 rounded-md border-gray-300" data-wo-qty />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input name="line_price" value="{{ line.price }}" class="w-28 rounded-md border-gray-300" data-wo-price />
+                  </td>
+                  <td class="py-2 pr-3 text-gray-900" data-wo-amount>{{ line.amount }}</td>
+                  <td class="py-2 pr-3 text-right">
+                    <button type="button" class="text-sm text-red-700 hover:underline" data-wo-remove-line>Remove</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr class="border-b" data-wo-line-row>
+                <td class="py-2 pr-3">
+                  <input name="line_itemid" value="" class="w-24 rounded-md border-gray-300" placeholder="123" data-wo-itemid />
+                </td>
+                <td class="py-2 pr-3">
+                  <div class="relative">
+                    <input name="line_itemnumber_snapshot" value="" class="w-40 rounded-md border-gray-300" placeholder="Search items..." data-wo-itemnumber />
+                    <div class="absolute z-10 mt-1 w-96 rounded-md border border-gray-200 bg-white shadow-lg hidden" data-wo-item-results></div>
+                  </div>
+                </td>
+                <td class="py-2 pr-3">
+                  <input name="line_description_snapshot" value="" class="w-full rounded-md border-gray-300" placeholder="Description" data-wo-description />
+                </td>
+                <td class="py-2 pr-3">
+                  <input name="line_qty" value="1.00" class="w-24 rounded-md border-gray-300" data-wo-qty />
+                </td>
+                <td class="py-2 pr-3">
+                  <input name="line_price" value="0.00" class="w-28 rounded-md border-gray-300" data-wo-price />
+                </td>
+                <td class="py-2 pr-3 text-gray-900" data-wo-amount>0.00</td>
+                <td class="py-2 pr-3 text-right">
+                  <button type="button" class="text-sm text-red-700 hover:underline" data-wo-remove-line>Remove</button>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-3 flex items-center justify-between">
+        <button type="button" class="text-sm text-blue-700 hover:underline" data-wo-add-line>Add line</button>
+        <div class="text-sm text-gray-700 space-y-1 text-right">
+          <div>Subtotal: <span class="font-semibold" data-wo-subtotal>0.00</span></div>
+          <div>Discount: <span class="font-semibold" data-wo-discount-amount>0.00</span></div>
+          <div>Total: <span class="font-semibold" data-wo-total>0.00</span></div>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Customer modal (create/edit) -->
+<div class="fixed inset-0 z-50 hidden" data-wo-customer-modal>
+  <div class="absolute inset-0 bg-black/30" data-wo-modal-backdrop></div>
+  <div class="relative mx-auto mt-24 w-full max-w-lg rounded-lg bg-white p-4 shadow-lg">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold text-gray-900" data-wo-customer-modal-title>Customer</h2>
+      <button type="button" class="text-sm text-gray-600 hover:underline" data-wo-customer-modal-close>Close</button>
+    </div>
+    <form class="space-y-3" data-wo-customer-modal-form>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Name</label>
+        <input class="mt-1 w-full rounded-md border-gray-300" data-wo-cust-name />
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Phone</label>
+          <input class="mt-1 w-full rounded-md border-gray-300" data-wo-cust-phone />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Contact</label>
+          <input class="mt-1 w-full rounded-md border-gray-300" data-wo-cust-contact />
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Email</label>
+        <input class="mt-1 w-full rounded-md border-gray-300" data-wo-cust-email />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Address</label>
+        <input class="mt-1 w-full rounded-md border-gray-300" placeholder="Line 1" data-wo-cust-address1 />
+        <input class="mt-2 w-full rounded-md border-gray-300" placeholder="Line 2" data-wo-cust-address2 />
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">City</label>
+          <input class="mt-1 w-full rounded-md border-gray-300" data-wo-cust-city />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">State</label>
+          <input class="mt-1 w-full rounded-md border-gray-300" data-wo-cust-state />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">ZIP</label>
+          <input class="mt-1 w-full rounded-md border-gray-300" data-wo-cust-zip />
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button type="button" class="rounded-md border border-gray-200 px-3 py-1.5 text-sm" data-wo-customer-modal-cancel>Cancel</button>
+        <button type="submit" class="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white" data-wo-customer-modal-submit>Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  <script src="{% static 'rental_scheduler/js/entrypoints/work_order_page.js' %}"></script>
+{% endblock %}
+

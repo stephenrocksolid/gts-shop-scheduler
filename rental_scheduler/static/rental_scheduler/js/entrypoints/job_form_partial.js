@@ -264,6 +264,46 @@
                 }, 50);
             }
 
+            function resolveJobIdFromEvent(event, fallbackJobId, form) {
+                let actualJobId = fallbackJobId;
+
+                // 1. Try to get from HX-Trigger header (jobSaved event contains jobId)
+                if (event.detail.xhr) {
+                    const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
+                    if (triggerHeader) {
+                        try {
+                            const triggerData = JSON.parse(triggerHeader);
+                            if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
+                                actualJobId = triggerData.jobSaved.jobId;
+                                console.log('Got job ID from HX-Trigger:', actualJobId);
+                            }
+                        } catch (e) {
+                            console.log('Could not parse HX-Trigger header');
+                        }
+                    }
+
+                    // 2. Try to extract from response HTML (OOB swap includes job_id input)
+                    if (!actualJobId || actualJobId === '0') {
+                        const responseText = event.detail.xhr.responseText;
+                        const match = responseText.match(/name="job_id"\s+value="(\d+)"/);
+                        if (match && match[1]) {
+                            actualJobId = match[1];
+                            console.log('Got job ID from response HTML:', actualJobId);
+                        }
+                    }
+                }
+
+                // 3. Fallback: check form's hidden input (for existing jobs)
+                if ((!actualJobId || actualJobId === '0') && form) {
+                    const jobIdInput = form.querySelector('input[name="job_id"]');
+                    if (jobIdInput && jobIdInput.value) {
+                        actualJobId = jobIdInput.value;
+                    }
+                }
+
+                return actualJobId;
+            }
+
             /**
              * Save job form and then print
              */
@@ -290,41 +330,7 @@
                     // Define the success handler
                     const handleAfterRequest = function(event) {
                         // Get the job ID - try multiple sources
-                        let actualJobId = jobId;
-                        
-                        // 1. Try to get from HX-Trigger header (jobSaved event contains jobId)
-                        if (event.detail.xhr) {
-                            const triggerHeader = event.detail.xhr.getResponseHeader('HX-Trigger');
-                            if (triggerHeader) {
-                                try {
-                                    const triggerData = JSON.parse(triggerHeader);
-                                    if (triggerData.jobSaved && triggerData.jobSaved.jobId) {
-                                        actualJobId = triggerData.jobSaved.jobId;
-                                        console.log('Got job ID from HX-Trigger:', actualJobId);
-                                    }
-                                } catch (e) {
-                                    console.log('Could not parse HX-Trigger header');
-                                }
-                            }
-                            
-                            // 2. Try to extract from response HTML (OOB swap includes job_id input)
-                            if (!actualJobId || actualJobId === '0') {
-                                const responseText = event.detail.xhr.responseText;
-                                const match = responseText.match(/name="job_id"\s+value="(\d+)"/);
-                                if (match && match[1]) {
-                                    actualJobId = match[1];
-                                    console.log('Got job ID from response HTML:', actualJobId);
-                                }
-                            }
-                        }
-                        
-                        // 3. Fallback: check form's hidden input (for existing jobs)
-                        if (!actualJobId || actualJobId === '0') {
-                            const jobIdInput = form.querySelector('input[name="job_id"]');
-                            if (jobIdInput && jobIdInput.value) {
-                                actualJobId = jobIdInput.value;
-                            }
-                        }
+                        const actualJobId = resolveJobIdFromEvent(event, jobId, form);
 
                         if (event.detail.successful) {
                             console.log('Job saved successfully, now printing with job ID:', actualJobId);
@@ -449,6 +455,76 @@
                 }
             }
 
+            /**
+             * Save job form and then navigate to Work Order create page
+             */
+            function saveJobThenCreateWorkOrder(form, jobId, triggerBtn) {
+                console.log('Saving job form before creating work order...');
+
+                if (!GTS.urls || !GTS.urls.workOrderNew) {
+                    alert('Work Order URLs are not configured.');
+                    return;
+                }
+
+                if (window.JobPanel) {
+                    window.JobPanel.isPrinting = true;
+                }
+
+                const originalText = triggerBtn ? triggerBtn.textContent : '';
+                if (triggerBtn) {
+                    triggerBtn.textContent = 'Saving...';
+                    triggerBtn.disabled = true;
+                }
+
+                const hxPost = form.getAttribute('hx-post');
+                if (hxPost) {
+                    const handleAfterRequest = function(event) {
+                        const actualJobId = resolveJobIdFromEvent(event, jobId, form);
+
+                        if (event.detail.successful) {
+                            if (window.JobPanel && window.JobPanel.clearUnsavedChanges) {
+                                window.JobPanel.clearUnsavedChanges();
+                            }
+
+                            document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
+
+                            if (!actualJobId || actualJobId === '0') {
+                                alert('Job saved but could not determine job ID. Please try again.');
+                                if (triggerBtn) {
+                                    triggerBtn.textContent = originalText;
+                                    triggerBtn.disabled = false;
+                                }
+                                if (window.JobPanel) {
+                                    window.JobPanel.isPrinting = false;
+                                }
+                                return;
+                            }
+
+                            if (window.JobPanel) {
+                                window.JobPanel.isPrinting = false;
+                            }
+
+                            // Include current page as "next" so WO page can return here
+                            var nextUrl = window.location.pathname + window.location.search;
+                            window.location.href = GTS.urls.workOrderNew({ job: actualJobId, next: nextUrl });
+                        } else {
+                            if (window.JobPanel) {
+                                window.JobPanel.isPrinting = false;
+                            }
+                            alert('Failed to save job. Please check required fields and try again.');
+                            if (triggerBtn) {
+                                triggerBtn.textContent = originalText;
+                                triggerBtn.disabled = false;
+                            }
+                            document.body.removeEventListener('htmx:afterRequest', handleAfterRequest);
+                        }
+                    };
+
+                    document.body.addEventListener('htmx:afterRequest', handleAfterRequest);
+                    htmx.trigger(form, 'submit');
+                }
+            }
+
             // Use event delegation - attach to document body so it works for all future buttons
             document.body.addEventListener('click', function(e) {
                 // Check if clicked element is a print button
@@ -475,20 +551,61 @@
                     }
                 }
 
-                // Check if clicked element is a save-and-print button
-                const saveAndPrintBtn = e.target.closest('.save-and-print-btn');
-                if (saveAndPrintBtn && !saveAndPrintBtn.disabled) {
+                // Save & Create WO button
+                const saveAndCreateBtn = e.target.closest('.save-and-create-wo-btn');
+                if (saveAndCreateBtn && !saveAndCreateBtn.disabled) {
                     GTS.dom.stop(e);
-                    const printType = saveAndPrintBtn.getAttribute('data-print-type') || 'wo';
-                    const form = saveAndPrintBtn.closest('form');
-                    
+                    const form = saveAndCreateBtn.closest('form');
                     if (form) {
-                        // Get job ID from form (may be empty for new jobs)
                         const jobIdInput = form.querySelector('input[name="job_id"]');
                         const jobId = jobIdInput ? jobIdInput.value : '0';
-                        
-                        console.log('Save & Print button clicked - saving and printing...');
-                        saveJobThenPrint(form, jobId, printType);
+                        saveJobThenCreateWorkOrder(form, jobId, saveAndCreateBtn);
+                    }
+                }
+
+                // Create WO (existing job)
+                const createBtn = e.target.closest('[data-wo-action="create"]');
+                if (createBtn && !createBtn.disabled) {
+                    GTS.dom.stop(e);
+                    const form = createBtn.closest('form');
+                    const jobId = createBtn.getAttribute('data-job-id') || '0';
+                    if (form) {
+                        const hasUnsaved = window.JobPanel && window.JobPanel.hasUnsavedChanges
+                            ? (typeof window.JobPanel.hasUnsavedChanges === 'function'
+                                ? window.JobPanel.hasUnsavedChanges()
+                                : false)
+                            : false;
+                        if (hasUnsaved || !jobId || jobId === '0') {
+                            saveJobThenCreateWorkOrder(form, jobId, createBtn);
+                        } else if (GTS.urls && GTS.urls.workOrderNew) {
+                            // Include current page as "next" so WO page can return here
+                            var nextUrl = window.location.pathname + window.location.search;
+                            window.location.href = GTS.urls.workOrderNew({ job: jobId, next: nextUrl });
+                        }
+                    }
+                }
+
+                // Edit WO
+                const editBtn = e.target.closest('[data-wo-action="edit"]');
+                if (editBtn && !editBtn.disabled) {
+                    GTS.dom.stop(e);
+                    const woId = editBtn.getAttribute('data-wo-id');
+                    if (woId && GTS.urls && GTS.urls.workOrderEdit) {
+                        // Include current page as "next" so WO page can return here
+                        var nextUrl = window.location.pathname + window.location.search;
+                        window.location.href = GTS.urls.withQuery(GTS.urls.workOrderEdit(woId), { next: nextUrl });
+                    }
+                }
+
+                // Print WO (PDF)
+                const printWoBtn = e.target.closest('[data-wo-action="print"]');
+                if (printWoBtn && !printWoBtn.disabled) {
+                    GTS.dom.stop(e);
+                    const woId = printWoBtn.getAttribute('data-wo-id');
+                    if (woId && GTS.urls && GTS.urls.workOrderPdf) {
+                        // Include current page as "next" so PDF page can return here
+                        var nextUrl = window.location.pathname + window.location.search;
+                        window.location.href = GTS.urls.withQuery(GTS.urls.workOrderPdf(woId), { next: nextUrl });
                     }
                 }
             });

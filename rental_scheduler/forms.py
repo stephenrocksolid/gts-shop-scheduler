@@ -1,7 +1,7 @@
 from django import forms
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from .models import Job, WorkOrder, WorkOrderLine, Calendar, CallReminder
+from .models import Job, Calendar, CallReminder
 from .utils.phone import format_phone
 
 
@@ -218,102 +218,6 @@ class JobForm(forms.ModelForm):
         
         return cleaned_data
 
-
-class WorkOrderForm(forms.ModelForm):
-    """Form for creating and editing work orders"""
-    
-    class Meta:
-        model = WorkOrder
-        fields = ['job', 'wo_number', 'wo_date', 'notes']
-        widgets = {
-            'job': forms.Select(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-            }),
-            'wo_number': forms.TextInput(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'placeholder': 'e.g., WO-2024-001'
-            }),
-            'wo_date': forms.DateInput(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'type': 'date'
-            }),
-            'notes': forms.Textarea(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'rows': 4,
-                'placeholder': 'Additional notes about the work order...'
-            })
-        }
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Only show jobs that don't already have work orders
-        if not self.instance.pk:  # Creating new work order
-            self.fields['job'].queryset = Job.objects.filter(
-                is_deleted=False,
-                work_order__isnull=True
-            )
-        else:  # Editing existing work order
-            self.fields['job'].queryset = Job.objects.filter(is_deleted=False)
-    
-    def clean_wo_number(self):
-        wo_number = self.cleaned_data.get('wo_number')
-        if wo_number:
-            # Check for duplicates, excluding current instance
-            queryset = WorkOrder.objects.filter(wo_number=wo_number)
-            if self.instance.pk:
-                queryset = queryset.exclude(pk=self.instance.pk)
-            if queryset.exists():
-                raise ValidationError('A work order with this number already exists.')
-        return wo_number
-
-
-class WorkOrderLineForm(forms.ModelForm):
-    """Form for creating and editing work order line items"""
-    
-    class Meta:
-        model = WorkOrderLine
-        fields = ['item_code', 'description', 'qty', 'rate']
-        widgets = {
-            'item_code': forms.TextInput(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'placeholder': 'Part #'
-            }),
-            'description': forms.TextInput(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'placeholder': 'Description of work or item'
-            }),
-            'qty': forms.NumberInput(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'step': '0.01',
-                'min': '0'
-            }),
-            'rate': forms.NumberInput(attrs={
-                'class': 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-                'step': '0.01',
-                'min': '0'
-            })
-        }
-    
-    def clean_qty(self):
-        qty = self.cleaned_data.get('qty')
-        if qty is not None and qty < 0:
-            raise ValidationError('Quantity cannot be negative.')
-        return qty
-    
-    def clean_rate(self):
-        rate = self.cleaned_data.get('rate')
-        if rate is not None and rate < 0:
-            raise ValidationError('Rate cannot be negative.')
-        return rate
-    
-    def save(self, commit=True):
-        instance = super().save(commit=False)
-        # Calculate total
-        if instance.qty is not None and instance.rate is not None:
-            instance.total = instance.qty * instance.rate
-        if commit:
-            instance.save()
-        return instance
 
 
 class CalendarImportForm(forms.Form):
