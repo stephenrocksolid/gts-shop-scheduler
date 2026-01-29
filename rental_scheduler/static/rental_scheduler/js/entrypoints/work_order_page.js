@@ -94,6 +94,7 @@
                 selectedLabel: document.querySelector('[data-wo-customer-selected]'),
                 createBtn: document.querySelector('[data-wo-customer-create]'),
                 editBtn: document.querySelector('[data-wo-customer-edit]'),
+                clearBtn: document.querySelector('[data-wo-customer-clear]'),
                 modal: document.querySelector('[data-wo-customer-modal]'),
                 modalBackdrop: document.querySelector('[data-wo-modal-backdrop]'),
                 modalClose: document.querySelector('[data-wo-customer-modal-close]'),
@@ -123,6 +124,25 @@
             if (els.editBtn) {
                 els.editBtn.disabled = !selected;
             }
+            if (els.clearBtn) {
+                if (selected) {
+                    els.clearBtn.classList.remove('hidden');
+                } else {
+                    els.clearBtn.classList.add('hidden');
+                }
+            }
+        }
+
+        function clearSelected() {
+            var els = getEls();
+            setSelected(null);
+            if (els.searchInput) {
+                els.searchInput.value = '';
+            }
+            if (els.results) {
+                hide(els.results);
+                els.results.innerHTML = '';
+            }
         }
 
         function renderResults(list) {
@@ -131,7 +151,7 @@
             els.results.innerHTML = '';
 
             if (!list || list.length === 0) {
-                els.results.innerHTML = '<div class="p-2 text-sm text-gray-600">No results</div>';
+                els.results.innerHTML = '<div class="px-3 py-2 text-sm text-gray-500">No results</div>';
                 show(els.results);
                 return;
             }
@@ -139,9 +159,10 @@
             list.forEach(function(org) {
                 var btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = 'block w-full text-left px-3 py-2 hover:bg-gray-50';
+                btn.className = 'wo-dropdown-item';
                 btn.setAttribute('data-wo-customer-select', '1');
                 btn.setAttribute('data-org-id', org.org_id);
+                btn.setAttribute('role', 'option');
                 btn.textContent = (org.name || '') + '  (#' + org.org_id + ')';
                 // Store details for modal edit (no address from search)
                 btn._org = org;
@@ -166,6 +187,8 @@
             }
 
             var url = GTS.urls.accountingCustomerSearchUrl({ q: query });
+            els.results.innerHTML = '<div class="px-3 py-2 text-sm text-gray-500">Searching...</div>';
+            show(els.results);
             safeFetchJson(url).then(function(data) {
                 renderResults((data && data.results) || []);
             }).catch(function(err) {
@@ -240,6 +263,12 @@
             var editBtn = closest(e.target, '[data-wo-customer-edit]');
             if (editBtn && !editBtn.disabled) {
                 openModal('edit');
+                return;
+            }
+
+            var clearBtn = closest(e.target, '[data-wo-customer-clear]');
+            if (clearBtn) {
+                clearSelected();
                 return;
             }
 
