@@ -85,6 +85,12 @@
     function initCustomerUI() {
         var selected = null; // { org_id, name, phone, contact, email, address_* }
         var modalMode = 'create'; // create | edit
+        var lastActiveElement = null;
+        var isSaving = false;
+        var hasShownErrors = false;
+        var previousBodyOverflow = '';
+        var modalKeydownHandler = null;
+        var submitBtnDefaultHtml = null;
 
         function getEls() {
             return {
@@ -101,6 +107,13 @@
                 modalCancel: document.querySelector('[data-wo-customer-modal-cancel]'),
                 modalTitle: document.querySelector('[data-wo-customer-modal-title]'),
                 modalForm: document.querySelector('[data-wo-customer-modal-form]'),
+                modalPanel: document.querySelector('[data-wo-customer-modal-panel]'),
+                modalError: document.querySelector('[data-wo-customer-modal-error]'),
+                submitBtn: document.querySelector('[data-wo-customer-modal-submit]'),
+                nameError: document.querySelector('[data-wo-customer-name-error]'),
+                emailError: document.querySelector('[data-wo-customer-email-error]'),
+                address2Row: document.querySelector('[data-wo-address2-row]'),
+                address2Toggle: document.querySelector('[data-wo-address2-toggle]'),
                 fieldName: document.querySelector('[data-wo-cust-name]'),
                 fieldPhone: document.querySelector('[data-wo-cust-phone]'),
                 fieldContact: document.querySelector('[data-wo-cust-contact]'),
@@ -113,13 +126,212 @@
             };
         }
 
+        function getFocusableElements(container) {
+            if (!container) return [];
+            var selectors = [
+                'a[href]',
+                'button:not([disabled])',
+                'textarea:not([disabled])',
+                'input:not([disabled])',
+                'select:not([disabled])',
+                '[tabindex]:not([tabindex="-1"])'
+            ];
+            return Array.prototype.slice.call(container.querySelectorAll(selectors.join(','))).filter(function(el) {
+                return !el.hasAttribute('aria-hidden');
+            });
+        }
+
+        function lockBodyScroll() {
+            previousBodyOverflow = document.body.style.overflow || '';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function unlockBodyScroll() {
+            document.body.style.overflow = previousBodyOverflow;
+            previousBodyOverflow = '';
+        }
+
+        function setModalError(message) {
+            var els = getEls();
+            if (!els.modalError) return;
+            if (message) {
+                els.modalError.textContent = message;
+                els.modalError.classList.remove('hidden');
+            } else {
+                els.modalError.textContent = '';
+                els.modalError.classList.add('hidden');
+            }
+        }
+
+        function setFieldError(fieldEl, errorEl, message) {
+            if (!fieldEl) return;
+            if (message) {
+                fieldEl.setAttribute('aria-invalid', 'true');
+            } else {
+                fieldEl.removeAttribute('aria-invalid');
+            }
+            if (!errorEl) return;
+            if (message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+            } else {
+                errorEl.textContent = '';
+                errorEl.classList.add('hidden');
+            }
+        }
+
+        function clearModalErrors() {
+            var els = getEls();
+            setModalError('');
+            setFieldError(els.fieldName, els.nameError, '');
+            setFieldError(els.fieldEmail, els.emailError, '');
+            hasShownErrors = false;
+        }
+
+        function isValidEmail(value) {
+            if (!value) return true;
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+        }
+
+        function validateForm(showErrors) {
+            var els = getEls();
+            var name = (els.fieldName && els.fieldName.value ? els.fieldName.value : '').trim();
+            var email = (els.fieldEmail && els.fieldEmail.value ? els.fieldEmail.value : '').trim();
+            var errors = {};
+
+            if (!name) {
+                errors.name = 'Name is required.';
+            }
+            if (email && !isValidEmail(email)) {
+                errors.email = 'Enter a valid email.';
+            }
+
+            if (showErrors) {
+                setFieldError(els.fieldName, els.nameError, errors.name || '');
+                setFieldError(els.fieldEmail, els.emailError, errors.email || '');
+                setModalError(Object.keys(errors).length ? 'Please fix the highlighted fields.' : '');
+                hasShownErrors = true;
+            }
+
+            return {
+                isValid: Object.keys(errors).length === 0,
+                errors: errors
+            };
+        }
+
+        function updateSubmitState() {
+            var els = getEls();
+            if (!els.submitBtn) return;
+            var result = validateForm(false);
+            els.submitBtn.disabled = !result.isValid || isSaving;
+        }
+
+        function setSavingState(nextSaving) {
+            var els = getEls();
+            isSaving = !!nextSaving;
+
+            if (els.submitBtn) {
+                if (!submitBtnDefaultHtml) {
+                    submitBtnDefaultHtml = els.submitBtn.innerHTML;
+                }
+                if (isSaving) {
+                    els.submitBtn.disabled = true;
+                    els.submitBtn.innerHTML = '' +
+                        '<svg class="h-4 w-4 mr-2 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+                        '  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>' +
+                        '  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>' +
+                        '</svg>' +
+                        'Saving...';
+                } else {
+                    els.submitBtn.innerHTML = submitBtnDefaultHtml || 'Save';
+                }
+            }
+
+            if (els.modalCancel) {
+                els.modalCancel.disabled = isSaving;
+            }
+            if (els.modalClose) {
+                els.modalClose.disabled = isSaving;
+            }
+        }
+
+        function showAddress2() {
+            var els = getEls();
+            if (els.address2Row) {
+                els.address2Row.classList.remove('hidden');
+            }
+            if (els.address2Toggle) {
+                els.address2Toggle.classList.add('hidden');
+            }
+            if (els.fieldAddr2) {
+                els.fieldAddr2.focus();
+            }
+        }
+
+        function syncAddress2State(value) {
+            var els = getEls();
+            var hasLine2 = value && String(value).trim();
+            if (hasLine2) {
+                if (els.address2Row) els.address2Row.classList.remove('hidden');
+                if (els.address2Toggle) els.address2Toggle.classList.add('hidden');
+            } else {
+                if (els.address2Row) els.address2Row.classList.add('hidden');
+                if (els.address2Toggle) els.address2Toggle.classList.remove('hidden');
+            }
+        }
+
+        function attachModalKeydown() {
+            var els = getEls();
+            if (!els.modal || !els.modalPanel || modalKeydownHandler) return;
+
+            modalKeydownHandler = function(e) {
+                if (e.key === 'Escape') {
+                    closeModal();
+                    return;
+                }
+
+                if (e.key !== 'Tab') return;
+                var focusable = getFocusableElements(els.modalPanel);
+                if (!focusable.length) return;
+
+                var first = focusable[0];
+                var last = focusable[focusable.length - 1];
+
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            };
+            document.addEventListener('keydown', modalKeydownHandler);
+        }
+
+        function detachModalKeydown() {
+            if (modalKeydownHandler) {
+                document.removeEventListener('keydown', modalKeydownHandler);
+                modalKeydownHandler = null;
+            }
+        }
+
         function setSelected(org) {
             selected = org || null;
             var els = getEls();
             if (!els.orgIdInput) return;
             els.orgIdInput.value = selected ? String(selected.org_id) : '';
             if (els.selectedLabel) {
-                els.selectedLabel.textContent = selected ? ('Selected: ' + (selected.name || '') + ' (#' + selected.org_id + ')') : '';
+                if (selected) {
+                    var name = (selected.name || '').trim();
+                    var phone = (selected.phone || '').trim();
+                    var label = name || '';
+                    if (phone) {
+                        label = label ? (label + ' (' + phone + ')') : phone;
+                    }
+                    els.selectedLabel.textContent = 'Selected: ' + label;
+                } else {
+                    els.selectedLabel.textContent = '';
+                }
             }
             if (els.editBtn) {
                 els.editBtn.disabled = !selected;
@@ -163,7 +375,13 @@
                 btn.setAttribute('data-wo-customer-select', '1');
                 btn.setAttribute('data-org-id', org.org_id);
                 btn.setAttribute('role', 'option');
-                btn.textContent = (org.name || '') + '  (#' + org.org_id + ')';
+                var name = (org.name || '').trim();
+                var phone = (org.phone || '').trim();
+                var label = name || '';
+                if (phone) {
+                    label = label ? (label + ' (' + phone + ')') : phone;
+                }
+                btn.textContent = label;
                 // Store details for modal edit (no address from search)
                 btn._org = org;
                 els.results.appendChild(btn);
@@ -201,10 +419,11 @@
             });
         }, 250);
 
-        function openModal(mode) {
+        function openModal(mode, triggerEl) {
             var els = getEls();
             if (!els.modal) return;
             modalMode = mode;
+            lastActiveElement = triggerEl || document.activeElement;
 
             if (els.modalTitle) {
                 els.modalTitle.textContent = mode === 'edit' ? 'Edit customer' : 'Create customer';
@@ -219,15 +438,36 @@
             if (els.fieldAddr1) els.fieldAddr1.value = src.address_line1 || '';
             if (els.fieldAddr2) els.fieldAddr2.value = src.address_line2 || '';
             if (els.fieldCity) els.fieldCity.value = src.city || '';
-            if (els.fieldState) els.fieldState.value = src.state || '';
+            if (els.fieldState) els.fieldState.value = (src.state || '').toUpperCase();
             if (els.fieldZip) els.fieldZip.value = src.zip || '';
 
+            clearModalErrors();
+            setSavingState(false);
+            syncAddress2State(src.address_line2 || '');
+
             show(els.modal);
+            lockBodyScroll();
+            attachModalKeydown();
+            updateSubmitState();
+
+            if (els.fieldName) {
+                els.fieldName.focus();
+            } else if (els.modalPanel) {
+                els.modalPanel.focus();
+            }
         }
 
         function closeModal() {
             var els = getEls();
+            if (!els.modal || els.modal.classList.contains('hidden')) return;
+            if (isSaving) return;
             hide(els.modal);
+            detachModalKeydown();
+            unlockBodyScroll();
+            clearModalErrors();
+            if (lastActiveElement && typeof lastActiveElement.focus === 'function') {
+                lastActiveElement.focus();
+            }
         }
 
         // Delegated interactions
@@ -235,6 +475,13 @@
             var target = e.target;
             if (target && target.matches && target.matches('[data-wo-customer-search]')) {
                 doSearch(target.value);
+            }
+            // State is now a select dropdown - no input manipulation needed
+            if (target && target.matches && target.matches('[data-wo-cust-name], [data-wo-cust-email]')) {
+                if (hasShownErrors) {
+                    validateForm(true);
+                }
+                updateSubmitState();
             }
         });
 
@@ -256,19 +503,25 @@
 
             var createBtn = closest(e.target, '[data-wo-customer-create]');
             if (createBtn) {
-                openModal('create');
+                openModal('create', createBtn);
                 return;
             }
 
             var editBtn = closest(e.target, '[data-wo-customer-edit]');
             if (editBtn && !editBtn.disabled) {
-                openModal('edit');
+                openModal('edit', editBtn);
                 return;
             }
 
             var clearBtn = closest(e.target, '[data-wo-customer-clear]');
             if (clearBtn) {
                 clearSelected();
+                return;
+            }
+
+            var address2Toggle = closest(e.target, '[data-wo-address2-toggle]');
+            if (address2Toggle) {
+                showAddress2();
                 return;
             }
 
@@ -296,23 +549,36 @@
 
             var els = getEls();
             if (!els.fieldName) return;
+            if (isSaving) return;
+
+            setModalError('');
+            var validation = validateForm(true);
+            updateSubmitState();
+            if (!validation.isValid) {
+                return;
+            }
+
+            setSavingState(true);
 
             var payload = {
-                name: els.fieldName.value || '',
-                phone: els.fieldPhone ? els.fieldPhone.value : '',
-                contact: els.fieldContact ? els.fieldContact.value : '',
-                email: els.fieldEmail ? els.fieldEmail.value : '',
-                address_line1: els.fieldAddr1 ? els.fieldAddr1.value : '',
-                address_line2: els.fieldAddr2 ? els.fieldAddr2.value : '',
-                city: els.fieldCity ? els.fieldCity.value : '',
-                state: els.fieldState ? els.fieldState.value : '',
-                zip: els.fieldZip ? els.fieldZip.value : '',
+                name: els.fieldName.value ? els.fieldName.value.trim() : '',
+                phone: els.fieldPhone ? els.fieldPhone.value.trim() : '',
+                contact: els.fieldContact ? els.fieldContact.value.trim() : '',
+                email: els.fieldEmail ? els.fieldEmail.value.trim() : '',
+                address_line1: els.fieldAddr1 ? els.fieldAddr1.value.trim() : '',
+                address_line2: els.fieldAddr2 ? els.fieldAddr2.value.trim() : '',
+                city: els.fieldCity ? els.fieldCity.value.trim() : '',
+                state: els.fieldState ? els.fieldState.value.trim().toUpperCase() : '',
+                zip: els.fieldZip ? els.fieldZip.value.trim() : '',
             };
 
             var url;
             if (modalMode === 'edit' && selected && selected.org_id) {
                 if (!GTS.urls || !GTS.urls.accountingCustomerUpdate) {
                     GTS.showToast('Customer update URL is not configured.', 'error');
+                    setModalError('Customer update URL is not configured.');
+                    setSavingState(false);
+                    updateSubmitState();
                     return;
                 }
                 url = GTS.urls.accountingCustomerUpdate(selected.org_id);
@@ -320,6 +586,9 @@
                 url = (GTS.urls && GTS.urls.accountingCustomerCreate) ? GTS.urls.accountingCustomerCreate : '';
                 if (!url) {
                     GTS.showToast('Customer create URL is not configured.', 'error');
+                    setModalError('Customer create URL is not configured.');
+                    setSavingState(false);
+                    updateSubmitState();
                     return;
                 }
             }
@@ -338,13 +607,19 @@
                 setSelected(payload);
                 var els2 = getEls();
                 if (els2.searchInput) els2.searchInput.value = payload.name || '';
+                setSavingState(false);
                 closeModal();
                 GTS.showToast('Customer saved.', 'success');
             }).catch(function(err) {
+                setSavingState(false);
+                updateSubmitState();
                 if (err && err.status === 503) {
                     GTS.showToast('Classic Accounting is not configured.', 'warning');
+                    setModalError('Classic Accounting is not configured.');
                 } else {
-                    GTS.showToast(err.message || 'Customer save failed.', 'error');
+                    var message = err.message || 'Customer save failed.';
+                    GTS.showToast(message, 'error');
+                    setModalError(message);
                 }
             });
         });
@@ -537,7 +812,7 @@
                 subtotal += qty * price;
             });
 
-            var discountTypeEl = document.querySelector('[name="discount_type"]');
+            var discountTypeEl = document.querySelector('input[name="discount_type"]:checked') || document.querySelector('[name="discount_type"]');
             var discountValueEl = document.querySelector('[name="discount_value"]');
             var discountType = discountTypeEl ? discountTypeEl.value : 'amount';
             var discountValue = discountValueEl ? parseMoney(discountValueEl.value) : 0;

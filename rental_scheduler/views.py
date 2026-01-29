@@ -200,6 +200,8 @@ def _render_workorder_v2_form(
     initial: dict | None = None,
     errors: dict | None = None,
 ):
+    from rental_scheduler.constants import US_STATE_TERRITORY_CHOICES
+    
     employees = WorkOrderEmployee.objects.filter(is_active=True).order_by("name")
     back_ctx = _get_workorder_back_context(request, job_id=job.pk)
     return render(
@@ -210,6 +212,7 @@ def _render_workorder_v2_form(
             "job": job,
             "work_order": work_order,
             "employees": employees,
+            "state_choices": US_STATE_TERRITORY_CHOICES,
             "initial": initial or {},
             "errors": errors or {},
             "back_url": back_ctx["back_url"],
@@ -568,8 +571,43 @@ def accounting_items_search(request):
     return JsonResponse({"results": results})
 
 
+def _normalize_state_code(value: str) -> str:
+    """
+    Normalize and validate US state/territory code.
+    
+    Args:
+        value: Raw state input (2-letter code or full name)
+    
+    Returns:
+        Normalized 2-letter USPS code (uppercase) or empty string
+    
+    Raises:
+        ValidationError: If value is non-empty and not a valid state/territory
+    """
+    from rental_scheduler.constants import US_STATE_TERRITORY_CODE_SET, US_STATE_TERRITORY_NAME_TO_CODE
+    
+    normalized = (value or "").strip().upper()
+    
+    if not normalized:
+        return ""
+    
+    # Already a valid 2-letter code
+    if normalized in US_STATE_TERRITORY_CODE_SET:
+        return normalized
+    
+    # Try mapping full name to code (defensive: allows "Tennessee" → "TN")
+    if normalized in US_STATE_TERRITORY_NAME_TO_CODE:
+        return US_STATE_TERRITORY_NAME_TO_CODE[normalized]
+    
+    # Invalid state
+    from django.core.exceptions import ValidationError
+    raise ValidationError(f"State must be a valid 2-letter USPS code (e.g., TN, KY). Received: {value[:20]}")
+
+
 def _classic_customer_payload(data: dict) -> dict:
     """Normalize Classic customer payload from JSON/form data."""
+    raw_state = (data.get("state") or data.get("txtstate") or "").strip()
+    
     return {
         "name": (data.get("name") or data.get("orgname") or "").strip(),
         "phone": (data.get("phone") or data.get("phone1") or "").strip(),
@@ -578,7 +616,7 @@ def _classic_customer_payload(data: dict) -> dict:
         "address_line1": (data.get("address_line1") or data.get("streetone") or "").strip(),
         "address_line2": (data.get("address_line2") or data.get("streettwo") or "").strip(),
         "city": (data.get("city") or data.get("txtcity") or "").strip(),
-        "state": (data.get("state") or data.get("txtstate") or "").strip(),
+        "state": raw_state,  # Will be normalized/validated separately
         "zip": (data.get("zip") or data.get("txtzip") or "").strip(),
     }
 
@@ -633,6 +671,12 @@ def accounting_customers_create(request):
     payload = _classic_customer_payload(data)
     if not payload["name"]:
         return JsonResponse({"error": "Customer name is required."}, status=400)
+    
+    # Normalize and validate state
+    try:
+        payload["state"] = _normalize_state_code(payload["state"])
+    except ValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
     from accounting_integration.models import Org, OrgAddress
 
@@ -704,6 +748,12 @@ def accounting_customers_update(request, orgid: int):
     payload = _classic_customer_payload(data)
     if not payload["name"]:
         return JsonResponse({"error": "Customer name is required."}, status=400)
+    
+    # Normalize and validate state
+    try:
+        payload["state"] = _normalize_state_code(payload["state"])
+    except ValidationError as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
     from accounting_integration.models import Org, OrgAddress
 

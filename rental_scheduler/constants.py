@@ -49,6 +49,80 @@ WARN_JOB_SPAN_DAYS = 60
 
 
 # =============================================================================
+# US STATE AND TERRITORY CODES
+# Used for customer address validation in Work Orders.
+# =============================================================================
+
+US_STATE_TERRITORY_CHOICES = [
+    ("AL", "Alabama"),
+    ("AK", "Alaska"),
+    ("AZ", "Arizona"),
+    ("AR", "Arkansas"),
+    ("CA", "California"),
+    ("CO", "Colorado"),
+    ("CT", "Connecticut"),
+    ("DE", "Delaware"),
+    ("DC", "District of Columbia"),
+    ("FL", "Florida"),
+    ("GA", "Georgia"),
+    ("HI", "Hawaii"),
+    ("ID", "Idaho"),
+    ("IL", "Illinois"),
+    ("IN", "Indiana"),
+    ("IA", "Iowa"),
+    ("KS", "Kansas"),
+    ("KY", "Kentucky"),
+    ("LA", "Louisiana"),
+    ("ME", "Maine"),
+    ("MD", "Maryland"),
+    ("MA", "Massachusetts"),
+    ("MI", "Michigan"),
+    ("MN", "Minnesota"),
+    ("MS", "Mississippi"),
+    ("MO", "Missouri"),
+    ("MT", "Montana"),
+    ("NE", "Nebraska"),
+    ("NV", "Nevada"),
+    ("NH", "New Hampshire"),
+    ("NJ", "New Jersey"),
+    ("NM", "New Mexico"),
+    ("NY", "New York"),
+    ("NC", "North Carolina"),
+    ("ND", "North Dakota"),
+    ("OH", "Ohio"),
+    ("OK", "Oklahoma"),
+    ("OR", "Oregon"),
+    ("PA", "Pennsylvania"),
+    ("RI", "Rhode Island"),
+    ("SC", "South Carolina"),
+    ("SD", "South Dakota"),
+    ("TN", "Tennessee"),
+    ("TX", "Texas"),
+    ("UT", "Utah"),
+    ("VT", "Vermont"),
+    ("VA", "Virginia"),
+    ("WA", "Washington"),
+    ("WV", "West Virginia"),
+    ("WI", "Wisconsin"),
+    ("WY", "Wyoming"),
+    # US Territories
+    ("AS", "American Samoa"),
+    ("GU", "Guam"),
+    ("MP", "Northern Mariana Islands"),
+    ("PR", "Puerto Rico"),
+    ("VI", "U.S. Virgin Islands"),
+]
+"""List of (code, name) tuples for US states and territories. Used in Work Order customer modal."""
+
+US_STATE_TERRITORY_CODE_SET = {code for code, _ in US_STATE_TERRITORY_CHOICES}
+"""Set of valid 2-letter USPS state/territory codes for fast validation."""
+
+# Optional: name → code mapping for defensive normalization
+US_STATE_TERRITORY_NAME_TO_CODE = {name.upper(): code for code, name in US_STATE_TERRITORY_CHOICES}
+"""Mapping of uppercase state/territory names to 2-letter codes (e.g., 'TENNESSEE' → 'TN')."""
+
+
+# =============================================================================
 # HELPER: Get guardrails dict for frontend
 # =============================================================================
 

@@ -26,6 +26,12 @@ def test_workorder_new_prefills_from_job(api_client, job):
     assert "2020 Great Dane" in html
     assert "Blue" in html
     assert "SN-123" in html
+    
+    # Assert: State field is now a select dropdown with state options
+    assert '<select' in html and 'data-wo-cust-state' in html
+    assert '<option value="TN">TN — Tennessee</option>' in html
+    assert '<option value="PR">PR — Puerto Rico</option>' in html
+    assert '<option value="">Select…</option>' in html
 
 
 @pytest.mark.django_db
