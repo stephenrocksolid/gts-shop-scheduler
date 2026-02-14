@@ -1,5 +1,6 @@
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+from typing import List, Optional
 
 from django.db.models import Sum
 
@@ -15,6 +16,8 @@ from accounting_integration.exceptions import InvoiceError
 
 logger = logging.getLogger('accounting_integration')
 
+MONEY_QUANT = Decimal("0.01")
+
 
 def build_billtotx(org: Org) -> str:
     lines = []
@@ -25,7 +28,8 @@ def build_billtotx(org: Org) -> str:
     try:
         addr = (
             OrgAddress.objects.using('accounting')
-            .filter(orgid=org, addresstype='BILLTO', active=True, is_default=True)
+            .filter(orgid=org, addresstype='BILLTO')
+            .order_by('-is_default', '-gen_addr_id')
             .first()
         )
     except Exception:
@@ -102,6 +106,42 @@ def create_work_order_line_items(trans: AcctTrans, work_order) -> list:
         entries.append(entry)
 
     return entries
+
+
+def apply_discount_to_entries(
+    trans: AcctTrans,
+    product_entries: List[AcctEntry],
+    discount_amount: Decimal,
+    order_seq: int,
+    discount_item: ItmItems,
+    discount_unit: ItmItemUnit = None,
+) -> Optional[AcctEntry]:
+    if not discount_amount or discount_amount <= 0:
+        return None
+
+    subtotal = sum(e.entrytotal for e in product_entries)
+    if subtotal <= 0:
+        return None
+
+    discount_amount = discount_amount.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+
+    neg_amount = -discount_amount
+    discount_entry = create_item_entry(
+        trans=trans,
+        item=discount_item,
+        item_unit=discount_unit,
+        quantity=Decimal("1.0"),
+        unit_price=neg_amount,
+        memo=GTS_DISCOUNT_MEMO,
+        order_seq=order_seq,
+        entrytotal=neg_amount,
+    )
+
+    logger.info(f"Created discount ITEMENTRY {discount_entry.entryid}: ${neg_amount}")
+    return discount_entry
+
+
+GTS_DISCOUNT_MEMO = "Discount"
 
 
 def create_gl_entries(invoice: AcctTrans, line_items: list) -> None:

@@ -1,19 +1,5 @@
 import pytest
 from decimal import Decimal
-from django.core.exceptions import ValidationError
-
-
-@pytest.mark.django_db
-def test_work_order_employee_name_is_unique():
-    from rental_scheduler.models import WorkOrderEmployee
-
-    emp1 = WorkOrderEmployee(name="Alice")
-    emp1.full_clean()
-    emp1.save()
-
-    emp2 = WorkOrderEmployee(name="Alice")
-    with pytest.raises(ValidationError):
-        emp2.full_clean()
 
 
 @pytest.mark.django_db

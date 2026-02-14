@@ -5,13 +5,20 @@ from django.db import transaction
 
 from accounting_integration.models import (
     AcctTrans, AcctEntry, AcctEntryApplicTaxes, AcctTransTaxRegions, AcctTerms, Org,
+    AcctSalesRep,
 )
 from accounting_integration.services.document_number import allocate_next_doc_number
 from accounting_integration.services.transaction_builder import create_acct_trans
 from accounting_integration.services.document_builders import (
     build_billtotx,
     create_work_order_line_items,
+    apply_discount_to_entries,
     create_gl_entries,
+)
+from accounting_integration.services.discount_item import (
+    ensure_gts_discount_item,
+    ensure_discount_item_unit,
+    ensure_discount_tax_links,
 )
 from accounting_integration.exceptions import InvoiceError
 from accounting_integration.tax.apply import apply_taxes_to_document
@@ -80,7 +87,14 @@ def create_invoice_from_work_order(work_order, strict: bool = False) -> Optional
                 from django.utils import timezone
                 wo_date = timezone.now().date()
 
-            invoice = create_acct_trans(
+            sales_rep = None
+            if getattr(work_order, 'job_by_rep_id', None):
+                try:
+                    sales_rep = AcctSalesRep.objects.using('accounting').get(pk=work_order.job_by_rep_id)
+                except AcctSalesRep.DoesNotExist:
+                    logger.warning(f"Sales rep {work_order.job_by_rep_id} not found, skipping")
+
+            invoice_kwargs = dict(
                 trans_type_code='INVOICE',
                 org=customer_org,
                 trans_date=wo_date,
@@ -96,11 +110,32 @@ def create_invoice_from_work_order(work_order, strict: bool = False) -> Optional
                 tendered_amount=Decimal('0.00'),
                 undep_funds_total=Decimal('0.00'),
             )
+            if sales_rep:
+                invoice_kwargs['sales_rep_id'] = sales_rep
+
+            invoice = create_acct_trans(**invoice_kwargs)
 
             logger.info(f"Created Invoice {invoice.transid} (#{reference_number})")
 
             line_items = create_work_order_line_items(invoice, work_order)
             order_seq = len(line_items)
+
+            wo_discount = work_order.discount_amount or Decimal('0.00')
+            if wo_discount > 0:
+                discount_item = ensure_gts_discount_item(using='accounting')
+                discount_unit = ensure_discount_item_unit(discount_item, using='accounting')
+                ensure_discount_tax_links(discount_item, customer_org, using='accounting')
+                discount_entry = apply_discount_to_entries(
+                    trans=invoice,
+                    product_entries=line_items,
+                    discount_amount=wo_discount,
+                    order_seq=order_seq,
+                    discount_item=discount_item,
+                    discount_unit=discount_unit,
+                )
+                if discount_entry:
+                    line_items.append(discount_entry)
+                    order_seq += 1
 
             tax_entries, _tax_plan = apply_taxes_to_document(
                 trans=invoice,
@@ -197,6 +232,23 @@ def update_invoice_from_work_order(work_order) -> Optional[AcctTrans]:
             line_items = create_work_order_line_items(invoice, work_order)
             order_seq = len(line_items)
 
+            wo_discount = work_order.discount_amount or Decimal('0.00')
+            if wo_discount > 0:
+                discount_item = ensure_gts_discount_item(using='accounting')
+                discount_unit = ensure_discount_item_unit(discount_item, using='accounting')
+                ensure_discount_tax_links(discount_item, customer_org, using='accounting')
+                discount_entry = apply_discount_to_entries(
+                    trans=invoice,
+                    product_entries=line_items,
+                    discount_amount=wo_discount,
+                    order_seq=order_seq,
+                    discount_item=discount_item,
+                    discount_unit=discount_unit,
+                )
+                if discount_entry:
+                    line_items.append(discount_entry)
+                    order_seq += 1
+
             tax_entries, _tax_plan = apply_taxes_to_document(
                 trans=invoice,
                 customer_org=customer_org,
@@ -217,13 +269,22 @@ def update_invoice_from_work_order(work_order) -> Optional[AcctTrans]:
                 from django.utils import timezone
                 wo_date = timezone.now().date()
 
+            sales_rep = None
+            if getattr(work_order, 'job_by_rep_id', None):
+                try:
+                    sales_rep = AcctSalesRep.objects.using('accounting').get(pk=work_order.job_by_rep_id)
+                except AcctSalesRep.DoesNotExist:
+                    pass
+
             invoice.transtotal = actual_total
             invoice.transdate = wo_date
             invoice.billtotx = build_billtotx(customer_org)
             invoice.sourcerefnumber = str(work_order.number)
             invoice.notes = _build_invoice_notes(work_order)
+            invoice.sales_rep_id = sales_rep
             invoice.save(using='accounting', update_fields=[
                 'transtotal', 'transdate', 'billtotx', 'sourcerefnumber', 'notes',
+                'sales_rep_id',
             ])
             logger.info(f"Updated Invoice total to ${actual_total}")
 

@@ -23,7 +23,7 @@
         Save
       </button>
       {% if work_order %}
-        <a href="{% url 'rental_scheduler:workorder_pdf' work_order.pk %}" class="wo-btn wo-btn-outline gap-1.5">
+        <a href="{% url 'rental_scheduler:workorder_pdf' work_order.pk %}" target="_blank" class="wo-btn wo-btn-outline gap-1.5">
           <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path d="M6 2a2 2 0 00-2 2v3h12V4a2 2 0 00-2-2H6z" />
             <path fill-rule="evenodd" d="M4 9a2 2 0 00-2 2v3a2 2 0 002 2h2v2h8v-2h2a2 2 0 002-2v-3a2 2 0 00-2-2H4zm3 7a1 1 0 011-1h4a1 1 0 110 2H8a1 1 0 01-1-1z" clip-rule="evenodd" />
@@ -230,14 +230,14 @@
                 <tr class="border-b border-gray-100 group" data-wo-line-row>
                   <input type="hidden" name="line_itemid" value="{{ line.itemid }}" data-wo-itemid />
                   <td class="py-2 pr-3">
-                    <input name="line_qty" value="{{ line.qty }}" class="w-20 rounded-md border-gray-300 text-center" data-wo-qty />
+                    <input name="line_qty" value="{{ line.qty }}" class="w-20 rounded-md border-blue-200 bg-blue-50/50 text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500" data-wo-qty />
                   </td>
                   <td class="py-2 pr-3">
                     <div class="relative">
                       <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5">
                         <svg class="h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
                       </div>
-                      <input name="line_itemnumber_snapshot" value="{{ line.itemnumber_snapshot }}" class="w-full rounded-md border-gray-300 pl-8" placeholder="Search parts..." data-wo-itemnumber />
+                      <input name="line_itemnumber_snapshot" value="{{ line.itemnumber_snapshot }}" class="w-full rounded-md border-blue-200 bg-blue-50/50 pl-8 focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="Search parts..." data-wo-itemnumber />
                       <div class="absolute z-10 mt-1 w-full min-w-[24rem] rounded-md border border-gray-200 bg-white shadow-lg hidden max-h-96 overflow-y-auto" data-wo-item-results></div>
                     </div>
                   </td>
@@ -245,9 +245,9 @@
                     <input name="line_description_snapshot" value="{{ line.description_snapshot }}" class="w-full rounded-md border-gray-300 bg-gray-50 text-gray-600" readonly data-wo-description />
                   </td>
                   <td class="py-2 pr-3">
-                    <input name="line_price" value="{{ line.price }}" class="w-28 rounded-md border-gray-300 text-right" data-wo-price />
+                    <input name="line_price" value="{{ line.price }}" class="w-28 rounded-md border-blue-200 bg-blue-50/50 text-right focus:border-blue-500 focus:ring-1 focus:ring-blue-500" data-wo-price />
                   </td>
-                  <td class="py-2 pr-3 text-right font-medium text-gray-900" data-wo-amount>{{ line.amount }}</td>
+                  <td class="py-2 pr-3 text-right font-medium text-gray-900" data-wo-amount>${{ line.amount|floatformat:2 }}</td>
                   <td class="py-2 pr-1 text-center">
                     <button type="button" class="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100" data-wo-remove-line aria-label="Remove line">
                       <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
@@ -259,14 +259,14 @@
               <tr class="border-b border-gray-100 group" data-wo-line-row>
                 <input type="hidden" name="line_itemid" value="" data-wo-itemid />
                 <td class="py-2 pr-3">
-                  <input name="line_qty" value="1.00" class="w-20 rounded-md border-gray-300 text-center" data-wo-qty />
+                  <input name="line_qty" value="1.00" class="w-20 rounded-md border-blue-200 bg-blue-50/50 text-center focus:border-blue-500 focus:ring-1 focus:ring-blue-500" data-wo-qty />
                 </td>
                 <td class="py-2 pr-3">
                   <div class="relative">
                     <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5">
                       <svg class="h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
                     </div>
-                    <input name="line_itemnumber_snapshot" value="" class="w-full rounded-md border-gray-300 pl-8" placeholder="Search parts..." data-wo-itemnumber />
+                    <input name="line_itemnumber_snapshot" value="" class="w-full rounded-md border-blue-200 bg-blue-50/50 pl-8 focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="Search parts..." data-wo-itemnumber />
                     <div class="absolute z-10 mt-1 w-full min-w-[24rem] rounded-md border border-gray-200 bg-white shadow-lg hidden max-h-96 overflow-y-auto" data-wo-item-results></div>
                   </div>
                 </td>
@@ -274,9 +274,9 @@
                   <input name="line_description_snapshot" value="" class="w-full rounded-md border-gray-300 bg-gray-50 text-gray-600" readonly placeholder="Description" data-wo-description />
                 </td>
                 <td class="py-2 pr-3">
-                  <input name="line_price" value="0.00" class="w-28 rounded-md border-gray-300 text-right" data-wo-price />
+                  <input name="line_price" value="0.00" class="w-28 rounded-md border-blue-200 bg-blue-50/50 text-right focus:border-blue-500 focus:ring-1 focus:ring-blue-500" data-wo-price />
                 </td>
-                <td class="py-2 pr-3 text-right font-medium text-gray-900" data-wo-amount>0.00</td>
+                <td class="py-2 pr-3 text-right font-medium text-gray-900" data-wo-amount>$0.00</td>
                 <td class="py-2 pr-1 text-center">
                   <button type="button" class="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100" data-wo-remove-line aria-label="Remove line">
                     <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
@@ -294,10 +294,10 @@
           Add line
         </button>
         <div class="text-sm text-gray-700 space-y-1 text-right" data-wo-totals-section style="transition: opacity 0.15s ease">
-          <div>Subtotal: <span class="font-semibold" data-wo-subtotal>0.00</span></div>
-          <div>Discount: <span class="font-semibold" data-wo-discount-amount>0.00</span></div>
-          <div>Tax: <span class="font-semibold" data-wo-tax-amount>0.00</span> <span class="text-xs text-amber-600 font-medium hidden" data-wo-tax-exempt>Tax Exempt</span></div>
-          <div>Total: <span class="font-semibold" data-wo-total>0.00</span></div>
+          <div>Subtotal: <span class="font-semibold" data-wo-subtotal>$0.00</span></div>
+          <div>Discount: <span class="font-semibold" data-wo-discount-amount>$0.00</span></div>
+          <div>Tax: <span class="font-semibold" data-wo-tax-amount>$0.00</span> <span class="text-xs text-amber-600 font-medium hidden" data-wo-tax-exempt>Tax Exempt</span></div>
+          <div>Total: <span class="font-semibold" data-wo-total>$0.00</span></div>
         </div>
       </div>
     </div>
@@ -459,35 +459,6 @@
     </form>
   </div>
 </div>
-
-<!-- Employees modal -->
-<div class="wo-customer-modal hidden" data-wo-employees-modal>
-  <div class="wo-customer-modal__overlay" data-wo-employees-modal-backdrop></div>
-  <div
-    class="wo-customer-modal__panel"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="wo-employees-modal-title"
-    aria-describedby="wo-employees-modal-subtitle"
-    tabindex="-1"
-    data-wo-employees-modal-panel
-  >
-    <div class="wo-customer-modal__header">
-      <div>
-        <h2 class="wo-customer-modal__title" id="wo-employees-modal-title">Manage Employees</h2>
-        <p class="wo-customer-modal__subtitle" id="wo-employees-modal-subtitle">Manage the employee list for the "Job By" field.</p>
-      </div>
-      <button type="button" class="wo-customer-modal__close" data-wo-employees-modal-close aria-label="Close">
-        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-        </svg>
-      </button>
-    </div>
-    <div class="wo-customer-modal__body" id="wo-employees-modal-body">
-      <!-- Content loaded via HTMX -->
-    </div>
-    </div>
-  </div>
 
 <!-- Unsaved changes modal -->
 <div class="wo-customer-modal hidden" data-wo-unsaved-modal>

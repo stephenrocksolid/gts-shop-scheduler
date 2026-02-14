@@ -904,27 +904,6 @@ Quote Amount
       {% endif %}
     {% endif %}
     <button type="button"
-            class="print-btn
-                   {% if not form.instance.pk %}
-                     btn-disabled
-                   {% endif %}"
-            data-job-id="{{ form.instance.pk|default:'0' }}"
-            data-print-type="invoice"
-            style="padding: 4px 12px;
-                   border: 1px solid #d1d5db;
-                   border-radius: 6px;
-                   background: #ffffff;
-                   color: #374151;
-                   font-weight: 500;
-                   font-size: 12px;
-                   cursor: pointer;
-                   transition: all 0.2s"
-            {% if not form.instance.pk %}
-              disabled
-            {% endif %}>
-      Print Invoice
-    </button>
-    <button type="button"
             onclick="JobPanel.close()"
             style="padding: 4px 12px;
                    border: 1px solid #d1d5db;

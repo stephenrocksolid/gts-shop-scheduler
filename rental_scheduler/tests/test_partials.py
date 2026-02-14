@@ -96,8 +96,8 @@ class TestJobCreatePartial:
         assert 'data-wo-action="create"' not in content
         assert 'data-wo-action="save-create"' not in content
 
-    def test_job_print_buttons_removed_but_invoice_print_remains(self, api_client, job):
-        """Legacy job-based WO print buttons should be removed."""
+    def test_all_legacy_print_buttons_removed(self, api_client, job):
+        """All legacy print buttons (WO and invoice) should be removed."""
         url = reverse('rental_scheduler:job_create_partial')
         response = api_client.get(url, {'edit': job.id})
 
@@ -106,7 +106,7 @@ class TestJobCreatePartial:
 
         assert 'data-print-type="wo"' not in content
         assert 'data-print-type="wo-customer"' not in content
-        assert 'data-print-type="invoice"' in content
+        assert 'data-print-type="invoice"' not in content
     
     def test_edit_job_with_call_reminder(self, api_client, calendar):
         """GET /jobs/new/partial/?edit=<id> for job with call reminder should render."""

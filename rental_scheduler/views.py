@@ -25,13 +25,11 @@ from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 from django.views.generic import (
     CreateView,
     DeleteView,
-    DetailView,
     ListView,
     TemplateView,
     UpdateView,
@@ -48,9 +46,7 @@ from rental_scheduler.utils.phone import format_phone
 from .forms import CalendarImportForm, JobForm
 from .models import (
     Calendar,
-    Invoice,
     Job,
-    WorkOrderEmployee,
     WorkOrderLineV2,
     WorkOrderNumberSequence,
     WorkOrderV2,
@@ -444,7 +440,13 @@ def _render_workorder_v2_form(
 ):
     from rental_scheduler.constants import US_STATE_TERRITORY_CHOICES
     
-    employees = WorkOrderEmployee.objects.filter(is_active=True).order_by("name")
+    sales_reps = []
+    if _accounting_is_configured():
+        try:
+            from accounting_integration.models import AcctSalesRep
+            sales_reps = list(AcctSalesRep.objects.using("accounting").filter(active=True).order_by("rep_name"))
+        except Exception:
+            pass
     back_ctx = _get_workorder_back_context(request, job_id=job.pk)
     # Title format: "Work Order: Customer (Phone)" to match header
     title = f"Work Order: {job.display_name}"
@@ -509,7 +511,7 @@ def _render_workorder_v2_form(
             "title": title,
             "job": job,
             "work_order": work_order,
-            "employees": employees,
+            "sales_reps": sales_reps,
             "state_choices": US_STATE_TERRITORY_CHOICES,
             "initial": initial_data,
             "initial_customer": initial_customer,
@@ -519,108 +521,6 @@ def _render_workorder_v2_form(
             "next_value": back_ctx["next_value"],
             "next_wo_number": next_wo_number,
         },
-    )
-
-
-@require_http_methods(["GET", "POST"])
-@csrf_protect
-def workorder_employee_settings(request):
-    is_htmx = request.headers.get('HX-Request') == 'true'
-    
-    if request.method == "POST":
-        action = str(request.POST.get("action", "")).strip()
-
-        if action == "add":
-            name = str(request.POST.get("name", "")).strip()
-            if not name:
-                messages.error(request, "Employee name is required.")
-            elif WorkOrderEmployee.objects.filter(name__iexact=name).exists():
-                messages.error(request, "Employee already exists.")
-            else:
-                WorkOrderEmployee.objects.create(name=name, is_active=True)
-                messages.success(request, f"Added employee: {name}.")
-
-        elif action == "set_active":
-            employee_id_raw = str(request.POST.get("employee_id", "")).strip()
-            is_active_raw = str(request.POST.get("is_active", "")).strip().lower()
-            if not employee_id_raw:
-                messages.error(request, "Missing employee id.")
-            else:
-                try:
-                    employee_id = int(employee_id_raw)
-                    employee = WorkOrderEmployee.objects.get(pk=employee_id)
-                except (ValueError, WorkOrderEmployee.DoesNotExist):
-                    messages.error(request, "Employee not found.")
-                else:
-                    is_active = is_active_raw in {"1", "true", "yes", "on"}
-                    if employee.is_active != is_active:
-                        employee.is_active = is_active
-                        employee.save(update_fields=["is_active", "updated_at"])
-                    state_label = "Active" if is_active else "Inactive"
-                    messages.success(request, f"Updated {employee.name} → {state_label}.")
-
-        elif action == "rename":
-            employee_id_raw = str(request.POST.get("employee_id", "")).strip()
-            name = str(request.POST.get("name", "")).strip()
-            if not employee_id_raw:
-                messages.error(request, "Missing employee id.")
-            elif not name:
-                messages.error(request, "Employee name is required.")
-            else:
-                try:
-                    employee_id = int(employee_id_raw)
-                    employee = WorkOrderEmployee.objects.get(pk=employee_id)
-                except (ValueError, WorkOrderEmployee.DoesNotExist):
-                    messages.error(request, "Employee not found.")
-                else:
-                    # Check for case-insensitive duplicate, excluding current employee
-                    if WorkOrderEmployee.objects.filter(name__iexact=name).exclude(pk=employee_id).exists():
-                        messages.error(request, "Employee already exists.")
-                    elif employee.name == name:
-                        messages.info(request, "No changes made.")
-                    else:
-                        old_name = employee.name
-                        employee.name = name
-                        employee.save(update_fields=["name", "updated_at"])
-                        messages.success(request, f"Renamed {old_name} → {name}.")
-
-        else:
-            messages.error(request, "Unknown action.")
-
-        # HTMX requests: return modal body partial (no redirect)
-        # Non-HTMX: redirect as before
-        if not is_htmx:
-            return redirect("rental_scheduler:workorder_employee_settings")
-        # Fall through to render the modal body partial below
-
-    # Prepare context
-    employees = WorkOrderEmployee.objects.all().order_by("name")
-    active_employees = WorkOrderEmployee.objects.filter(is_active=True).order_by("name")
-    active_count = WorkOrderEmployee.objects.filter(is_active=True).count()
-    inactive_count = WorkOrderEmployee.objects.filter(is_active=False).count()
-    
-    context = {
-        "title": "Work Order Employees",
-        "employees": employees,
-        "active_employees": active_employees,
-        "active_count": active_count,
-        "inactive_count": inactive_count,
-        "total_count": active_count + inactive_count,
-    }
-    
-    # HTMX requests: return modal body partial
-    if is_htmx:
-        return render(
-            request,
-            "rental_scheduler/workorders_v2/partials/workorder_employee_settings_modal_body.html",
-            context,
-        )
-    
-    # Non-HTMX: return full page
-    return render(
-        request,
-        "rental_scheduler/workorders_v2/workorder_employee_settings.html",
-        context,
     )
 
 
@@ -653,7 +553,7 @@ def workorder_new(request):
             "discount_type": "amount",
             "discount_value": "0.00",
             "customer_org_id": "",
-            "job_by_id": "",
+            "job_by_rep_id": "",
             "date": job.start_dt.date().isoformat() if job.start_dt else "",
         }
         return _render_workorder_v2_form(request, job=job, work_order=None, initial=initial)
@@ -676,7 +576,7 @@ def workorder_new(request):
     discount_type = request.POST.get("discount_type", "amount")
     discount_value_raw = request.POST.get("discount_value", "0.00")
     customer_org_id_raw = str(request.POST.get("customer_org_id", "")).strip()
-    job_by_id_raw = str(request.POST.get("job_by_id", "")).strip()
+    job_by_rep_id_raw = str(request.POST.get("job_by_rep_id", "")).strip()
     number_raw = str(request.POST.get("number", "")).strip()
     date_raw = request.POST.get("date", "").strip()
 
@@ -708,12 +608,16 @@ def workorder_new(request):
         except (TypeError, ValueError):
             errors["customer_org_id"] = "Customer ID must be an integer."
 
-    job_by = None
-    if job_by_id_raw:
+    job_by_rep_id = ""
+    job_by_name = ""
+    if job_by_rep_id_raw and _accounting_is_configured():
         try:
-            job_by = WorkOrderEmployee.objects.get(pk=int(job_by_id_raw))
-        except (WorkOrderEmployee.DoesNotExist, TypeError, ValueError):
-            errors["job_by_id"] = "Invalid employee."
+            from accounting_integration.models import AcctSalesRep
+            rep = AcctSalesRep.objects.using("accounting").get(pk=job_by_rep_id_raw)
+            job_by_rep_id = rep.id
+            job_by_name = rep.rep_name or ""
+        except AcctSalesRep.DoesNotExist:
+            errors["job_by_rep_id"] = "Invalid sales rep."
 
     try:
         discount_value = _parse_decimal(discount_value_raw, field_name="discount")
@@ -739,7 +643,8 @@ def workorder_new(request):
             create_kwargs = dict(
                 job=job,
                 customer_org_id=customer_org_id,
-                job_by=job_by,
+                job_by_rep_id=job_by_rep_id,
+                job_by_name=job_by_name,
                 date=wo_date,
                 notes=notes,
                 trailer_make_model=trailer_make_model,
@@ -819,7 +724,7 @@ def workorder_edit(request, pk: int):
             "discount_type": wo.discount_type,
             "discount_value": str(wo.discount_value),
             "customer_org_id": wo.customer_org_id or "",
-            "job_by_id": wo.job_by_id or "",
+            "job_by_rep_id": wo.job_by_rep_id or "",
             "date": wo.date.isoformat() if wo.date else "",
         }
         return _render_workorder_v2_form(request, job=job, work_order=wo, initial=initial)
@@ -841,7 +746,7 @@ def workorder_edit(request, pk: int):
     discount_type = request.POST.get("discount_type", "amount")
     discount_value_raw = request.POST.get("discount_value", "0.00")
     customer_org_id_raw = str(request.POST.get("customer_org_id", "")).strip()
-    job_by_id_raw = str(request.POST.get("job_by_id", "")).strip()
+    job_by_rep_id_raw = str(request.POST.get("job_by_rep_id", "")).strip()
     number_raw = str(request.POST.get("number", "")).strip()
     date_raw = request.POST.get("date", "").strip()
 
@@ -873,12 +778,16 @@ def workorder_edit(request, pk: int):
         except (TypeError, ValueError):
             errors["customer_org_id"] = "Customer ID must be an integer."
 
-    job_by = None
-    if job_by_id_raw:
+    job_by_rep_id = ""
+    job_by_name = ""
+    if job_by_rep_id_raw and _accounting_is_configured():
         try:
-            job_by = WorkOrderEmployee.objects.get(pk=int(job_by_id_raw))
-        except (WorkOrderEmployee.DoesNotExist, TypeError, ValueError):
-            errors["job_by_id"] = "Invalid employee."
+            from accounting_integration.models import AcctSalesRep
+            rep = AcctSalesRep.objects.using("accounting").get(pk=job_by_rep_id_raw)
+            job_by_rep_id = rep.id
+            job_by_name = rep.rep_name or ""
+        except AcctSalesRep.DoesNotExist:
+            errors["job_by_rep_id"] = "Invalid sales rep."
 
     try:
         discount_value = _parse_decimal(discount_value_raw, field_name="discount")
@@ -905,7 +814,8 @@ def workorder_edit(request, pk: int):
 
             wo.number = wo_number
             wo.customer_org_id = customer_org_id
-            wo.job_by = job_by
+            wo.job_by_rep_id = job_by_rep_id
+            wo.job_by_name = job_by_name
             wo.date = wo_date
             wo.notes = notes
             wo.trailer_make_model = trailer_make_model
@@ -1033,6 +943,33 @@ def accounting_items_search(request):
         )
 
     return JsonResponse({"results": results})
+
+
+@require_http_methods(["GET"])
+def api_sales_reps(request):
+    if not _accounting_is_configured():
+        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
+
+    from accounting_integration.models import AcctSalesRep
+
+    reps = AcctSalesRep.objects.using("accounting").filter(active=True).order_by("rep_name")
+    results = [
+        {"id": rep.id, "rep_name": rep.rep_name or "", "rep_initials": rep.rep_initials or ""}
+        for rep in reps
+    ]
+
+    customer_default_rep_id = ""
+    customer_org_id = (request.GET.get("customer_org_id") or "").strip()
+    if customer_org_id:
+        try:
+            from accounting_integration.models import Org
+            org = Org.objects.using("accounting").filter(org_id=int(customer_org_id)).first()
+            if org and org.def_sales_rep_id_id:
+                customer_default_rep_id = org.def_sales_rep_id_id
+        except (ValueError, TypeError):
+            pass
+
+    return JsonResponse({"results": results, "customer_default_rep_id": customer_default_rep_id})
 
 
 @require_http_methods(["GET"])
@@ -1346,7 +1283,7 @@ def accounting_customers_update(request, orgid: int):
 
 def _workorder_pdf_context(request, pk: int):
     wo = get_object_or_404(
-        WorkOrderV2.objects.select_related("job", "job_by").prefetch_related("lines"),
+        WorkOrderV2.objects.select_related("job").prefetch_related("lines"),
         pk=pk,
     )
 
@@ -2223,20 +2160,6 @@ class JobDeleteView(DeleteView):
         job = self.get_object()
         messages.success(request, f'Job for {job.get_display_name()} deleted successfully.')
         return super().delete(request, *args, **kwargs)
-
-
-# Print Views
-@method_decorator(xframe_options_exempt, name='dispatch')
-class JobPrintInvoiceView(DetailView):
-    """Print invoice view"""
-    model = Job
-    template_name = 'rental_scheduler/jobs/job_print_invoice.html'
-    context_object_name = 'job'
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Invoice'
-        return context
 
 
 # Calendar API Views
@@ -3506,38 +3429,6 @@ def delete_job_api(request, job_id):
     except Exception as e:
         logger.error(f"Error deleting job: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
-
-
-# Invoice Views  
-class InvoiceListView(ListView):
-    """List all invoices"""
-    model = Invoice
-    template_name = 'rental_scheduler/invoices/invoice_list.html'
-    context_object_name = 'invoices'
-    paginate_by = 25
-    
-    def get_queryset(self):
-        return Invoice.objects.select_related('job__calendar', 'work_order').filter(is_deleted=False)
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = 'Invoices'
-        return context
-
-
-class InvoiceDetailView(DetailView):
-    """View invoice details"""
-    model = Invoice
-    template_name = 'rental_scheduler/invoices/invoice_detail.html'
-    context_object_name = 'invoice'
-    
-    def get_queryset(self):
-        return Invoice.objects.select_related('job__calendar', 'work_order').prefetch_related('lines')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['title'] = f'Invoice: {self.object.invoice_number}'
-        return context
 
 
 # Job Modal Views

@@ -20,7 +20,6 @@
         if (!GTS.initOnce) return;
         GTS.initOnce('work_order_page_v2', function() {
             initCustomerUI();
-            initEmployeesModalUI();
             initLineItemsUI();
             initTotalsUI();
             initSaveGuard();
@@ -63,7 +62,7 @@
 
     function fmtMoney(n) {
         if (n == null || isNaN(n)) n = 0;
-        return (Math.round(n * 100) / 100).toFixed(2);
+        return '$' + (Math.round(n * 100) / 100).toFixed(2);
     }
 
     function safeFetchJson(url, options) {
@@ -502,9 +501,22 @@
                 } else {
                     fetchTaxRateForCustomer(selected.org_id);
                 }
+                fetchDefaultSalesRep(selected.org_id);
             } else {
                 clearTaxRate();
             }
+        }
+
+        function fetchDefaultSalesRep(orgId) {
+            var jobBySelect = document.getElementById('wo-job-by');
+            if (!jobBySelect || !GTS.urls.salesReps) return;
+            if (jobBySelect.value) return;
+            var url = GTS.urls.salesReps + '?customer_org_id=' + encodeURIComponent(orgId);
+            safeFetchJson(url).then(function(data) {
+                if (data && data.customer_default_rep_id && !jobBySelect.value) {
+                    jobBySelect.value = data.customer_default_rep_id;
+                }
+            });
         }
 
         function clearSelected() {
@@ -863,147 +875,6 @@
     }
 
     // =========================================================================
-    // Employees Modal UI
-    // =========================================================================
-
-    function initEmployeesModalUI() {
-        var lastActiveElement = null;
-        var previousBodyOverflow = '';
-        var modalKeydownHandler = null;
-
-        function getEls() {
-            return {
-                modal: document.querySelector('[data-wo-employees-modal]'),
-                modalBackdrop: document.querySelector('[data-wo-employees-modal-backdrop]'),
-                modalClose: document.querySelector('[data-wo-employees-modal-close]'),
-                modalPanel: document.querySelector('[data-wo-employees-modal-panel]'),
-                modalBody: document.getElementById('wo-employees-modal-body'),
-            };
-        }
-
-        function getFocusableElements(container) {
-            if (!container) return [];
-            var selectors = [
-                'a[href]',
-                'button:not([disabled])',
-                'textarea:not([disabled])',
-                'input:not([disabled])',
-                'select:not([disabled])',
-                '[tabindex]:not([tabindex="-1"])'
-            ];
-            return Array.prototype.slice.call(container.querySelectorAll(selectors.join(','))).filter(function(el) {
-                return !el.hasAttribute('aria-hidden');
-            });
-        }
-
-        function lockBodyScroll() {
-            previousBodyOverflow = document.body.style.overflow || '';
-            document.body.style.overflow = 'hidden';
-        }
-
-        function unlockBodyScroll() {
-            document.body.style.overflow = previousBodyOverflow;
-            previousBodyOverflow = '';
-        }
-
-        function attachModalKeydown() {
-            var els = getEls();
-            if (!els.modal || !els.modalPanel || modalKeydownHandler) return;
-
-            modalKeydownHandler = function(e) {
-                if (e.key === 'Escape') {
-                    closeModal();
-                    return;
-                }
-
-                if (e.key !== 'Tab') return;
-                var focusable = getFocusableElements(els.modalPanel);
-                if (!focusable.length) return;
-
-                var first = focusable[0];
-                var last = focusable[focusable.length - 1];
-
-                if (e.shiftKey && document.activeElement === first) {
-                    e.preventDefault();
-                    last.focus();
-                } else if (!e.shiftKey && document.activeElement === last) {
-                    e.preventDefault();
-                    first.focus();
-                }
-            };
-            document.addEventListener('keydown', modalKeydownHandler);
-        }
-
-        function detachModalKeydown() {
-            if (modalKeydownHandler) {
-                document.removeEventListener('keydown', modalKeydownHandler);
-                modalKeydownHandler = null;
-            }
-        }
-
-        function openModal(triggerEl) {
-            var els = getEls();
-            if (!els.modal) return;
-            lastActiveElement = triggerEl || document.activeElement;
-
-            show(els.modal);
-            lockBodyScroll();
-            attachModalKeydown();
-
-            // Focus the panel initially (will be moved to first input after HTMX loads content)
-            if (els.modalPanel) {
-                els.modalPanel.focus();
-            }
-        }
-
-        function closeModal() {
-            var els = getEls();
-            if (!els.modal || els.modal.classList.contains('hidden')) return;
-            hide(els.modal);
-            detachModalKeydown();
-            unlockBodyScroll();
-            if (lastActiveElement && typeof lastActiveElement.focus === 'function') {
-                lastActiveElement.focus();
-            }
-        }
-
-        // Open modal when clicking manage employees buttons
-        document.body.addEventListener('click', function(e) {
-            var openBtn = closest(e.target, '[data-wo-employees-open]');
-            if (openBtn) {
-                openModal(openBtn);
-                return;
-            }
-
-            var closeBtn = closest(e.target, '[data-wo-employees-modal-close]');
-            if (closeBtn) {
-                closeModal();
-                return;
-            }
-
-            var backdrop = closest(e.target, '[data-wo-employees-modal-backdrop]');
-            if (backdrop) {
-                closeModal();
-                return;
-            }
-        });
-
-        // After HTMX swaps content into modal body, focus the employee name input
-        document.body.addEventListener('htmx:afterSwap', function(e) {
-            var els = getEls();
-            if (e.target === els.modalBody) {
-                // Focus the employee name input for quick data entry
-                var nameInput = document.querySelector('[data-wo-emp-name-input]');
-                if (nameInput) {
-                    setTimeout(function() {
-                        nameInput.focus();
-                    }, 50);
-                }
-            }
-        });
-    }
-
-    // =========================================================================
     // Line items UI (items search/select, add/remove)
     // =========================================================================
 
@@ -1052,7 +923,7 @@
                     '<div class="font-medium text-gray-900 text-sm">' + (item.itemnumber || '') + '</div>' +
                     '<div class="text-xs text-gray-500 truncate max-w-xs">' + (item.salesdesc || '') + '</div>' +
                     '</div>';
-                var right = item.price ? '<div class="text-sm font-medium text-gray-700 ml-4 whitespace-nowrap">$' + fmtMoney(parseMoney(item.price)) + '</div>' : '';
+                var right = item.price ? '<div class="text-sm font-medium text-gray-700 ml-4 whitespace-nowrap">' + fmtMoney(parseMoney(item.price)) + '</div>' : '';
                 btn.innerHTML = left + right;
                 container.appendChild(btn);
             });
@@ -1140,7 +1011,7 @@
 
         document.body.addEventListener('focusin', function(e) {
             var input = e.target;
-            if (input && input.matches && input.matches('[data-wo-qty], [data-wo-price]')) {
+            if (input && input.matches && input.matches('[data-wo-qty], [data-wo-price], [name="discount_value"]')) {
                 setTimeout(function() { input.select(); }, 0);
             }
         });
@@ -1250,10 +1121,10 @@
             var discountEl = document.querySelector('[data-wo-discount-amount]');
             var taxEl = document.querySelector('[data-wo-tax-amount]');
             var totalEl = document.querySelector('[data-wo-total]');
-            if (subtotalEl) subtotalEl.textContent = parseFloat(data.subtotal).toFixed(2);
-            if (discountEl) discountEl.textContent = parseFloat(data.discount_amount).toFixed(2);
-            if (taxEl) taxEl.textContent = parseFloat(data.tax_amount).toFixed(2);
-            if (totalEl) totalEl.textContent = parseFloat(data.total).toFixed(2);
+            if (subtotalEl) subtotalEl.textContent = fmtMoney(parseFloat(data.subtotal));
+            if (discountEl) discountEl.textContent = fmtMoney(parseFloat(data.discount_amount));
+            if (taxEl) taxEl.textContent = fmtMoney(parseFloat(data.tax_amount));
+            if (totalEl) totalEl.textContent = fmtMoney(parseFloat(data.total));
         }
 
         function _fetchTotals() {

@@ -6,10 +6,7 @@ from .models import (
     WorkOrderLine,
     WorkOrderV2,
     WorkOrderLineV2,
-    Invoice,
-    InvoiceLine,
     StatusChange,
-    WorkOrderEmployee,
     WorkOrderNumberSequence,
 )
 
@@ -192,13 +189,13 @@ class WorkOrderLineAdmin(admin.ModelAdmin):
 class WorkOrderV2Admin(admin.ModelAdmin):
     """Admin configuration for WorkOrderV2."""
 
-    list_display = ("number", "job", "customer_org_id", "job_by", "subtotal", "total", "created_at")
+    list_display = ("number", "job", "customer_org_id", "job_by_name", "subtotal", "total", "created_at")
     list_filter = ("discount_type", "created_at")
     search_fields = ("number", "job__business_name", "notes")
     ordering = ("-created_at",)
 
     fieldsets = (
-        ("Linkage", {"fields": ("job", "number", "customer_org_id", "job_by")}),
+        ("Linkage", {"fields": ("job", "number", "customer_org_id", "job_by_rep_id", "job_by_name")}),
         (
             "Job snapshot",
             {"fields": ("notes", "trailer_make_model", "trailer_color", "trailer_serial")},
@@ -223,17 +220,6 @@ class WorkOrderLineV2Admin(admin.ModelAdmin):
     readonly_fields = ("amount", "created_at", "updated_at")
 
 
-@admin.register(WorkOrderEmployee)
-class WorkOrderEmployeeAdmin(admin.ModelAdmin):
-    """Admin configuration for WorkOrderEmployee."""
-
-    list_display = ("name", "is_active", "created_at")
-    list_filter = ("is_active", "created_at")
-    search_fields = ("name",)
-    ordering = ("name",)
-    readonly_fields = ("created_at", "updated_at")
-
-
 @admin.register(WorkOrderNumberSequence)
 class WorkOrderNumberSequenceAdmin(admin.ModelAdmin):
     """Admin configuration for WorkOrderNumberSequence (singleton)."""
@@ -252,100 +238,6 @@ class WorkOrderNumberSequenceAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         # Keep singleton row stable; allow editing instead
         return False
-
-
-@admin.register(Invoice)
-class InvoiceAdmin(admin.ModelAdmin):
-    """Admin configuration for Invoice model"""
-    list_display = ['invoice_number', 'job_info', 'invoice_date', 'bill_to_display_name', 'total_amount', 'line_count', 'created_at']
-    list_filter = ['invoice_date', 'created_at', 'is_deleted']
-    search_fields = [
-        'invoice_number', 'job__business_name', 'job__contact_name',
-        'bill_to_name', 'notes_public', 'notes_private'
-    ]
-    ordering = ['-invoice_date', '-created_at']
-    date_hierarchy = 'invoice_date'
-    
-    fieldsets = (
-        ('Invoice Information', {
-            'fields': ('invoice_number', 'invoice_date', 'job', 'work_order')
-        }),
-        ('Billing Information', {
-            'fields': (
-                'bill_to_name', 'bill_to_address_line1', 'bill_to_address_line2',
-                'bill_to_city', 'bill_to_state', 'bill_to_postal_code', 'bill_to_phone'
-            ),
-            'description': 'Leave blank to use job customer information'
-        }),
-        ('Notes', {
-            'fields': ('notes_public', 'notes_private')
-        }),
-        ('Totals', {
-            'fields': ('subtotal', 'tax_rate', 'tax_amount', 'total_amount'),
-            'classes': ('collapse',)
-        }),
-        ('System', {
-            'fields': ('is_deleted', 'created_by', 'updated_by', 'created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    readonly_fields = ['created_at', 'updated_at', 'subtotal', 'tax_amount', 'total_amount']
-    
-    def job_info(self, obj):
-        """Display job information in the admin list"""
-        return f"{obj.job.display_name}"
-    job_info.short_description = 'Job'
-    
-    def bill_to_display_name(self, obj):
-        """Display billing name in the admin list"""
-        return obj.bill_to_display_name
-    bill_to_display_name.short_description = 'Bill To'
-    
-    def total_amount(self, obj):
-        """Display total amount in the admin list"""
-        return f"${obj.total_amount:.2f}"
-    total_amount.short_description = 'Total'
-    
-    def line_count(self, obj):
-        """Display line count in the admin list"""
-        return obj.line_count
-    line_count.short_description = 'Lines'
-    
-    def get_queryset(self, request):
-        """Return invoices with related data"""
-        return super().get_queryset(request).select_related('job__calendar', 'work_order')
-
-
-@admin.register(InvoiceLine)
-class InvoiceLineAdmin(admin.ModelAdmin):
-    """Admin configuration for InvoiceLine model"""
-    list_display = ['invoice', 'item_code', 'description', 'qty', 'price', 'total', 'created_at']
-    list_filter = ['created_at', 'invoice__invoice_date']
-    search_fields = [
-        'item_code', 'description', 'invoice__invoice_number',
-        'invoice__job__business_name', 'invoice__job__contact_name'
-    ]
-    ordering = ['-created_at']
-    
-    fieldsets = (
-        ('Line Information', {
-            'fields': ('invoice', 'item_code', 'description')
-        }),
-        ('Pricing', {
-            'fields': ('qty', 'price', 'total')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    readonly_fields = ['created_at', 'updated_at', 'total']
-    
-    def get_queryset(self, request):
-        """Return invoice lines with related data"""
-        return super().get_queryset(request).select_related('invoice__job__calendar')
 
 
 @admin.register(StatusChange)

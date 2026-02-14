@@ -109,7 +109,7 @@
       <div class="wo-meta">
         <div class="wo-title">Work Order</div>
         <div class="wo-number"><span>#</span> {{ work_order.number }}</div>
-        <div class="wo-jobby">Job By: {% if work_order.job_by %}{{ work_order.job_by.name }}{% else %}&mdash;{% endif %}</div>
+        <div class="wo-jobby">Job By: {% if work_order.job_by_name %}{{ work_order.job_by_name }}{% else %}&mdash;{% endif %}</div>
       </div>
     </div>
 
@@ -153,6 +153,7 @@
         <thead>
           <tr>
             <th style="width: 8%;">Qty</th>
+            <th style="width: 12%;">Part No.</th>
             <th>Item Description</th>
             <th style="width: 15%;" class="right">Price</th>
             <th style="width: 15%;" class="right">Amount</th>
@@ -162,9 +163,10 @@
           {% for line in lines %}
             <tr>
               <td>{{ line.qty }}</td>
-              <td>{% if line.itemnumber_snapshot %}[{{ line.itemnumber_snapshot }}] {% endif %}{{ line.description_snapshot }}</td>
-              <td class="right">{{ line.price }}</td>
-              <td class="right">{{ line.amount }}</td>
+              <td>{{ line.itemnumber_snapshot }}</td>
+              <td>{{ line.description_snapshot }}</td>
+              <td class="right">${{ line.price|floatformat:2 }}</td>
+              <td class="right">${{ line.amount|floatformat:2 }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -173,19 +175,19 @@
       <table class="totals">
         <tr>
           <td class="right label">Subtotal:</td>
-          <td class="right" style="width: 120px;">{{ work_order.subtotal }}</td>
+          <td class="right" style="width: 120px;">${{ work_order.subtotal|floatformat:2 }}</td>
         </tr>
         <tr>
           <td class="right label">Discount:</td>
-          <td class="right">{{ work_order.discount_amount }}</td>
+          <td class="right">${{ work_order.discount_amount|floatformat:2 }}</td>
         </tr>
         <tr>
           <td class="right label">Tax ({{ work_order.tax_rate_snapshot }}%):</td>
-          <td class="right">{{ work_order.tax_amount }}</td>
+          <td class="right">${{ work_order.tax_amount|floatformat:2 }}</td>
         </tr>
         <tr>
           <td class="right label">Total:</td>
-          <td class="right"><strong>{{ work_order.total }}</strong></td>
+          <td class="right"><strong>${{ work_order.total|floatformat:2 }}</strong></td>
         </tr>
       </table>
     </div>

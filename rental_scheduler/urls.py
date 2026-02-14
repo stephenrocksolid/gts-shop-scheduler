@@ -18,14 +18,10 @@ from .views import (
     JobListView,
     JobListTablePartialView,
     JobDeleteView,
-    JobPrintInvoiceView,
-    workorder_employee_settings,
     workorder_new,
     workorder_edit,
     workorder_pdf,
     workorder_pdf_preview,
-    InvoiceListView,
-    InvoiceDetailView,
     job_create_partial,
     job_detail_partial,
     job_create_submit,
@@ -38,6 +34,7 @@ from .views import (
     accounting_items_search,
     work_order_customer_tax_rate,
     work_order_compute_totals,
+    api_sales_reps,
     calendar_import,
     import_history,
     revert_import,
@@ -94,8 +91,6 @@ urlpatterns = [
     path('jobs/export/', export_jobs, name='job_export'),
     path('jobs/export/<int:calendar_id>/', export_jobs, name='job_export_calendar'),
     path('jobs/<int:pk>/delete/', JobDeleteView.as_view(), name='job_delete'),
-    path('jobs/<int:pk>/print/invoice/', JobPrintInvoiceView.as_view(), name='job_print_invoice'),
-    
     # Job Modal URLs
     
     # Job Partial URLs
@@ -111,16 +106,11 @@ urlpatterns = [
     path('jobs/<int:job_id>/call-reminder/update/', job_call_reminder_update, name='job_call_reminder_update'),
     
     # Work Order URLs (v2)
-    path('settings/workorders/employees/', workorder_employee_settings, name='workorder_employee_settings'),
     path('workorders/new/', workorder_new, name='workorder_new'),
     path('workorders/<int:pk>/edit/', workorder_edit, name='workorder_edit'),
     # PDF print (v2)
     path('workorders/<int:pk>/pdf/', workorder_pdf, name='workorder_pdf'),
     path('workorders/<int:pk>/pdf/preview/', workorder_pdf_preview, name='workorder_pdf_preview'),
-    
-    # Invoice Management URLs
-    path('invoices/', InvoiceListView.as_view(), name='invoice_list'),
-    path('invoices/<int:pk>/', InvoiceDetailView.as_view(), name='invoice_detail'),
     
     # API endpoints
     # Accounting-backed APIs (Classic Accounting)
@@ -130,5 +120,6 @@ urlpatterns = [
     path('api/accounting/items/search/', accounting_items_search, name='accounting_items_search'),
     path('api/work-orders/customer-tax-rate/', work_order_customer_tax_rate, name='work_order_customer_tax_rate'),
     path('api/work-orders/compute-totals/', work_order_compute_totals, name='work_order_compute_totals'),
+    path('api/sales-reps/', api_sales_reps, name='api_sales_reps'),
     path('api/send-error-report/', error_views.send_error_report, name='send_error_report'),
 ]

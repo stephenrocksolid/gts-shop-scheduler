@@ -109,10 +109,10 @@ def create_acct_trans(
 def create_item_entry(
     trans: AcctTrans,
     item: ItmItems,
-    item_unit: ItmItemUnit,
-    quantity: Decimal,
-    unit_price: Decimal,
-    memo: str,
+    item_unit: ItmItemUnit = None,
+    quantity: Decimal = Decimal('1.0'),
+    unit_price: Decimal = Decimal('0.00'),
+    memo: str = '',
     order_seq: int = 0,
     **kwargs
 ) -> AcctEntry:

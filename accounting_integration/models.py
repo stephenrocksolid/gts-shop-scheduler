@@ -53,6 +53,10 @@ class Org(models.Model):
     lastfcdate = models.DateField(blank=True, null=True)
     is_cash_customer = models.BooleanField()
     is_no_charge_sales = models.BooleanField()
+    def_sales_rep_id = models.ForeignKey(
+        "AcctSalesRep", models.DO_NOTHING, db_column="def_sales_rep_id",
+        blank=True, null=True, related_name="default_orgs",
+    )
 
     class Meta:
         managed = False
@@ -251,6 +255,22 @@ class GlAcct(models.Model):
         return f"{self.glnumber} - {self.accountname}"
 
 
+class AcctSalesRep(models.Model):
+    id = models.CharField(primary_key=True, max_length=36)
+    active = models.BooleanField()
+    create_date = models.DateTimeField()
+    rep_initials = models.CharField(max_length=10, blank=True, null=True)
+    mod_date = models.DateTimeField(blank=True, null=True)
+    rep_name = models.CharField(max_length=60, blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "acct_sales_rep"
+
+    def __str__(self):
+        return self.rep_name or f"Rep {self.id[:8]}"
+
+
 class AcctTerms(models.Model):
     terms_id = models.BigAutoField(primary_key=True)
     active = models.BooleanField()
@@ -333,6 +353,10 @@ class AcctTrans(models.Model):
     glaccountidfrom = models.ForeignKey(GlAcct, models.DO_NOTHING, db_column="glaccountidfrom", blank=True, null=True)
     glaccountidto = models.ForeignKey(GlAcct, models.DO_NOTHING, db_column="glaccountidto", related_name="accttrans_glaccountidto_set", blank=True, null=True)
     termsid = models.ForeignKey(AcctTerms, models.DO_NOTHING, db_column="termsid", blank=True, null=True)
+    sales_rep_id = models.ForeignKey(
+        AcctSalesRep, models.DO_NOTHING, db_column="sales_rep_id",
+        blank=True, null=True, related_name="transactions",
+    )
 
     class Meta:
         managed = False

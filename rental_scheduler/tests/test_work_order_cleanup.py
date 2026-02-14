@@ -11,6 +11,7 @@ def _assert_no_reverse(name: str, args=None):
 def test_legacy_job_print_urls_removed():
     _assert_no_reverse("rental_scheduler:job_print_wo", args=[1])
     _assert_no_reverse("rental_scheduler:job_print_wo_customer", args=[1])
+    _assert_no_reverse("rental_scheduler:job_print_invoice", args=[1])
 
 
 @pytest.mark.django_db
@@ -33,4 +34,4 @@ def test_legacy_job_print_urls_not_in_gts_urls(api_client):
 
     assert "GTS.urls.jobPrintWoTemplate" not in content
     assert "GTS.urls.jobPrintWoCustomerTemplate" not in content
-    assert "GTS.urls.jobPrintInvoiceTemplate" in content
+    assert "GTS.urls.jobPrintInvoiceTemplate" not in content

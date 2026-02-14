@@ -239,24 +239,6 @@
         return GTS.urls.interpolate(template, { job_id: jobId });
     };
 
-    /**
-     * Get job print URL
-     * @param {string|number} jobId
-     * @param {string} printType - 'wo', 'wo-customer', or 'invoice'
-     * @returns {string}
-     */
-    GTS.urls.jobPrint = function(jobId, printType) {
-        var templateMap = {
-            'invoice': GTS.urls.jobPrintInvoiceTemplate
-        };
-        var template = templateMap[printType];
-        if (!template) {
-            console.error('[GTS.urls] Print template not configured for type: ' + printType);
-            return '';
-        }
-        return GTS.urls.interpolate(template, { job_id: jobId });
-    };
-
     // =========================================================================
     // WORK ORDERS (v2)
     // =========================================================================

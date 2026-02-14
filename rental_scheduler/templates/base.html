@@ -181,9 +181,6 @@
             GTS.urls.jobCallReminderUpdateTemplate = "{% url 'rental_scheduler:job_call_reminder_update' job_id=0 %}".replace('/0/', '/{job_id}/');
             GTS.urls.markCallReminderCompleteTemplate = "{% url 'rental_scheduler:mark_call_reminder_complete' job_id=0 %}".replace('/0/', '/{job_id}/');
 
-            // Print URLs (templates with {job_id} placeholder)
-            GTS.urls.jobPrintInvoiceTemplate = "{% url 'rental_scheduler:job_print_invoice' pk=0 %}".replace('/0/', '/{job_id}/');
-
             // Work Order (v2) routes (templates with {pk} placeholder)
             GTS.urls.workOrderEditTemplate = "{% url 'rental_scheduler:workorder_edit' pk=0 %}".replace('/0/', '/{pk}/');
             GTS.urls.workOrderPdfTemplate = "{% url 'rental_scheduler:workorder_pdf' pk=0 %}".replace('/0/', '/{pk}/');
@@ -195,6 +192,7 @@
             GTS.urls.accountingItemSearch = "{% url 'rental_scheduler:accounting_items_search' %}";
             GTS.urls.workOrderCustomerTaxRate = "{% url 'rental_scheduler:work_order_customer_tax_rate' %}";
             GTS.urls.workOrderComputeTotals = "{% url 'rental_scheduler:work_order_compute_totals' %}";
+            GTS.urls.salesReps = "{% url 'rental_scheduler:api_sales_reps' %}";
 
             // Calendar data API
             GTS.urls.calendarEvents = "{% url 'rental_scheduler:job_calendar_data' %}";
