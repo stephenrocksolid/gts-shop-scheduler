@@ -82,6 +82,54 @@
     }
 
     // =========================================================================
+    // Tax rate state (module-level, shared across customer + totals UI)
+    // =========================================================================
+
+    var currentTaxRate = 0;
+    var currentTaxExempt = false;
+
+    function fetchTaxRateForCustomer(orgId) {
+        if (!orgId || !GTS.urls || !GTS.urls.workOrderCustomerTaxRateUrl) {
+            currentTaxRate = 0;
+            currentTaxExempt = false;
+            updateTaxExemptIndicator();
+            if (typeof window.__woRecomputeTotals === 'function') window.__woRecomputeTotals();
+            return;
+        }
+        var url = GTS.urls.workOrderCustomerTaxRateUrl({ customer_org_id: orgId });
+        safeFetchJson(url).then(function(data) {
+            currentTaxRate = parseFloat(data.tax_rate) || 0;
+            currentTaxExempt = !!data.exempt;
+            updateTaxExemptIndicator();
+            if (typeof window.__woRecomputeTotals === 'function') window.__woRecomputeTotals();
+        }).catch(function() {
+            currentTaxRate = 0;
+            currentTaxExempt = false;
+            updateTaxExemptIndicator();
+            if (typeof window.__woRecomputeTotals === 'function') window.__woRecomputeTotals();
+        });
+    }
+
+    function clearTaxRate() {
+        currentTaxRate = 0;
+        currentTaxExempt = false;
+        updateTaxExemptIndicator();
+        if (typeof window.__woRecomputeTotals === 'function') window.__woRecomputeTotals();
+    }
+
+    function updateTaxExemptIndicator() {
+        var el = document.querySelector('[data-wo-tax-exempt]');
+        if (!el) return;
+        var orgIdInput = document.querySelector('[data-wo-customer-org-id]');
+        var hasCustomer = orgIdInput && orgIdInput.value && orgIdInput.value.trim() !== '';
+        if (hasCustomer && currentTaxExempt) {
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    }
+
+    // =========================================================================
     // Customer UI
     // =========================================================================
 
@@ -94,6 +142,7 @@
         var previousBodyOverflow = '';
         var modalKeydownHandler = null;
         var submitBtnDefaultHtml = null;
+        var lastCreatePayload = null;
 
         function getEls() {
             return {
@@ -112,6 +161,10 @@
                 modalForm: document.querySelector('[data-wo-customer-modal-form]'),
                 modalPanel: document.querySelector('[data-wo-customer-modal-panel]'),
                 modalError: document.querySelector('[data-wo-customer-modal-error]'),
+                dupesPanel: document.querySelector('[data-wo-customer-dupes]'),
+                dupesList: document.querySelector('[data-wo-customer-dupes-list]'),
+                dupesDismiss: document.querySelector('[data-wo-customer-dupes-dismiss]'),
+                dupesCreateAnyway: document.querySelector('[data-wo-customer-dupes-create-anyway]'),
                 submitBtn: document.querySelector('[data-wo-customer-modal-submit]'),
                 nameError: document.querySelector('[data-wo-customer-name-error]'),
                 emailError: document.querySelector('[data-wo-customer-email-error]'),
@@ -191,6 +244,85 @@
             hasShownErrors = false;
         }
 
+        function clearDuplicateWarning() {
+            var els = getEls();
+            if (els.dupesList) {
+                els.dupesList.innerHTML = '';
+            }
+            if (els.dupesPanel) {
+                hide(els.dupesPanel);
+            }
+        }
+
+        function formatDuplicateAddress(org) {
+            var parts = [];
+            if (org.address_line1) parts.push(org.address_line1);
+            if (org.address_line2) parts.push(org.address_line2);
+            var cityStateZip = [];
+            if (org.city) cityStateZip.push(org.city);
+            if (org.state) cityStateZip.push(org.state);
+            if (org.zip) cityStateZip.push(org.zip);
+            if (cityStateZip.length) parts.push(cityStateZip.join(', '));
+            return parts.join(', ');
+        }
+
+        function renderDuplicateList(list) {
+            var els = getEls();
+            if (!els.dupesPanel || !els.dupesList) return;
+            els.dupesList.innerHTML = '';
+            if (!list || !list.length) {
+                hide(els.dupesPanel);
+                return;
+            }
+
+            list.forEach(function(org) {
+                var row = document.createElement('div');
+                row.className = 'wo-customer-dupes__item';
+
+                var info = document.createElement('div');
+                info.className = 'wo-customer-dupes__info';
+
+                var nameEl = document.createElement('div');
+                nameEl.className = 'wo-customer-dupes__name';
+                var name = (org.name || '').trim();
+                var phone = (org.phone || '').trim();
+                var label = name || '';
+                if (phone) {
+                    label = label ? (label + ' (' + phone + ')') : phone;
+                }
+                nameEl.textContent = label || 'Unnamed customer';
+                info.appendChild(nameEl);
+
+                var address = formatDuplicateAddress(org);
+                if (address) {
+                    var addressEl = document.createElement('div');
+                    addressEl.className = 'wo-customer-dupes__address';
+                    addressEl.textContent = address;
+                    info.appendChild(addressEl);
+                }
+
+                if (org.match_reasons && org.match_reasons.length) {
+                    var reasonsEl = document.createElement('div');
+                    reasonsEl.className = 'wo-customer-dupes__reasons';
+                    reasonsEl.textContent = 'Matches: ' + org.match_reasons.join(', ');
+                    info.appendChild(reasonsEl);
+                }
+
+                var useBtn = document.createElement('button');
+                useBtn.type = 'button';
+                useBtn.className = 'wo-btn wo-btn-outline';
+                useBtn.textContent = 'Use this customer';
+                useBtn.setAttribute('data-wo-customer-dup-use', '1');
+                useBtn._org = org;
+
+                row.appendChild(info);
+                row.appendChild(useBtn);
+                els.dupesList.appendChild(row);
+            });
+
+            show(els.dupesPanel);
+        }
+
         function isValidEmail(value) {
             if (!value) return true;
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -255,6 +387,12 @@
             }
             if (els.modalClose) {
                 els.modalClose.disabled = isSaving;
+            }
+            if (els.dupesDismiss) {
+                els.dupesDismiss.disabled = isSaving;
+            }
+            if (els.dupesCreateAnyway) {
+                els.dupesCreateAnyway.disabled = isSaving;
             }
         }
 
@@ -331,7 +469,10 @@
                     if (phone) {
                         label = label ? (label + ' (' + phone + ')') : phone;
                     }
-                    els.selectedLabel.textContent = 'Selected: ' + label;
+                    if (!label && selected.org_id) {
+                        label = 'Customer #' + selected.org_id;
+                    }
+                    els.selectedLabel.textContent = label ? ('Selected: ' + label) : '';
                 } else {
                     els.selectedLabel.textContent = '';
                 }
@@ -351,6 +492,19 @@
                 window.__woUpdateSaveButton();
             }
             document.dispatchEvent(new CustomEvent('wo-customer-changed'));
+
+            if (selected && selected.org_id) {
+                if (selected.taxable === false) {
+                    currentTaxRate = 0;
+                    currentTaxExempt = true;
+                    updateTaxExemptIndicator();
+                    if (typeof window.__woRecomputeTotals === 'function') window.__woRecomputeTotals();
+                } else {
+                    fetchTaxRateForCustomer(selected.org_id);
+                }
+            } else {
+                clearTaxRate();
+            }
         }
 
         function clearSelected() {
@@ -362,6 +516,16 @@
             if (els.results) {
                 hide(els.results);
                 els.results.innerHTML = '';
+            }
+        }
+
+        function readInitialCustomer() {
+            var script = document.getElementById('wo-initial-customer');
+            if (!script) return null;
+            try {
+                return JSON.parse(script.textContent || '{}');
+            } catch (e) {
+                return null;
             }
         }
 
@@ -450,6 +614,7 @@
             if (els.fieldZip) els.fieldZip.value = src.zip || '';
 
             clearModalErrors();
+            clearDuplicateWarning();
             setSavingState(false);
             syncAddress2State(src.address_line2 || '');
 
@@ -473,9 +638,84 @@
             detachModalKeydown();
             unlockBodyScroll();
             clearModalErrors();
+            clearDuplicateWarning();
             if (lastActiveElement && typeof lastActiveElement.focus === 'function') {
                 lastActiveElement.focus();
             }
+        }
+
+        function submitCustomer(payload, options) {
+            var els = getEls();
+            var opts = options || {};
+            var mode = opts.mode || modalMode;
+            var allowDuplicate = !!opts.allowDuplicate;
+
+            var url;
+            if (mode === 'edit' && selected && selected.org_id) {
+                if (!GTS.urls || !GTS.urls.accountingCustomerUpdate) {
+                    GTS.showToast('Customer update URL is not configured.', 'error');
+                    setModalError('Customer update URL is not configured.');
+                    setSavingState(false);
+                    updateSubmitState();
+                    return;
+                }
+                url = GTS.urls.accountingCustomerUpdate(selected.org_id);
+            } else {
+                url = (GTS.urls && GTS.urls.accountingCustomerCreate) ? GTS.urls.accountingCustomerCreate : '';
+                if (!url) {
+                    GTS.showToast('Customer create URL is not configured.', 'error');
+                    setModalError('Customer create URL is not configured.');
+                    setSavingState(false);
+                    updateSubmitState();
+                    return;
+                }
+            }
+
+            var requestPayload = Object.assign({}, payload);
+            if (allowDuplicate) {
+                requestPayload.allow_duplicate = true;
+            }
+            if (mode === 'create' && !allowDuplicate) {
+                lastCreatePayload = payload;
+            }
+
+            clearDuplicateWarning();
+            setSavingState(true);
+
+            safeFetchJson(url, {
+                method: 'POST',
+                headers: GTS.csrf && GTS.csrf.headers ? GTS.csrf.headers({ 'Content-Type': 'application/json' }) : { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestPayload),
+            }).then(function(data) {
+                var orgId = data && (data.org_id || data.orgid);
+                if (!orgId) {
+                    throw new Error('Missing org_id in response.');
+                }
+                // Update selection
+                payload.org_id = orgId;
+                setSelected(payload);
+                var els2 = getEls();
+                if (els2.searchInput) els2.searchInput.value = payload.name || '';
+                setSavingState(false);
+                closeModal();
+                GTS.showToast('Customer saved.', 'success');
+            }).catch(function(err) {
+                setSavingState(false);
+                updateSubmitState();
+                if (err && err.status === 409 && err.data && err.data.duplicates && mode === 'create') {
+                    renderDuplicateList(err.data.duplicates || []);
+                    GTS.showToast('Possible duplicate customers found.', 'warning');
+                    return;
+                }
+                if (err && err.status === 503) {
+                    GTS.showToast('Classic Accounting is not configured.', 'warning');
+                    setModalError('Classic Accounting is not configured.');
+                } else {
+                    var message = err.message || 'Customer save failed.';
+                    GTS.showToast(message, 'error');
+                    setModalError(message);
+                }
+            });
         }
 
         // Delegated interactions
@@ -485,6 +725,9 @@
                 doSearch(target.value);
             }
             // State is now a select dropdown - no input manipulation needed
+            if (target && target.matches && target.matches('[data-wo-cust-name], [data-wo-cust-phone], [data-wo-cust-address1], [data-wo-cust-address2], [data-wo-cust-city], [data-wo-cust-state], [data-wo-cust-zip]')) {
+                clearDuplicateWarning();
+            }
             if (target && target.matches && target.matches('[data-wo-cust-name], [data-wo-cust-email]')) {
                 if (hasShownErrors) {
                     validateForm(true);
@@ -506,6 +749,31 @@
                 setSelected(selectBtn._org);
                 if (els.searchInput) els.searchInput.value = selectBtn._org.name || '';
                 hide(els.results);
+                return;
+            }
+
+            var dupUseBtn = closest(e.target, '[data-wo-customer-dup-use]');
+            if (dupUseBtn && dupUseBtn._org) {
+                setSelected(dupUseBtn._org);
+                if (els.searchInput) els.searchInput.value = dupUseBtn._org.name || '';
+                clearDuplicateWarning();
+                closeModal();
+                return;
+            }
+
+            var dupesDismiss = closest(e.target, '[data-wo-customer-dupes-dismiss]');
+            if (dupesDismiss) {
+                clearDuplicateWarning();
+                return;
+            }
+
+            var dupesCreateAnyway = closest(e.target, '[data-wo-customer-dupes-create-anyway]');
+            if (dupesCreateAnyway) {
+                if (!lastCreatePayload) {
+                    GTS.showToast('Please review customer details first.', 'warning');
+                    return;
+                }
+                submitCustomer(lastCreatePayload, { mode: 'create', allowDuplicate: true });
                 return;
             }
 
@@ -566,8 +834,6 @@
                 return;
             }
 
-            setSavingState(true);
-
             var payload = {
                 name: els.fieldName.value ? els.fieldName.value.trim() : '',
                 phone: els.fieldPhone ? els.fieldPhone.value.trim() : '',
@@ -579,58 +845,21 @@
                 state: els.fieldState ? els.fieldState.value.trim().toUpperCase() : '',
                 zip: els.fieldZip ? els.fieldZip.value.trim() : '',
             };
-
-            var url;
-            if (modalMode === 'edit' && selected && selected.org_id) {
-                if (!GTS.urls || !GTS.urls.accountingCustomerUpdate) {
-                    GTS.showToast('Customer update URL is not configured.', 'error');
-                    setModalError('Customer update URL is not configured.');
-                    setSavingState(false);
-                    updateSubmitState();
-                    return;
-                }
-                url = GTS.urls.accountingCustomerUpdate(selected.org_id);
-            } else {
-                url = (GTS.urls && GTS.urls.accountingCustomerCreate) ? GTS.urls.accountingCustomerCreate : '';
-                if (!url) {
-                    GTS.showToast('Customer create URL is not configured.', 'error');
-                    setModalError('Customer create URL is not configured.');
-                    setSavingState(false);
-                    updateSubmitState();
-                    return;
-                }
-            }
-
-            safeFetchJson(url, {
-                method: 'POST',
-                headers: GTS.csrf && GTS.csrf.headers ? GTS.csrf.headers({ 'Content-Type': 'application/json' }) : { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            }).then(function(data) {
-                var orgId = data && (data.org_id || data.orgid);
-                if (!orgId) {
-                    throw new Error('Missing org_id in response.');
-                }
-                // Update selection
-                payload.org_id = orgId;
-                setSelected(payload);
-                var els2 = getEls();
-                if (els2.searchInput) els2.searchInput.value = payload.name || '';
-                setSavingState(false);
-                closeModal();
-                GTS.showToast('Customer saved.', 'success');
-            }).catch(function(err) {
-                setSavingState(false);
-                updateSubmitState();
-                if (err && err.status === 503) {
-                    GTS.showToast('Classic Accounting is not configured.', 'warning');
-                    setModalError('Classic Accounting is not configured.');
-                } else {
-                    var message = err.message || 'Customer save failed.';
-                    GTS.showToast(message, 'error');
-                    setModalError(message);
-                }
-            });
+            submitCustomer(payload, { mode: modalMode });
         });
+
+        // Hydrate selected customer on page load (after redirect)
+        var els = getEls();
+        if (els.orgIdInput && els.orgIdInput.value) {
+            var initialCustomer = readInitialCustomer();
+            if (!initialCustomer || !initialCustomer.org_id) {
+                initialCustomer = { org_id: els.orgIdInput.value.trim() };
+            }
+            setSelected(initialCustomer);
+            if (els.searchInput && initialCustomer.name) {
+                els.searchInput.value = initialCustomer.name;
+            }
+        }
     }
 
     // =========================================================================
@@ -780,7 +1009,7 @@
 
     function initLineItemsUI() {
         function findTableBody() {
-            var table = document.querySelector('table');
+            var table = document.querySelector('[data-wo-lines-table]');
             return table ? table.querySelector('tbody') : null;
         }
 
@@ -795,24 +1024,64 @@
             amtEl.textContent = fmtMoney(qty * price);
         }
 
+        function showLoadingSpinner(container) {
+            if (!container) return;
+            container.innerHTML = '<div class="flex items-center justify-center py-4">' +
+                '<svg class="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">' +
+                '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>' +
+                '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>' +
+                '</svg></div>';
+            show(container);
+        }
+
         function renderItemResults(container, items) {
             if (!container) return;
             container.innerHTML = '';
             if (!items || items.length === 0) {
-                container.innerHTML = '<div class="p-2 text-sm text-gray-600">No results</div>';
+                container.innerHTML = '<div class="px-3 py-3 text-sm text-gray-500 text-center">No matching items found</div>';
                 show(container);
                 return;
             }
             items.forEach(function(item) {
                 var btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = 'block w-full text-left px-3 py-2 hover:bg-gray-50';
+                btn.className = 'flex w-full items-center justify-between px-3 py-2.5 hover:bg-blue-50 transition-colors border-b border-gray-100 last:border-0';
                 btn.setAttribute('data-wo-item-select', '1');
                 btn._item = item;
-                btn.textContent = (item.itemnumber || '') + ' — ' + (item.salesdesc || '');
+                var left = '<div class="text-left">' +
+                    '<div class="font-medium text-gray-900 text-sm">' + (item.itemnumber || '') + '</div>' +
+                    '<div class="text-xs text-gray-500 truncate max-w-xs">' + (item.salesdesc || '') + '</div>' +
+                    '</div>';
+                var right = item.price ? '<div class="text-sm font-medium text-gray-700 ml-4 whitespace-nowrap">$' + fmtMoney(parseMoney(item.price)) + '</div>' : '';
+                btn.innerHTML = left + right;
                 container.appendChild(btn);
             });
             show(container);
+        }
+
+        function createBlankRow() {
+            var tbody = findTableBody();
+            if (!tbody) return null;
+            var firstRow = tbody.querySelector('[data-wo-line-row]');
+            if (!firstRow) return null;
+            var clone = firstRow.cloneNode(true);
+            clone.querySelectorAll('input').forEach(function(i) {
+                if (i.name === 'line_qty') i.value = '1.00';
+                else if (i.name === 'line_price') i.value = '0.00';
+                else i.value = '';
+                if (i.hasAttribute('readonly')) i.removeAttribute('readonly');
+            });
+            var descInput = clone.querySelector('[data-wo-description]');
+            if (descInput) descInput.setAttribute('readonly', '');
+            var amtEl = clone.querySelector('[data-wo-amount]');
+            if (amtEl) amtEl.textContent = '0.00';
+            var resEl = clone.querySelector('[data-wo-item-results]');
+            if (resEl) {
+                resEl.innerHTML = '';
+                hide(resEl);
+            }
+            tbody.appendChild(clone);
+            return clone;
         }
 
         var doItemSearch = debounce(function(row, query) {
@@ -827,6 +1096,7 @@
                 GTS.showToast('Item search URL is not configured.', 'error');
                 return;
             }
+            showLoadingSpinner(results);
             var url = GTS.urls.accountingItemSearchUrl({ q: query });
             safeFetchJson(url).then(function(data) {
                 renderItemResults(results, (data && data.results) || []);
@@ -842,6 +1112,12 @@
 
         document.body.addEventListener('input', function(e) {
             var input = e.target;
+
+            if (input && input.matches && input.matches('[name="discount_value"]')) {
+                recomputeTotals();
+                return;
+            }
+
             var row = closest(input, '[data-wo-line-row]');
             if (!row) return;
 
@@ -853,36 +1129,30 @@
                 recomputeRow(row);
                 recomputeTotals();
             }
+        });
 
-            if (input && input.matches && input.matches('[name="discount_value"], [name="discount_type"]')) {
+        document.body.addEventListener('change', function(e) {
+            var input = e.target;
+            if (input && input.matches && input.matches('[name="discount_type"]')) {
                 recomputeTotals();
+            }
+        });
+
+        document.body.addEventListener('focusin', function(e) {
+            var input = e.target;
+            if (input && input.matches && input.matches('[data-wo-qty], [data-wo-price]')) {
+                setTimeout(function() { input.select(); }, 0);
             }
         });
 
         document.body.addEventListener('click', function(e) {
             var addBtn = closest(e.target, '[data-wo-add-line]');
             if (addBtn) {
-                var tbody = findTableBody();
-                if (!tbody) return;
-                var firstRow = tbody.querySelector('[data-wo-line-row]');
-                if (!firstRow) return;
-                var clone = firstRow.cloneNode(true);
-
-                // Clear values
-                var inputs = clone.querySelectorAll('input');
-                inputs.forEach(function(i) {
-                    if (i.name === 'line_qty') i.value = '1.00';
-                    else if (i.name === 'line_price') i.value = '0.00';
-                    else i.value = '';
-                });
-                var amtEl = clone.querySelector('[data-wo-amount]');
-                if (amtEl) amtEl.textContent = '0.00';
-                var resEl = clone.querySelector('[data-wo-item-results]');
-                if (resEl) {
-                    resEl.innerHTML = '';
-                    hide(resEl);
+                var newRow = createBlankRow();
+                if (newRow) {
+                    var partInput = newRow.querySelector('[data-wo-itemnumber]');
+                    if (partInput) partInput.focus();
                 }
-                tbody.appendChild(clone);
                 recomputeTotals();
                 return;
             }
@@ -894,9 +1164,7 @@
                 if (!row || !tbody) return;
                 var rows = tbody.querySelectorAll('[data-wo-line-row]');
                 if (rows.length <= 1) {
-                    // Keep at least one row
-                    var inputs2 = row.querySelectorAll('input');
-                    inputs2.forEach(function(i) {
+                    row.querySelectorAll('input').forEach(function(i) {
                         if (i.name === 'line_qty') i.value = '1.00';
                         else if (i.name === 'line_price') i.value = '0.00';
                         else i.value = '';
@@ -930,10 +1198,18 @@
 
                 recomputeRow(row2);
                 recomputeTotals();
+
+                var qtyEl = row2.querySelector('[data-wo-qty]');
+                if (qtyEl) {
+                    qtyEl.focus();
+                    setTimeout(function() { qtyEl.select(); }, 0);
+                }
+
+                createBlankRow();
+
                 return;
             }
 
-            // Click outside item results closes dropdown
             var openResults = document.querySelectorAll('[data-wo-item-results]:not(.hidden)');
             if (openResults && openResults.length) {
                 openResults.forEach(function(el) {
@@ -944,47 +1220,71 @@
             }
         });
 
-        function recomputeTotals() {
-            var subtotalEl = document.querySelector('[data-wo-subtotal]');
-            var discountEl = document.querySelector('[data-wo-discount-amount]');
-            var totalEl = document.querySelector('[data-wo-total]');
+        var _totalsRequestId = 0;
 
-            if (!subtotalEl || !discountEl || !totalEl) return;
-
+        function gatherTotalsPayload() {
             var rows = document.querySelectorAll('[data-wo-line-row]');
-            var subtotal = 0;
+            var lineItems = [];
             rows.forEach(function(r) {
                 var qtyEl = r.querySelector('[data-wo-qty]');
                 var priceEl = r.querySelector('[data-wo-price]');
-                var qty = qtyEl ? parseMoney(qtyEl.value) : 0;
-                var price = priceEl ? parseMoney(priceEl.value) : 0;
-                subtotal += qty * price;
+                lineItems.push({
+                    qty: String(qtyEl ? parseMoney(qtyEl.value) : 0),
+                    price: String(priceEl ? parseMoney(priceEl.value) : 0)
+                });
             });
 
             var discountTypeEl = document.querySelector('input[name="discount_type"]:checked') || document.querySelector('[name="discount_type"]');
             var discountValueEl = document.querySelector('[name="discount_value"]');
-            var discountType = discountTypeEl ? discountTypeEl.value : 'amount';
-            var discountValue = discountValueEl ? parseMoney(discountValueEl.value) : 0;
 
-            var discountAmount = 0;
-            if (discountType === 'percent') {
-                if (discountValue < 0) discountValue = 0;
-                if (discountValue > 100) discountValue = 100;
-                discountAmount = subtotal * (discountValue / 100);
-            } else {
-                if (discountValue < 0) discountValue = 0;
-                if (discountValue > subtotal) discountValue = subtotal;
-                discountAmount = discountValue;
-            }
-
-            var total = subtotal - discountAmount;
-
-            subtotalEl.textContent = fmtMoney(subtotal);
-            discountEl.textContent = fmtMoney(discountAmount);
-            totalEl.textContent = fmtMoney(total);
+            return {
+                line_items: lineItems,
+                discount_type: discountTypeEl ? discountTypeEl.value : 'amount',
+                discount_value: String(discountValueEl ? parseMoney(discountValueEl.value) : 0),
+                tax_rate: String(currentTaxRate)
+            };
         }
 
-        // Expose for initTotalsUI to call once
+        function applyTotalsFromServer(data) {
+            var subtotalEl = document.querySelector('[data-wo-subtotal]');
+            var discountEl = document.querySelector('[data-wo-discount-amount]');
+            var taxEl = document.querySelector('[data-wo-tax-amount]');
+            var totalEl = document.querySelector('[data-wo-total]');
+            if (subtotalEl) subtotalEl.textContent = parseFloat(data.subtotal).toFixed(2);
+            if (discountEl) discountEl.textContent = parseFloat(data.discount_amount).toFixed(2);
+            if (taxEl) taxEl.textContent = parseFloat(data.tax_amount).toFixed(2);
+            if (totalEl) totalEl.textContent = parseFloat(data.total).toFixed(2);
+        }
+
+        function _fetchTotals() {
+            var url = GTS.urls.workOrderComputeTotalsUrl ? GTS.urls.workOrderComputeTotalsUrl() : '';
+            if (!url) return;
+
+            var payload = gatherTotalsPayload();
+            var requestId = ++_totalsRequestId;
+
+            var totalsSection = document.querySelector('[data-wo-totals-section]');
+            if (totalsSection) totalsSection.style.opacity = '0.5';
+
+            safeFetchJson(url, {
+                method: 'POST',
+                headers: GTS.csrf && GTS.csrf.headers
+                    ? GTS.csrf.headers({ 'Content-Type': 'application/json' })
+                    : { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function(data) {
+                if (requestId !== _totalsRequestId) return;
+                applyTotalsFromServer(data);
+            }).catch(function() {
+                if (requestId !== _totalsRequestId) return;
+            }).then(function() {
+                if (requestId !== _totalsRequestId) return;
+                if (totalsSection) totalsSection.style.opacity = '';
+            });
+        }
+
+        var recomputeTotals = debounce(_fetchTotals, 300);
+
         window.__woRecomputeTotals = recomputeTotals;
     }
 
@@ -993,7 +1293,14 @@
     // =========================================================================
 
     function initTotalsUI() {
-        // Compute all existing row amounts once
+        var snapshotEl = document.querySelector('[data-wo-tax-rate-snapshot]');
+        if (snapshotEl) {
+            var snapshotRate = parseFloat(snapshotEl.value);
+            if (!isNaN(snapshotRate) && snapshotRate > 0) {
+                currentTaxRate = snapshotRate;
+            }
+        }
+
         var rows = document.querySelectorAll('[data-wo-line-row]');
         rows.forEach(function(r) {
             var qtyEl = r.querySelector('[data-wo-qty]');
@@ -1008,6 +1315,8 @@
         if (typeof window.__woRecomputeTotals === 'function') {
             window.__woRecomputeTotals();
         }
+
+        updateTaxExemptIndicator();
     }
 
     // =========================================================================
@@ -1022,15 +1331,23 @@
 
         if (!form || !orgIdInput || !saveBtn) return;
 
+        function hasAtLeastOneLineItem() {
+            var itemIdInputs = document.querySelectorAll('input[name="line_itemid"]');
+            for (var i = 0; i < itemIdInputs.length; i++) {
+                if (itemIdInputs[i].value && itemIdInputs[i].value.trim() !== '') {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         function updateSaveButtonState() {
             var hasCustomer = orgIdInput.value && orgIdInput.value.trim() !== '';
             saveBtn.disabled = !hasCustomer;
         }
 
-        // Initial state
         updateSaveButtonState();
 
-        // Watch for changes to customer selection (via hidden input value changes)
         var lastValue = orgIdInput.value;
         var checkInterval = setInterval(function() {
             if (orgIdInput.value !== lastValue) {
@@ -1039,12 +1356,10 @@
             }
         }, 100);
 
-        // Also listen for custom event from customer UI
         document.addEventListener('wo-customer-changed', function() {
             updateSaveButtonState();
         });
 
-        // Prevent form submission without customer
         form.addEventListener('submit', function(e) {
             var hasCustomer = orgIdInput.value && orgIdInput.value.trim() !== '';
             if (!hasCustomer) {
@@ -1057,9 +1372,16 @@
                 }
                 return false;
             }
+
+            if (!hasAtLeastOneLineItem()) {
+                e.preventDefault();
+                if (GTS && GTS.showToast) {
+                    GTS.showToast('At least one line item is required.', 'error');
+                }
+                return false;
+            }
         });
 
-        // Expose function for external updates
         window.__woUpdateSaveButton = updateSaveButtonState;
     }
 
@@ -1077,8 +1399,9 @@
         var saveBackBtn = document.querySelector('[data-wo-unsaved-save-back]');
         var closeBtn = document.querySelector('[data-wo-unsaved-close]');
         var afterSaveInput = document.querySelector('[data-wo-after-save]');
+        var actualBackLink = document.querySelector('[data-wo-back-link]');
 
-        if (!form || !backLink || !modal) return;
+        if (!form || !actualBackLink || !modal) return;
 
         var isDirty = false;
         var backHref = null;
@@ -1156,7 +1479,6 @@
         });
 
         // Intercept Back link click
-        var actualBackLink = document.querySelector('[data-wo-back-link]');
         if (actualBackLink) {
             actualBackLink.addEventListener('click', function(e) {
                 checkDirty();

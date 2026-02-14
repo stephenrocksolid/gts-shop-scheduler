@@ -51,8 +51,16 @@ The repo enforces this with:
 - Classic Accounting APIs (Jan 2026):
   - `accountingCustomerSearch` - `/api/accounting/customers/search/`
   - `accountingCustomerCreate` - `/api/accounting/customers/create/`
+    - Returns **409** with `{ duplicates: [...] }` when possible duplicates are detected.
+    - Client may retry with `allow_duplicate: true` to proceed.
   - `accountingCustomerUpdateTemplate` - `/api/accounting/customers/{orgid}/update/` (template)
   - `accountingItemSearch` - `/api/accounting/items/search/`
+  - `workOrderCustomerTaxRate` - `/api/work-orders/customer-tax-rate/`
+    - GET with `?customer_org_id=...` returns `{ tax_rate, exempt }`.
+  - `workOrderComputeTotals` - `/api/work-orders/compute-totals/`
+    - POST with JSON body `{ line_items: [{qty, price}, ...], discount_type, discount_value, tax_rate }`.
+    - Returns `{ subtotal, discount_amount, tax_amount, total }` (all as strings).
+    - Single source of truth for totals: the work order page JS calls this endpoint instead of computing locally, and the PDF reads from stored model fields computed by the same Python function.
 
 `shared/urls.js` wraps these into convenient functions, e.g.:
 
@@ -69,6 +77,8 @@ The repo enforces this with:
   - `GTS.urls.accountingCustomerUpdate(orgid)`
   - `GTS.urls.accountingCustomerSearchUrl({ q: '...' })`
   - `GTS.urls.accountingItemSearchUrl({ q: '...' })`
+  - `GTS.urls.workOrderCustomerTaxRateUrl({ customer_org_id: '...' })`
+  - `GTS.urls.workOrderComputeTotalsUrl()`
 
 ## How to add a new backend endpoint that JS will call
 

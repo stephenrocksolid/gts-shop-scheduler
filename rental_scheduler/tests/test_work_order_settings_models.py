@@ -1,17 +1,6 @@
 import pytest
+from decimal import Decimal
 from django.core.exceptions import ValidationError
-
-
-@pytest.mark.django_db
-def test_work_order_company_profile_is_singleton():
-    from rental_scheduler.models import WorkOrderCompanyProfile
-
-    profile1 = WorkOrderCompanyProfile.get_solo()
-    profile2 = WorkOrderCompanyProfile.get_solo()
-
-    assert profile1.pk == 1
-    assert profile2.pk == 1
-    assert WorkOrderCompanyProfile.objects.count() == 1
 
 
 @pytest.mark.django_db
@@ -42,3 +31,24 @@ def test_work_order_number_sequence_allocates_sequential_numbers():
 
     seq.refresh_from_db()
     assert seq.next_number == 102
+
+
+@pytest.mark.django_db
+def test_editing_wo_number_advances_sequence(job):
+    from rental_scheduler.models import WorkOrderNumberSequence, WorkOrderV2
+
+    WorkOrderNumberSequence.get_solo(start_number=1)
+
+    wo = WorkOrderV2.objects.create(
+        job=job, discount_type="amount", discount_value=Decimal("0.00"),
+    )
+    assert wo.number == 1
+
+    seq = WorkOrderNumberSequence.objects.get(pk=1)
+    assert seq.next_number == 2
+
+    wo.number = 1009
+    wo.save()
+
+    seq.refresh_from_db()
+    assert seq.next_number == 1010

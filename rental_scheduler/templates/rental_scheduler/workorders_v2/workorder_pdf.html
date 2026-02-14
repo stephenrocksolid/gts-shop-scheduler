@@ -5,67 +5,155 @@
     <title>Work Order {{ work_order.number }}</title>
     <style>
       @page { size: letter; margin: 18mm; }
-      body { font-family: Arial, sans-serif; font-size: 12px; color: #111827; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #111827; margin: 0; }
       h1, h2, h3 { margin: 0; }
-      .header { display: flex; justify-content: space-between; align-items: flex-start; }
-      .company { font-size: 12px; line-height: 1.4; }
-      .wo-meta { text-align: right; }
-      .section { margin-top: 16px; }
-      .label { font-weight: 600; color: #374151; }
-      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-      th, td { border-bottom: 1px solid #e5e7eb; padding: 6px 4px; text-align: left; }
-      th { background: #f9fafb; font-weight: 600; font-size: 11px; }
+
+      .header { position: relative; padding-bottom: 12px; }
+      .company { text-align: center; line-height: 1.5; }
+      .company h2 { font-size: 22px; font-weight: bold; }
+      .company .slogan { font-size: 11px; font-style: italic; color: #374151; }
+      .company .address { font-size: 12px; }
+      .company .contact-line { font-size: 12px; }
+      .company .email-line { font-size: 12px; }
+
+      .wo-meta {
+        position: absolute;
+        top: 0;
+        right: 0;
+        text-align: right;
+        line-height: 1.5;
+      }
+      .wo-meta .wo-title { font-size: 18px; font-weight: bold; }
+      .wo-meta .wo-number { font-size: 20px; font-weight: bold; color: #dc2626; }
+      .wo-meta .wo-number span { color: #111827; font-size: 14px; }
+      .wo-meta .wo-jobby { font-size: 12px; }
+
+      .customer-block {
+        margin-top: 16px;
+        display: flex;
+        justify-content: space-between;
+        line-height: 1.6;
+      }
+      .customer-left { width: 55%; }
+      .customer-right { width: 40%; text-align: right; }
+      .customer-right table { width: 100%; border-collapse: collapse; }
+      .customer-right td { border: none; padding: 1px 0; vertical-align: top; }
+      .customer-right .lbl { text-align: right; font-weight: 700; padding-right: 4px; white-space: nowrap; }
+      .customer-right .val { text-align: left; word-break: break-all; }
+      .label { font-weight: 700; }
+
+      .notes-box {
+        margin-top: 2px;
+        padding: 2px 8px;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+      .notes-box .notes-label {
+        font-weight: 700;
+        font-style: italic;
+        margin-bottom: 2px;
+      }
+
+      .trailer-row {
+        margin-top: 20px;
+        display: flex;
+        border-bottom: 2px solid #111827;
+        font-size: 12px;
+      }
+      .trailer-cell {
+        padding: 4px 6px;
+        border-bottom: none;
+      }
+      .trailer-cell .trailer-label {
+        font-weight: 700;
+        font-size: 11px;
+        text-decoration: underline;
+      }
+      .trailer-cell-make { width: 30%; }
+      .trailer-cell-model { width: 40%; }
+      .trailer-cell-serial { width: 30%; }
+
+      .section { margin-top: 8px; }
+      table { width: 100%; border-collapse: collapse; margin: 0; }
+      th, td { border-bottom: 1px solid #d1d5db; padding: 6px 4px; text-align: left; }
+      th { font-weight: 600; font-size: 11px; }
       .totals { margin-top: 12px; width: 100%; }
       .totals td { border: none; padding: 2px 0; }
       .right { text-align: right; }
-      .muted { color: #6b7280; }
+
+      .disclaimer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        text-align: center;
+        font-family: 'Brush Script MT', 'Segoe Script', cursive;
+        font-style: italic;
+        font-size: 12px;
+        color: #9ca3af;
+      }
     </style>
   </head>
   <body>
     <div class="header">
       <div class="company">
-        <h2>{{ company.name|default:"GTS" }}</h2>
-        {% if company.slogan %}<div class="muted">{{ company.slogan }}</div>{% endif %}
-        <div>
-          {{ company.address_line1 }}{% if company.address_line2 %}, {{ company.address_line2 }}{% endif %}<br>
-          {{ company.city }}{% if company.state %}, {{ company.state }}{% endif %} {{ company.zip }}
-        </div>
-        <div>
-          {% if company.tel %}Tel: {{ company.tel }}{% endif %}
-          {% if company.fax %} | Fax: {{ company.fax }}{% endif %}
-        </div>
-        {% if company.email %}<div>{{ company.email }}</div>{% endif %}
+        <h2>Gingerich Trailer Sales, Ltd</h2>
+        <div class="slogan">(Specializing in Trailer Sales, Service, Rentals and Parts)</div>
+        <div class="address">5815 State Route 39 / Millersburg OH 44654</div>
+        <div class="contact-line">Tel: 330-674-4441 / Fax: 330-674-4464</div>
+        <div class="email-line">Email: gtsservice@plainemail.com</div>
       </div>
 
       <div class="wo-meta">
-        <h1>Work Order</h1>
-        <div class="label"># {{ work_order.number }}</div>
-        <div class="muted">Date: {{ work_order.created_at|date:"F j, Y" }}</div>
+        <div class="wo-title">Work Order</div>
+        <div class="wo-number"><span>#</span> {{ work_order.number }}</div>
+        <div class="wo-jobby">Job By: {% if work_order.job_by %}{{ work_order.job_by.name }}{% else %}&mdash;{% endif %}</div>
       </div>
     </div>
 
-    <div class="section">
-      <div><span class="label">Customer:</span> {{ customer_name }}</div>
-      {% if customer_phone %}<div><span class="label">Phone:</span> {{ customer_phone }}</div>{% endif %}
-      {% if customer_contact %}<div><span class="label">Contact:</span> {{ customer_contact }}</div>{% endif %}
-      {% if customer_email %}<div><span class="label">Email:</span> {{ customer_email }}</div>{% endif %}
+    <div class="customer-block">
+      <div class="customer-left">
+        <div><span class="label">NAME:</span> {{ customer_name }}</div>
+        <div><span class="label">ADDRESS:</span> {{ customer_address }}</div>
+        {% if customer_city or customer_state or customer_zip %}
+          <div style="padding-left: 70px;">{{ customer_city }}{% if customer_city and customer_state %}, {% endif %}{{ customer_state }} {{ customer_zip }}</div>
+        {% endif %}
+      </div>
+      <div class="customer-right">
+        <table>
+          <tr><td class="lbl">DATE:</td><td class="val">{% if work_order.date %}{{ work_order.date }}{% endif %}</td></tr>
+          <tr><td class="lbl">PHONE #:</td><td class="val">{{ customer_phone }}</td></tr>
+          <tr><td class="lbl">Contact:</td><td class="val">{{ customer_contact }}</td></tr>
+          <tr><td class="lbl">Email:</td><td class="val">{{ customer_email }}</td></tr>
+        </table>
+      </div>
     </div>
 
-    <div class="section">
-      <div><span class="label">Job By:</span> {% if work_order.job_by %}{{ work_order.job_by.name }}{% endif %}</div>
-      <div><span class="label">Notes:</span> {{ work_order.notes }}</div>
-      <div><span class="label">Make/Model:</span> {{ work_order.trailer_make_model }}</div>
-      <div><span class="label">Color:</span> {{ work_order.trailer_color }}</div>
-      <div><span class="label">Serial:</span> {{ work_order.trailer_serial }}</div>
+    <div class="notes-box"><div class="notes-label">NOTES.</div>{{ work_order.notes }}</div>
+
+    <div class="trailer-row">
+      <div class="trailer-cell trailer-cell-make">
+        <div class="trailer-label">Make &amp; Model</div>
+        <div>{{ work_order.trailer_make_model }}</div>
+      </div>
+      <div class="trailer-cell trailer-cell-model">
+        <div class="trailer-label">Color</div>
+        <div>{{ work_order.trailer_color }}</div>
+      </div>
+      <div class="trailer-cell trailer-cell-serial">
+        <div class="trailer-label">Serial No.</div>
+        <div>{{ work_order.trailer_serial }}</div>
+      </div>
     </div>
 
     <div class="section">
       <table>
         <thead>
           <tr>
-            <th style="width: 10%;">Qty</th>
-            <th style="width: 20%;">Part #</th>
-            <th>Description</th>
+            <th style="width: 8%;">Qty</th>
+            <th>Item Description</th>
             <th style="width: 15%;" class="right">Price</th>
             <th style="width: 15%;" class="right">Amount</th>
           </tr>
@@ -74,8 +162,7 @@
           {% for line in lines %}
             <tr>
               <td>{{ line.qty }}</td>
-              <td>{{ line.itemnumber_snapshot }}</td>
-              <td>{{ line.description_snapshot }}</td>
+              <td>{% if line.itemnumber_snapshot %}[{{ line.itemnumber_snapshot }}] {% endif %}{{ line.description_snapshot }}</td>
               <td class="right">{{ line.price }}</td>
               <td class="right">{{ line.amount }}</td>
             </tr>
@@ -93,10 +180,18 @@
           <td class="right">{{ work_order.discount_amount }}</td>
         </tr>
         <tr>
+          <td class="right label">Tax ({{ work_order.tax_rate_snapshot }}%):</td>
+          <td class="right">{{ work_order.tax_amount }}</td>
+        </tr>
+        <tr>
           <td class="right label">Total:</td>
           <td class="right"><strong>{{ work_order.total }}</strong></td>
         </tr>
       </table>
+    </div>
+
+    <div class="disclaimer">
+      This is not an invoice, Please do not remit payment from this amount!
     </div>
   </body>
 </html>

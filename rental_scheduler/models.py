@@ -668,50 +668,6 @@ class CallReminder(models.Model):
         return f"Call Reminder on {self.reminder_date}"
 
 
-class WorkOrderCompanyProfile(models.Model):
-    """
-    Singleton-style company profile for Work Order rendering.
-
-    This is owned by the scheduler DB (not Classic Accounting).
-    """
-
-    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
-
-    name = models.CharField(max_length=200, blank=True, default="")
-    slogan = models.CharField(max_length=200, blank=True, default="")
-
-    address_line1 = models.CharField(max_length=200, blank=True, default="")
-    address_line2 = models.CharField(max_length=200, blank=True, default="")
-    city = models.CharField(max_length=100, blank=True, default="")
-    state = models.CharField(max_length=50, blank=True, default="")
-    zip = models.CharField(max_length=20, blank=True, default="")
-
-    tel = models.CharField(max_length=45, blank=True, default="")
-    fax = models.CharField(max_length=45, blank=True, default="")
-    email = models.EmailField(blank=True, default="")
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Work Order Company Profile"
-        verbose_name_plural = "Work Order Company Profile"
-
-    def __str__(self):
-        return self.name or "Work Order Company Profile"
-
-    @classmethod
-    def get_solo(cls):
-        obj, _created = cls.objects.get_or_create(pk=1)
-        return obj
-
-    def save(self, *args, **kwargs):
-        # Enforce singleton PK
-        self.pk = 1
-        self.full_clean()
-        return super().save(*args, **kwargs)
-
-
 class WorkOrderEmployee(models.Model):
     """Employee name list for the Work Order "Job By" field."""
 
@@ -780,11 +736,20 @@ class WorkOrderNumberSequence(models.Model):
             seq.save(update_fields=["next_number"])
             return number
 
+    @classmethod
+    def advance_past(cls, number):
+        with transaction.atomic():
+            seq, _ = cls.objects.select_for_update().get_or_create(
+                pk=1,
+                defaults={"start_number": 1, "next_number": 1},
+            )
+            if seq.next_number <= number:
+                seq.next_number = number + 1
+                seq.save(update_fields=["next_number"])
+
     def save(self, *args, **kwargs):
-        # Enforce singleton PK
         self.pk = 1
 
-        # Keep next_number at/above start_number when editing start_number
         if self.next_number < self.start_number:
             self.next_number = self.start_number
 
@@ -835,6 +800,8 @@ class WorkOrderV2(models.Model):
         help_text='Employee who the job is "by" (nullable)',
     )
 
+    date = models.DateField(null=True, blank=True)
+
     notes = models.TextField(blank=True, default="")
 
     trailer_make_model = models.TextField(blank=True, default="")
@@ -850,9 +817,16 @@ class WorkOrderV2(models.Model):
 
     subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    tax_rate_snapshot = models.DecimalField(max_digits=7, decimal_places=4, default=Decimal("0.0000"))
+    tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
 
     created_at = models.DateTimeField(auto_now_add=True)
+    accounting_invoice_id = models.BigIntegerField(
+        null=True, blank=True, db_index=True,
+        help_text="Link to AcctTrans.transid (Invoice) in Classic Accounting database",
+    )
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -894,28 +868,33 @@ class WorkOrderV2(models.Model):
                 if not exists:
                     raise ValidationError({"customer_org_id": "Customer does not exist in Classic Accounting."})
 
-    def recalculate_totals(self, *, save: bool = False):
-        # IMPORTANT: do not rely on the related-manager cache (prefetch_related)
-        # when computing totals. Always query the DB for current line items.
+    def recalculate_totals(self, *, save: bool = False, tax_rate=None):
         line_items = (
             WorkOrderLineV2.objects.filter(work_order_id=self.pk).only("qty", "price")
             if self.pk
             else []
         )
-        subtotal, discount_amount, total = compute_work_order_totals(
+        effective_rate = tax_rate if tax_rate is not None else self.tax_rate_snapshot
+        subtotal, discount_amount, tax_amount, total = compute_work_order_totals(
             line_items=line_items,
             discount_type=self.discount_type,
             discount_value=self.discount_value,
+            tax_rate=effective_rate,
         )
 
+        if tax_rate is not None:
+            self.tax_rate_snapshot = tax_rate
         self.subtotal = subtotal
         self.discount_amount = discount_amount
+        self.tax_amount = tax_amount
         self.total = total
 
         if save and self.pk:
             WorkOrderV2.objects.filter(pk=self.pk).update(
                 subtotal=subtotal,
                 discount_amount=discount_amount,
+                tax_rate_snapshot=self.tax_rate_snapshot,
+                tax_amount=tax_amount,
                 total=total,
             )
 
@@ -925,13 +904,16 @@ class WorkOrderV2(models.Model):
         if creating and not self.number:
             self.number = WorkOrderNumberSequence.allocate_work_order_number()
 
-        # Ensure discount_value is stored as 2-decimal money/percent
+        if self.number and WorkOrderV2.objects.filter(number=self.number).exclude(pk=self.pk).exists():
+            raise ValidationError({"number": f"Work order number {self.number} is already in use."})
+
         self.discount_value = quantize_money(self.discount_value)
 
         self.full_clean()
         result = super().save(*args, **kwargs)
 
-        # Keep stored totals in sync (safe even if there are no lines yet)
+        WorkOrderNumberSequence.advance_past(self.number)
+
         if self.pk:
             self.recalculate_totals(save=True)
 

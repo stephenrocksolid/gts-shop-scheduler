@@ -25,7 +25,50 @@
                 initLocalStoragePersistence();
                 initSearchNavigation();
                 initRowClickHandlers();
+                initOpenJobFromUrl();
             });
+        });
+    }
+
+    // ========================================================================
+    // RETURN NAV: OPEN JOB FROM URL
+    // Supports `?open_job=<job_id>` so Work Order pages (and browser Back) can
+    // return to the jobs list and re-open the originating job in the panel.
+    // ========================================================================
+
+    function initOpenJobFromUrl() {
+        GTS.initOnce('jobs_list_open_job_from_url', function() {
+            const params = new URLSearchParams(window.location.search);
+            const jobId = params.get('open_job');
+            if (!jobId || !/^\d+$/.test(jobId)) {
+                return;
+            }
+
+            // Prefer JobWorkspace so the tab bar stays in sync.
+            if (window.JobWorkspace && typeof window.JobWorkspace.openJob === 'function') {
+                window.JobWorkspace.openJob(jobId, {
+                    customerName: 'Job',
+                    trailerColor: '',
+                    calendarColor: '#3B82F6'
+                });
+            } else if (window.JobPanel && GTS.urls && typeof GTS.urls.jobCreatePartial === 'function') {
+                // Fallback: open directly in JobPanel.
+                window.JobPanel.setTitle('Edit Job');
+                window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
+                if (window.JobPanel.setCurrentJobId) {
+                    window.JobPanel.setCurrentJobId(jobId);
+                }
+            } else {
+                return; // Can't open; leave param in place for potential retry on reload.
+            }
+
+            // Clear param so refresh doesn't keep re-opening.
+            params.delete('open_job');
+            const newQuery = params.toString();
+            const newUrl = window.location.pathname + (newQuery ? '?' + newQuery : '') + window.location.hash;
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState({}, '', newUrl);
+            }
         });
     }
 
@@ -286,6 +329,9 @@
                 // Use config-driven URL from GTS.urls (global, always available)
                 window.JobPanel.setTitle('Edit Job');
                 window.JobPanel.load(GTS.urls.jobCreatePartial({ edit: jobId }));
+                if (window.JobPanel.setCurrentJobId) {
+                    window.JobPanel.setCurrentJobId(jobId);
+                }
             }
         });
 

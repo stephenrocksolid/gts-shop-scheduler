@@ -34,19 +34,30 @@ def compute_work_order_totals(
     line_items: Iterable,
     discount_type: str,
     discount_value: Decimal | int | float | str | None,
-) -> Tuple[Decimal, Decimal, Decimal]:
+    tax_rate: Decimal | int | float | str | None = None,
+) -> Tuple[Decimal, Decimal, Decimal, Decimal]:
     """
-    Compute (subtotal, discount_amount, total) with server-side validation.
+    Compute (subtotal, discount_amount, tax_amount, total).
 
     Contracts:
     - subtotal = sum(qty * price)
     - discount_type:
       - "percent": discount_value must be 0–100
       - "amount": discount_value must be 0–subtotal
-    - total = subtotal - discount_amount
+    - tax_amount = (subtotal - discount_amount) * tax_rate / 100
+    - total = subtotal - discount_amount + tax_amount
     """
 
     discount_value_dec = quantize_money(discount_value)
+
+    tax_rate_dec = Decimal("0.00")
+    if tax_rate is not None:
+        if not isinstance(tax_rate, Decimal):
+            tax_rate_dec = Decimal(str(tax_rate))
+        else:
+            tax_rate_dec = tax_rate
+        if tax_rate_dec < 0:
+            tax_rate_dec = Decimal("0.00")
 
     subtotal = Decimal("0.00")
     for li in line_items or []:
@@ -72,6 +83,9 @@ def compute_work_order_totals(
             raise ValidationError({"discount_value": "Discount cannot exceed subtotal."})
         discount_amount = quantize_money(discount_value_dec)
 
-    total = quantize_money(subtotal - discount_amount)
-    return subtotal, discount_amount, total
+    taxable_subtotal = subtotal - discount_amount
+    tax_amount = quantize_money(taxable_subtotal * tax_rate_dec / Decimal("100"))
+
+    total = quantize_money(taxable_subtotal + tax_amount)
+    return subtotal, discount_amount, tax_amount, total
 

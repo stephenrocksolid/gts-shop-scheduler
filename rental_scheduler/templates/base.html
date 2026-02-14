@@ -193,6 +193,8 @@
             GTS.urls.accountingCustomerCreate = "{% url 'rental_scheduler:accounting_customers_create' %}";
             GTS.urls.accountingCustomerUpdateTemplate = "{% url 'rental_scheduler:accounting_customers_update' orgid=0 %}".replace('/0/', '/{orgid}/');
             GTS.urls.accountingItemSearch = "{% url 'rental_scheduler:accounting_items_search' %}";
+            GTS.urls.workOrderCustomerTaxRate = "{% url 'rental_scheduler:work_order_customer_tax_rate' %}";
+            GTS.urls.workOrderComputeTotals = "{% url 'rental_scheduler:work_order_compute_totals' %}";
 
             // Calendar data API
             GTS.urls.calendarEvents = "{% url 'rental_scheduler:job_calendar_data' %}";

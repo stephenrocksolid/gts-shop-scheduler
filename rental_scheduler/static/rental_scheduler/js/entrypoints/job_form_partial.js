@@ -462,14 +462,18 @@
             /**
              * Save job form and then navigate to Work Order create page
              */
-            function saveJobThenCreateWorkOrder(form, jobId, triggerBtn) {
-                console.log('Saving job form before creating work order...');
+            function stampOpenJobOnCurrentUrl(jobId) {
+                if (!jobId || jobId === '0') return;
+                if (!window.history || !window.history.replaceState) return;
+                try {
+                    const p = new URLSearchParams(window.location.search || '');
+                    p.set('open_job', String(jobId));
+                    const newUrl = window.location.pathname + '?' + p.toString() + window.location.hash;
+                    window.history.replaceState({}, '', newUrl);
+                } catch (_) { }
+            }
 
-                if (!GTS.urls || !GTS.urls.workOrderNew) {
-                    alert('Work Order URLs are not configured.');
-                    return;
-                }
-
+            function saveJobThenNavigate(form, jobId, triggerBtn, buildUrl) {
                 if (window.JobPanel) {
                     window.JobPanel.isPrinting = true;
                 }
@@ -508,9 +512,7 @@
                                 window.JobPanel.isPrinting = false;
                             }
 
-                            // Include current page as "next" so WO page can return here
-                            var nextUrl = window.location.pathname + window.location.search;
-                            window.location.href = GTS.urls.workOrderNew({ job: actualJobId, next: nextUrl });
+                            window.location.href = buildUrl(actualJobId);
                         } else {
                             if (window.JobPanel) {
                                 window.JobPanel.isPrinting = false;
@@ -560,10 +562,14 @@
                 if (saveAndCreateBtn && !saveAndCreateBtn.disabled) {
                     GTS.dom.stop(e);
                     const form = saveAndCreateBtn.closest('form');
-                    if (form) {
+                    if (form && GTS.urls && GTS.urls.workOrderNew) {
                         const jobIdInput = form.querySelector('input[name="job_id"]');
                         const jobId = jobIdInput ? jobIdInput.value : '0';
-                        saveJobThenCreateWorkOrder(form, jobId, saveAndCreateBtn);
+                        saveJobThenNavigate(form, jobId, saveAndCreateBtn, function(actualJobId) {
+                            stampOpenJobOnCurrentUrl(actualJobId);
+                            var nextUrl = window.location.pathname + window.location.search;
+                            return GTS.urls.workOrderNew({ job: actualJobId, next: nextUrl });
+                        });
                     }
                 }
 
@@ -573,16 +579,20 @@
                     GTS.dom.stop(e);
                     const form = createBtn.closest('form');
                     const jobId = createBtn.getAttribute('data-job-id') || '0';
-                    if (form) {
+                    if (form && GTS.urls && GTS.urls.workOrderNew) {
                         const hasUnsaved = window.JobPanel && window.JobPanel.hasUnsavedChanges
                             ? (typeof window.JobPanel.hasUnsavedChanges === 'function'
                                 ? window.JobPanel.hasUnsavedChanges()
                                 : false)
                             : false;
                         if (hasUnsaved || !jobId || jobId === '0') {
-                            saveJobThenCreateWorkOrder(form, jobId, createBtn);
-                        } else if (GTS.urls && GTS.urls.workOrderNew) {
-                            // Include current page as "next" so WO page can return here
+                            saveJobThenNavigate(form, jobId, createBtn, function(actualJobId) {
+                                stampOpenJobOnCurrentUrl(actualJobId);
+                                var nextUrl = window.location.pathname + window.location.search;
+                                return GTS.urls.workOrderNew({ job: actualJobId, next: nextUrl });
+                            });
+                        } else {
+                            stampOpenJobOnCurrentUrl(jobId);
                             var nextUrl = window.location.pathname + window.location.search;
                             window.location.href = GTS.urls.workOrderNew({ job: jobId, next: nextUrl });
                         }
@@ -595,9 +605,17 @@
                     GTS.dom.stop(e);
                     const woId = editBtn.getAttribute('data-wo-id');
                     if (woId && GTS.urls && GTS.urls.workOrderEdit) {
-                        // Include current page as "next" so WO page can return here
-                        var nextUrl = window.location.pathname + window.location.search;
-                        window.location.href = GTS.urls.withQuery(GTS.urls.workOrderEdit(woId), { next: nextUrl });
+                        const form = editBtn.closest('form');
+                        let _jobId = '0';
+                        try {
+                            const jobIdInput = form ? form.querySelector('input[name="job_id"]') : null;
+                            _jobId = jobIdInput ? (jobIdInput.value || '0') : '0';
+                        } catch (_) { }
+                        saveJobThenNavigate(form, _jobId, editBtn, function(actualJobId) {
+                            stampOpenJobOnCurrentUrl(actualJobId || _jobId);
+                            var nextUrl = window.location.pathname + window.location.search;
+                            return GTS.urls.withQuery(GTS.urls.workOrderEdit(woId), { next: nextUrl });
+                        });
                     }
                 }
 

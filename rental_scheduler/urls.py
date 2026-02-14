@@ -23,6 +23,7 @@ from .views import (
     workorder_new,
     workorder_edit,
     workorder_pdf,
+    workorder_pdf_preview,
     InvoiceListView,
     InvoiceDetailView,
     job_create_partial,
@@ -35,6 +36,8 @@ from .views import (
     accounting_customers_create,
     accounting_customers_update,
     accounting_items_search,
+    work_order_customer_tax_rate,
+    work_order_compute_totals,
     calendar_import,
     import_history,
     revert_import,
@@ -113,6 +116,7 @@ urlpatterns = [
     path('workorders/<int:pk>/edit/', workorder_edit, name='workorder_edit'),
     # PDF print (v2)
     path('workorders/<int:pk>/pdf/', workorder_pdf, name='workorder_pdf'),
+    path('workorders/<int:pk>/pdf/preview/', workorder_pdf_preview, name='workorder_pdf_preview'),
     
     # Invoice Management URLs
     path('invoices/', InvoiceListView.as_view(), name='invoice_list'),
@@ -124,5 +128,7 @@ urlpatterns = [
     path('api/accounting/customers/create/', accounting_customers_create, name='accounting_customers_create'),
     path('api/accounting/customers/<int:orgid>/update/', accounting_customers_update, name='accounting_customers_update'),
     path('api/accounting/items/search/', accounting_items_search, name='accounting_items_search'),
+    path('api/work-orders/customer-tax-rate/', work_order_customer_tax_rate, name='work_order_customer_tax_rate'),
+    path('api/work-orders/compute-totals/', work_order_compute_totals, name='work_order_compute_totals'),
     path('api/send-error-report/', error_views.send_error_report, name='send_error_report'),
 ]

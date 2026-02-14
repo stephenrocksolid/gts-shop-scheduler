@@ -345,5 +345,23 @@
         return GTS.urls.withQuery(baseUrl, queryParams);
     };
 
+    GTS.urls.workOrderCustomerTaxRateUrl = function(queryParams) {
+        var baseUrl = GTS.urls.workOrderCustomerTaxRate;
+        if (!baseUrl) {
+            console.error('[GTS.urls] workOrderCustomerTaxRate not configured');
+            return '';
+        }
+        return GTS.urls.withQuery(baseUrl, queryParams);
+    };
+
+    GTS.urls.workOrderComputeTotalsUrl = function() {
+        var baseUrl = GTS.urls.workOrderComputeTotals;
+        if (!baseUrl) {
+            console.error('[GTS.urls] workOrderComputeTotals not configured');
+            return '';
+        }
+        return baseUrl;
+    };
+
 })();
 

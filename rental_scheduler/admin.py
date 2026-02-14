@@ -9,7 +9,6 @@ from .models import (
     Invoice,
     InvoiceLine,
     StatusChange,
-    WorkOrderCompanyProfile,
     WorkOrderEmployee,
     WorkOrderNumberSequence,
 )
@@ -222,31 +221,6 @@ class WorkOrderLineV2Admin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
     readonly_fields = ("amount", "created_at", "updated_at")
-
-
-@admin.register(WorkOrderCompanyProfile)
-class WorkOrderCompanyProfileAdmin(admin.ModelAdmin):
-    """Admin configuration for WorkOrderCompanyProfile (singleton)."""
-
-    fieldsets = (
-        ("Company", {"fields": ("name", "slogan")}),
-        (
-            "Address",
-            {"fields": ("address_line1", "address_line2", "city", "state", "zip")},
-        ),
-        ("Contact", {"fields": ("tel", "fax", "email")}),
-        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
-    )
-
-    readonly_fields = ("created_at", "updated_at")
-
-    def has_add_permission(self, request):
-        # Enforce singleton (pk=1)
-        return not WorkOrderCompanyProfile.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        # Keep singleton row stable; allow editing instead
-        return False
 
 
 @admin.register(WorkOrderEmployee)

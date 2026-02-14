@@ -29,18 +29,16 @@ def test_workorder_pdf_contains_work_order_number_in_html(api_client, job):
     the work order number before conversion.
     """
     from django.template.loader import render_to_string
-    from rental_scheduler.models import WorkOrderNumberSequence, WorkOrderV2, WorkOrderCompanyProfile
+    from rental_scheduler.models import WorkOrderNumberSequence, WorkOrderV2
 
     WorkOrderNumberSequence.get_solo(start_number=901)
     wo = WorkOrderV2.objects.create(job=job)
-    company = WorkOrderCompanyProfile.get_solo()
 
     html = render_to_string(
         "rental_scheduler/workorders_v2/workorder_pdf.html",
         {
             "work_order": wo,
             "lines": [],
-            "company": company,
             "customer_name": "",
             "customer_phone": "",
             "customer_contact": "",
