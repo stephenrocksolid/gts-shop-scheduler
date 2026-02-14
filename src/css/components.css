@@ -121,6 +121,10 @@
     @apply text-blue-700 hover:text-blue-800;
 }
 
+.wo-btn-sm {
+    @apply px-2.5 py-1 text-xs;
+}
+
 .wo-input-icon {
     @apply pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400;
 }
@@ -243,6 +247,51 @@ details summary::-webkit-details-marker {
 
 .wo-customer-modal__link {
     @apply text-xs font-medium text-blue-700 hover:underline;
+}
+
+.wo-customer-modal__dupes {
+    @apply rounded-lg border border-amber-200 bg-amber-50 p-4;
+}
+
+.wo-customer-modal__dupes-header {
+    @apply mb-3;
+}
+
+.wo-customer-modal__dupes-title {
+    @apply text-sm font-semibold text-amber-900;
+}
+
+.wo-customer-modal__dupes-subtitle {
+    @apply mt-0.5 text-xs text-amber-700;
+}
+
+.wo-customer-modal__dupes-list {
+    @apply space-y-2;
+}
+
+.wo-customer-dupes__item {
+    @apply flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2;
+}
+
+.wo-customer-dupes__info {
+    @apply flex-1 min-w-0;
+}
+
+.wo-customer-dupes__name {
+    @apply text-sm font-medium text-gray-900 truncate;
+}
+
+.wo-customer-dupes__reasons {
+    @apply mt-1 flex flex-wrap gap-1;
+}
+
+.wo-customer-dupes__pill {
+    @apply inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800;
+    font-size: 11px;
+}
+
+.wo-customer-modal__dupes-actions {
+    @apply mt-3 flex items-center justify-end gap-2;
 }
 
 @keyframes wo-modal-pop {

@@ -292,24 +292,21 @@
                 nameEl.textContent = label || 'Unnamed customer';
                 info.appendChild(nameEl);
 
-                var address = formatDuplicateAddress(org);
-                if (address) {
-                    var addressEl = document.createElement('div');
-                    addressEl.className = 'wo-customer-dupes__address';
-                    addressEl.textContent = address;
-                    info.appendChild(addressEl);
-                }
-
                 if (org.match_reasons && org.match_reasons.length) {
                     var reasonsEl = document.createElement('div');
                     reasonsEl.className = 'wo-customer-dupes__reasons';
-                    reasonsEl.textContent = 'Matches: ' + org.match_reasons.join(', ');
+                    org.match_reasons.forEach(function(reason) {
+                        var pill = document.createElement('span');
+                        pill.className = 'wo-customer-dupes__pill';
+                        pill.textContent = reason;
+                        reasonsEl.appendChild(pill);
+                    });
                     info.appendChild(reasonsEl);
                 }
 
                 var useBtn = document.createElement('button');
                 useBtn.type = 'button';
-                useBtn.className = 'wo-btn wo-btn-outline';
+                useBtn.className = 'wo-btn wo-btn-outline wo-btn-sm';
                 useBtn.textContent = 'Use this customer';
                 useBtn.setAttribute('data-wo-customer-dup-use', '1');
                 useBtn._org = org;
