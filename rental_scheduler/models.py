@@ -877,6 +877,10 @@ class WorkOrderV2(models.Model):
                 total=total,
             )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._original_number = self.number
+
     def save(self, *args, **kwargs):
         creating = self._state.adding
 
@@ -891,10 +895,9 @@ class WorkOrderV2(models.Model):
         self.full_clean()
         result = super().save(*args, **kwargs)
 
-        WorkOrderNumberSequence.advance_past(self.number)
-
-        if self.pk:
-            self.recalculate_totals(save=True)
+        if creating or self.number != self._original_number:
+            WorkOrderNumberSequence.advance_past(self.number)
+        self._original_number = self.number
 
         return result
 
@@ -981,175 +984,6 @@ class WorkOrderLineV2(models.Model):
                 wo.recalculate_totals(save=True)
 
         return result
-
-
-class WorkOrder(models.Model):
-    """
-    Work Order model for tracking detailed repair work and line items.
-    Each work order is associated with exactly one job and contains multiple line items.
-    """
-    job = models.OneToOneField(
-        Job,
-        on_delete=models.CASCADE,
-        related_name='work_order',
-        help_text="Associated job for this work order"
-    )
-    wo_number = models.CharField(
-        max_length=20,
-        unique=True,
-        help_text="Unique work order number (e.g., WO-2024-001)"
-    )
-    wo_date = models.DateField(
-        default=timezone.now,
-        help_text="Date the work order was created"
-    )
-    notes = models.TextField(
-        blank=True,
-        help_text="Additional notes about the work order"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        verbose_name = "Work Order"
-        verbose_name_plural = "Work Orders"
-        ordering = ['-wo_date', '-created_at']
-        indexes = [
-            models.Index(fields=['wo_number']),
-            models.Index(fields=['wo_date']),
-            models.Index(fields=['job']),
-        ]
-    
-    def __str__(self):
-        """String representation of the work order"""
-        return f"{self.wo_number} - {self.job.display_name}"
-    
-    @property
-    def total_amount(self):
-        """Calculate the total amount from all line items"""
-        return sum(line.total for line in self.lines.all())
-    
-    @property
-    def line_count(self):
-        """Get the number of line items"""
-        return self.lines.count()
-    
-    def clean(self):
-        """Validate the work order data"""
-        super().clean()
-        
-        # Validate work order number format (basic validation)
-        if self.wo_number and not self.wo_number.strip():
-            raise ValidationError({
-                'wo_number': 'Work order number cannot be empty'
-            })
-    
-    def save(self, *args, **kwargs):
-        """Save the work order with validation"""
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-
-class WorkOrderLine(models.Model):
-    """
-    Work Order Line model for individual line items in a work order.
-    Each line represents a specific repair task, part, or service.
-    """
-    work_order = models.ForeignKey(
-        WorkOrder,
-        on_delete=models.CASCADE,
-        related_name='lines',
-        help_text="Work order this line belongs to"
-    )
-    item_code = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text="Item code or part number"
-    )
-    description = models.CharField(
-        max_length=200,
-        help_text="Description of the work or item"
-    )
-    qty = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=1.00,
-        help_text="Quantity of the item or hours of work"
-    )
-    rate = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=0.00,
-        help_text="Rate per unit (price per item or hourly rate)"
-    )
-    total = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        default=0.00,
-        help_text="Total amount for this line (qty * rate)"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        verbose_name = "Work Order Line"
-        verbose_name_plural = "Work Order Lines"
-        ordering = ['created_at']
-        indexes = [
-            models.Index(fields=['work_order']),
-            models.Index(fields=['item_code']),
-            models.Index(fields=['description']),
-        ]
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(qty__gte=0),
-                name='work_order_line_qty_non_negative'
-            ),
-            models.CheckConstraint(
-                condition=models.Q(rate__gte=0),
-                name='work_order_line_rate_non_negative'
-            ),
-            models.CheckConstraint(
-                condition=models.Q(total__gte=0),
-                name='work_order_line_total_non_negative'
-            ),
-        ]
-    
-    def __str__(self):
-        """String representation of the work order line"""
-        return f"{self.description} - Qty: {self.qty} @ ${self.rate}"
-    
-    def clean(self):
-        """Validate the work order line data"""
-        super().clean()
-        
-        # Validate quantity is positive
-        if self.qty and self.qty <= 0:
-            raise ValidationError({
-                'qty': 'Quantity must be greater than zero'
-            })
-        
-        # Validate rate is non-negative
-        if self.rate and self.rate < 0:
-            raise ValidationError({
-                'rate': 'Rate cannot be negative'
-            })
-        
-        # Validate description is not empty
-        if not self.description or not self.description.strip():
-            raise ValidationError({
-                'description': 'Description is required'
-            })
-    
-    def save(self, *args, **kwargs):
-        """Save the work order line with validation and total calculation"""
-        self.full_clean()
-        
-        # Calculate total if not explicitly set
-        if self.qty and self.rate:
-            self.total = self.qty * self.rate
-        
-        super().save(*args, **kwargs)
 
 
 class StatusChange(models.Model):

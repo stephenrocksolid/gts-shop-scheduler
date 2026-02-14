@@ -46,6 +46,7 @@ def test_workorder_new_post_creates_work_order_v2_and_lines(api_client, job):
     resp = api_client.post(
         url,
         data={
+            "date": "2024-01-15",
             "notes": "Repair notes",
             "trailer_make_model": "Model X",
             "trailer_color": "Red",
@@ -54,7 +55,6 @@ def test_workorder_new_post_creates_work_order_v2_and_lines(api_client, job):
             "job_by_rep_id": "",
             "discount_type": "amount",
             "discount_value": "0.00",
-            # Single line item
             "line_itemid": ["123"],
             "line_itemnumber_snapshot": ["PN-123"],
             "line_description_snapshot": ["Brake pads"],
@@ -92,6 +92,7 @@ def test_workorder_edit_updates_lines_and_discount(api_client, job):
     resp = api_client.post(
         url,
         data={
+            "date": "2024-01-15",
             "notes": "Updated",
             "trailer_make_model": "",
             "trailer_color": "",
@@ -100,7 +101,6 @@ def test_workorder_edit_updates_lines_and_discount(api_client, job):
             "job_by_rep_id": "",
             "discount_type": "percent",
             "discount_value": "10.00",
-            # Replace lines (2 lines now)
             "line_itemid": ["10", "11"],
             "line_itemnumber_snapshot": ["PN-10", "PN-11"],
             "line_description_snapshot": ["Item 10", "Item 11"],
@@ -407,6 +407,7 @@ def test_workorder_new_save_and_go_back_redirects_to_back_url(api_client, job):
             "trailer_make_model": "",
             "trailer_color": "",
             "trailer_serial": "",
+            "date": "2024-01-15",
             "customer_org_id": "789",
             "job_by_rep_id": "",
             "discount_type": "amount",
@@ -449,6 +450,7 @@ def test_workorder_edit_save_and_go_back_redirects_to_back_url(api_client, job):
             "trailer_make_model": "",
             "trailer_color": "",
             "trailer_serial": "",
+            "date": "2024-01-15",
             "customer_org_id": "222",
             "job_by_rep_id": "",
             "discount_type": "amount",
@@ -579,6 +581,7 @@ def test_workorder_new_with_user_specified_number(api_client, job):
     resp = api_client.post(
         url,
         data={
+            "date": "2024-01-15",
             "number": "500",
             "notes": "",
             "customer_org_id": "1",
@@ -603,6 +606,7 @@ def test_workorder_new_user_number_advances_sequence(api_client, job):
     api_client.post(
         url,
         data={
+            "date": "2024-01-15",
             "number": "500",
             "notes": "",
             "customer_org_id": "1",
@@ -625,8 +629,8 @@ def test_workorder_new_duplicate_number_shows_error(api_client, job):
     from rental_scheduler.models import Job
     other_job = Job.objects.create(
         display_name="Other Job",
-        start=job.start,
-        end=job.end,
+        start_dt=job.start_dt,
+        end_dt=job.end_dt,
     )
     WorkOrderV2.objects.create(
         job=other_job,
@@ -640,6 +644,7 @@ def test_workorder_new_duplicate_number_shows_error(api_client, job):
     resp = api_client.post(
         url,
         data={
+            "date": "2024-01-15",
             "number": "500",
             "notes": "",
             "customer_org_id": "1",
@@ -671,6 +676,7 @@ def test_workorder_edit_change_number(api_client, job):
     resp = api_client.post(
         url,
         data={
+            "date": "2024-01-15",
             "number": "999",
             "notes": "",
             "customer_org_id": "1",
@@ -701,8 +707,8 @@ def test_workorder_edit_duplicate_number_shows_error(api_client, job):
     from rental_scheduler.models import Job
     other_job = Job.objects.create(
         display_name="Other Job",
-        start=job.start,
-        end=job.end,
+        start_dt=job.start_dt,
+        end_dt=job.end_dt,
     )
     wo2 = WorkOrderV2.objects.create(
         job=other_job,
@@ -715,6 +721,7 @@ def test_workorder_edit_duplicate_number_shows_error(api_client, job):
     resp = api_client.post(
         url,
         data={
+            "date": "2024-01-15",
             "number": str(wo1.number),
             "notes": "",
             "customer_org_id": "2",
@@ -743,3 +750,91 @@ def test_workorder_new_form_shows_next_number(api_client, job):
     assert resp.status_code == 200
     html = resp.content.decode("utf-8")
     assert 'value="42"' in html
+
+
+@pytest.mark.django_db
+def test_workorder_save_with_zero_price_line(api_client, job):
+    from rental_scheduler.models import WorkOrderNumberSequence, WorkOrderV2
+
+    WorkOrderNumberSequence.get_solo(start_number=2000)
+
+    url = reverse("rental_scheduler:workorder_new") + f"?job={job.id}"
+
+    resp = api_client.post(
+        url,
+        data={
+            "notes": "",
+            "customer_org_id": "123",
+            "job_by_rep_id": "",
+            "discount_type": "amount",
+            "date": "2024-01-15",
+            "discount_value": "0.00",
+            "line_itemid": ["123"],
+            "line_itemnumber_snapshot": ["714R"],
+            "line_description_snapshot": ["6' high ramp door"],
+            "line_qty": ["1.00"],
+            "line_price": ["0.00"],
+        },
+    )
+
+    assert resp.status_code == 302
+
+    wo = WorkOrderV2.objects.get(job=job)
+    assert wo.subtotal == Decimal("0.00")
+    assert wo.total == Decimal("0.00")
+
+    lines = list(wo.lines.all())
+    assert len(lines) == 1
+    assert lines[0].price == Decimal("0.00")
+    assert lines[0].amount == Decimal("0.00")
+
+
+@pytest.mark.django_db
+def test_workorder_save_with_dollar_sign_price(api_client, job):
+    from rental_scheduler.models import WorkOrderNumberSequence, WorkOrderV2
+
+    WorkOrderNumberSequence.get_solo(start_number=3000)
+
+    url = reverse("rental_scheduler:workorder_new") + f"?job={job.id}"
+
+    resp = api_client.post(
+        url,
+        data={
+            "notes": "",
+            "customer_org_id": "123",
+            "job_by_rep_id": "",
+            "discount_type": "amount",
+            "date": "2024-01-15",
+            "discount_value": "0.00",
+            "line_itemid": ["123"],
+            "line_itemnumber_snapshot": ["714R"],
+            "line_description_snapshot": ["6' high ramp door"],
+            "line_qty": ["1.00"],
+            "line_price": ["$0.00"],
+        },
+    )
+
+    assert resp.status_code == 302
+
+    wo = WorkOrderV2.objects.get(job=job)
+    assert wo.subtotal == Decimal("0.00")
+    assert wo.total == Decimal("0.00")
+
+    lines = list(wo.lines.all())
+    assert len(lines) == 1
+    assert lines[0].price == Decimal("0.00")
+    assert lines[0].amount == Decimal("0.00")
+
+
+def test_parse_decimal_strips_currency_symbols():
+    from rental_scheduler.views import _parse_decimal
+
+    assert _parse_decimal("$0.00", field_name="price") == Decimal("0.00")
+    assert _parse_decimal("$25.50", field_name="price") == Decimal("25.50")
+    assert _parse_decimal("1,234.56", field_name="price") == Decimal("1234.56")
+    assert _parse_decimal("$1,234.56", field_name="price") == Decimal("1234.56")
+    assert _parse_decimal("  0.00  ", field_name="price") == Decimal("0.00")
+    assert _parse_decimal("", field_name="price") == Decimal("0.00")
+    assert _parse_decimal("   ", field_name="price") == Decimal("0.00")
+    assert _parse_decimal("0", field_name="price") == Decimal("0")
+    assert _parse_decimal("0.00", field_name="price") == Decimal("0.00")

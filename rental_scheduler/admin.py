@@ -2,8 +2,6 @@ from django.contrib import admin
 from .models import (
     Calendar,
     Job,
-    WorkOrder,
-    WorkOrderLine,
     WorkOrderV2,
     WorkOrderLineV2,
     StatusChange,
@@ -106,83 +104,6 @@ class JobAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Return jobs ordered by start date (newest first)"""
         return super().get_queryset(request).select_related('calendar')
-
-
-@admin.register(WorkOrder)
-class WorkOrderAdmin(admin.ModelAdmin):
-    """Admin configuration for WorkOrder model"""
-    list_display = ['wo_number', 'job_info', 'wo_date', 'total_amount', 'line_count', 'created_at']
-    list_filter = ['wo_date', 'created_at']
-    search_fields = [
-        'wo_number', 'job__business_name', 'job__contact_name', 'notes'
-    ]
-    ordering = ['-wo_date', '-created_at']
-    date_hierarchy = 'wo_date'
-    
-    fieldsets = (
-        ('Work Order Information', {
-            'fields': ('wo_number', 'wo_date', 'job')
-        }),
-        ('Details', {
-            'fields': ('notes',)
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    readonly_fields = ['created_at', 'updated_at']
-    
-    def job_info(self, obj):
-        """Display job information in the admin list"""
-        return f"{obj.job.display_name}"
-    job_info.short_description = 'Job'
-    
-    def total_amount(self, obj):
-        """Display total amount in the admin list"""
-        return f"${obj.total_amount:.2f}"
-    total_amount.short_description = 'Total'
-    
-    def line_count(self, obj):
-        """Display line count in the admin list"""
-        return obj.line_count
-    line_count.short_description = 'Lines'
-    
-    def get_queryset(self, request):
-        """Return work orders with related data"""
-        return super().get_queryset(request).select_related('job__calendar')
-
-
-@admin.register(WorkOrderLine)
-class WorkOrderLineAdmin(admin.ModelAdmin):
-    """Admin configuration for WorkOrderLine model"""
-    list_display = ['work_order', 'item_code', 'description', 'qty', 'rate', 'total', 'created_at']
-    list_filter = ['created_at', 'work_order__wo_date']
-    search_fields = [
-        'item_code', 'description', 'work_order__wo_number',
-        'work_order__job__business_name', 'work_order__job__contact_name'
-    ]
-    ordering = ['-created_at']
-    
-    fieldsets = (
-        ('Line Information', {
-            'fields': ('work_order', 'item_code', 'description')
-        }),
-        ('Pricing', {
-            'fields': ('qty', 'rate', 'total')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    readonly_fields = ['created_at', 'updated_at']
-    
-    def get_queryset(self, request):
-        """Return work order lines with related data"""
-        return super().get_queryset(request).select_related('work_order__job__calendar')
 
 
 @admin.register(WorkOrderV2)

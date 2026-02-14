@@ -19,18 +19,17 @@
         </svg>
         <span>{{ back_label }}</span>
       </a>
-      <button type="submit" form="workorder-form" class="wo-btn wo-btn-primary" data-wo-save-btn {% if not initial.customer_org_id %}disabled{% endif %}>
-        Save
+      <button type="submit" form="workorder-form" class="wo-btn wo-btn-primary inline-flex items-center gap-2" data-wo-save-btn {% if not initial.customer_org_id %}disabled{% endif %}>
+        <span data-save-label>Save</span>
+        <svg data-save-spinner class="hidden animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
       </button>
-      {% if work_order %}
-        <a href="{% url 'rental_scheduler:workorder_pdf' work_order.pk %}" target="_blank" class="wo-btn wo-btn-outline gap-1.5">
-          <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-            <path d="M6 2a2 2 0 00-2 2v3h12V4a2 2 0 00-2-2H6z" />
-            <path fill-rule="evenodd" d="M4 9a2 2 0 00-2 2v3a2 2 0 002 2h2v2h8v-2h2a2 2 0 002-2v-3a2 2 0 00-2-2H4zm3 7a1 1 0 011-1h4a1 1 0 110 2H8a1 1 0 01-1-1z" clip-rule="evenodd" />
-          </svg>
-          <span>Print PDF</span>
-        </a>
-      {% endif %}
+      <button type="button" class="wo-btn wo-btn-outline gap-1.5" data-wo-save-print-btn {% if not initial.customer_org_id %}disabled{% endif %}>
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path d="M6 2a2 2 0 00-2 2v3h12V4a2 2 0 00-2-2H6z" />
+          <path fill-rule="evenodd" d="M4 9a2 2 0 00-2 2v3a2 2 0 002 2h2v2h8v-2h2a2 2 0 002-2v-3a2 2 0 00-2-2H4zm3 7a1 1 0 011-1h4a1 1 0 110 2H8a1 1 0 01-1-1z" clip-rule="evenodd" />
+        </svg>
+        Save &amp; Print
+      </button>
     </div>
   </div>
 
@@ -45,7 +44,8 @@
     </div>
   {% endif %}
 
-  <form method="post" class="space-y-6" id="workorder-form" data-wo-main-form>
+  <form method="post" class="space-y-6" id="workorder-form" data-wo-main-form
+        {% if work_order %}data-wo-pdf-url="{% url 'rental_scheduler:workorder_pdf' work_order.pk %}"{% endif %}>
     {% csrf_token %}
     {% if next_value %}<input type="hidden" name="next" value="{{ next_value }}">{% endif %}
     <input type="hidden" name="after_save" value="" data-wo-after-save />
@@ -294,10 +294,10 @@
           Add line
         </button>
         <div class="text-sm text-gray-700 space-y-1 text-right" data-wo-totals-section style="transition: opacity 0.15s ease">
-          <div>Subtotal: <span class="font-semibold" data-wo-subtotal>$0.00</span></div>
-          <div>Discount: <span class="font-semibold" data-wo-discount-amount>$0.00</span></div>
-          <div>Tax: <span class="font-semibold" data-wo-tax-amount>$0.00</span> <span class="text-xs text-amber-600 font-medium hidden" data-wo-tax-exempt>Tax Exempt</span></div>
-          <div>Total: <span class="font-semibold" data-wo-total>$0.00</span></div>
+          <div>Subtotal: <span class="font-semibold" data-wo-subtotal>{% if work_order %}${{ work_order.subtotal|floatformat:2 }}{% else %}$0.00{% endif %}</span></div>
+          <div>Discount: <span class="font-semibold" data-wo-discount-amount>{% if work_order %}${{ work_order.discount_amount|floatformat:2 }}{% else %}$0.00{% endif %}</span></div>
+          <div>Tax: <span class="font-semibold" data-wo-tax-amount>{% if work_order %}${{ work_order.tax_amount|floatformat:2 }}{% else %}$0.00{% endif %}</span> <span class="text-xs text-amber-600 font-medium hidden" data-wo-tax-exempt>Tax Exempt</span></div>
+          <div>Total: <span class="font-semibold" data-wo-total>{% if work_order %}${{ work_order.total|floatformat:2 }}{% else %}$0.00{% endif %}</span></div>
         </div>
       </div>
     </div>
@@ -494,5 +494,18 @@
 
 {% block extra_js %}
   <script src="{% static 'rental_scheduler/js/entrypoints/work_order_page.js' %}"></script>
+  <script>
+  (function() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('auto_print') !== '1') return;
+    var form = document.querySelector('[data-wo-main-form]');
+    var pdfUrl = form && form.getAttribute('data-wo-pdf-url');
+    if (pdfUrl) window.open(pdfUrl, '_blank');
+    params.delete('auto_print');
+    var qs = params.toString();
+    var clean = window.location.pathname + (qs ? '?' + qs : '');
+    window.history.replaceState(null, '', clean);
+  })();
+  </script>
 {% endblock %}
 

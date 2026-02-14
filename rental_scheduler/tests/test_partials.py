@@ -74,7 +74,6 @@ class TestJobCreatePartial:
         assert response.status_code == 200
         content = response.content.decode('utf-8')
 
-        assert 'data-wo-action="create"' in content
         assert 'data-wo-action="save-create"' in content
         assert 'data-wo-action="edit"' not in content
         assert 'data-wo-action="print"' not in content

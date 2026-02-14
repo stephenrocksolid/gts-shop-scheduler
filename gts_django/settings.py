@@ -126,6 +126,7 @@ if os.getenv("ACCOUNTING_DB_NAME"):
         "PASSWORD": os.getenv("ACCOUNTING_DB_PASSWORD", ""),
         "HOST": os.getenv("ACCOUNTING_DB_HOST", "localhost"),
         "PORT": os.getenv("ACCOUNTING_DB_PORT", "5432"),
+        "ATOMIC_REQUESTS": False,
         "OPTIONS": {
             "connect_timeout": 10,
         },
@@ -134,6 +135,7 @@ else:
     DATABASES["accounting"] = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "accounting.sqlite3",
+        "ATOMIC_REQUESTS": False,
     }
 
 # Database Routers (route accounting_integration models to "accounting")

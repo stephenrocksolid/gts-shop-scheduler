@@ -99,7 +99,7 @@ def create_invoice_from_work_order(work_order, strict: bool = False) -> Optional
                 org=customer_org,
                 trans_date=wo_date,
                 reference_number=reference_number,
-                trans_total=work_order.subtotal or Decimal('0.00'),
+                trans_total=work_order.subtotal if work_order.subtotal is not None else Decimal('0.00'),
                 status_code='OPEN',
                 terms_id=due_on_receipt_terms,
                 bill_to_tx=build_billtotx(customer_org),
@@ -120,7 +120,7 @@ def create_invoice_from_work_order(work_order, strict: bool = False) -> Optional
             line_items = create_work_order_line_items(invoice, work_order)
             order_seq = len(line_items)
 
-            wo_discount = work_order.discount_amount or Decimal('0.00')
+            wo_discount = work_order.discount_amount if work_order.discount_amount is not None else Decimal('0.00')
             if wo_discount > 0:
                 discount_item = ensure_gts_discount_item(using='accounting')
                 discount_unit = ensure_discount_item_unit(discount_item, using='accounting')
@@ -232,7 +232,7 @@ def update_invoice_from_work_order(work_order) -> Optional[AcctTrans]:
             line_items = create_work_order_line_items(invoice, work_order)
             order_seq = len(line_items)
 
-            wo_discount = work_order.discount_amount or Decimal('0.00')
+            wo_discount = work_order.discount_amount if work_order.discount_amount is not None else Decimal('0.00')
             if wo_discount > 0:
                 discount_item = ensure_gts_discount_item(using='accounting')
                 discount_unit = ensure_discount_item_unit(discount_item, using='accounting')

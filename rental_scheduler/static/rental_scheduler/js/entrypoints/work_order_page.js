@@ -920,7 +920,7 @@
                     '<div class="font-medium text-gray-900 text-sm">' + (item.itemnumber || '') + '</div>' +
                     '<div class="text-xs text-gray-500 truncate max-w-xs">' + (item.salesdesc || '') + '</div>' +
                     '</div>';
-                var right = item.price ? '<div class="text-sm font-medium text-gray-700 ml-4 whitespace-nowrap">' + fmtMoney(parseMoney(item.price)) + '</div>' : '';
+                var right = (item.price != null && String(item.price) !== '') ? '<div class="text-sm font-medium text-gray-700 ml-4 whitespace-nowrap">' + fmtMoney(parseMoney(item.price)) + '</div>' : '';
                 btn.innerHTML = left + right;
                 container.appendChild(btn);
             });
@@ -1061,7 +1061,7 @@
                 if (itemidEl) itemidEl.value = item.itemid;
                 if (itemnumEl) itemnumEl.value = item.itemnumber || '';
                 if (descEl) descEl.value = item.salesdesc || '';
-                if (priceEl) priceEl.value = fmtMoney(parseMoney(item.price));
+                if (priceEl) priceEl.value = parseMoney(item.price).toFixed(2);
                 if (resultsEl) hide(resultsEl);
 
                 recomputeRow(row2);
@@ -1195,7 +1195,10 @@
         var form = document.querySelector('[data-wo-main-form]');
         var orgIdInput = document.querySelector('[data-wo-customer-org-id]');
         var saveBtn = document.querySelector('[data-wo-save-btn]');
+        var savePrintBtn = document.querySelector('[data-wo-save-print-btn]');
         var searchInput = document.querySelector('[data-wo-customer-search]');
+        var afterSaveInput = document.querySelector('[data-wo-after-save]');
+        var _saving = false;
 
         if (!form || !orgIdInput || !saveBtn) return;
 
@@ -1211,43 +1214,117 @@
 
         function updateSaveButtonState() {
             var hasCustomer = orgIdInput.value && orgIdInput.value.trim() !== '';
-            saveBtn.disabled = !hasCustomer;
+            var disabled = !hasCustomer || _saving;
+            saveBtn.disabled = disabled;
+            if (savePrintBtn) savePrintBtn.disabled = disabled;
+        }
+
+        function setSaving(on) {
+            _saving = on;
+            var label = saveBtn.querySelector('[data-save-label]');
+            var spinner = saveBtn.querySelector('[data-save-spinner]');
+            if (label) label.classList.toggle('hidden', on);
+            if (spinner) spinner.classList.toggle('hidden', !on);
+            updateSaveButtonState();
         }
 
         updateSaveButtonState();
 
-        var lastValue = orgIdInput.value;
-        var checkInterval = setInterval(function() {
-            if (orgIdInput.value !== lastValue) {
-                lastValue = orgIdInput.value;
-                updateSaveButtonState();
-            }
-        }, 100);
+        if (savePrintBtn && afterSaveInput) {
+            savePrintBtn.addEventListener('click', function() {
+                afterSaveInput.value = 'print';
+                if (form.requestSubmit) {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
+            });
+        }
+
+        var _observer = new MutationObserver(function() {
+            updateSaveButtonState();
+        });
+        _observer.observe(orgIdInput, { attributes: true, attributeFilter: ['value'] });
 
         document.addEventListener('wo-customer-changed', function() {
             updateSaveButtonState();
         });
 
+        orgIdInput.addEventListener('change', updateSaveButtonState);
+
         form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (_saving) return;
+
             var hasCustomer = orgIdInput.value && orgIdInput.value.trim() !== '';
             if (!hasCustomer) {
-                e.preventDefault();
                 if (GTS && GTS.showToast) {
                     GTS.showToast('Select a customer before saving.', 'error');
                 }
                 if (searchInput) {
                     searchInput.focus();
                 }
-                return false;
+                return;
             }
 
             if (!hasAtLeastOneLineItem()) {
-                e.preventDefault();
                 if (GTS && GTS.showToast) {
                     GTS.showToast('At least one line item is required.', 'error');
                 }
-                return false;
+                return;
             }
+
+            setSaving(true);
+
+            var formData = new FormData(form);
+            var csrfHeaders = GTS.csrf ? GTS.csrf.headers() : {};
+            csrfHeaders['X-Requested-With'] = 'XMLHttpRequest';
+
+            fetch(form.action || window.location.href, {
+                method: 'POST',
+                headers: csrfHeaders,
+                body: formData,
+            }).then(function(resp) {
+                return resp.json().then(function(data) {
+                    return { status: resp.status, ok: resp.ok, data: data };
+                });
+            }).then(function(result) {
+                setSaving(false);
+                var data = result.data;
+
+                if (!result.ok || !data.ok) {
+                    var errors = data.errors || {};
+                    var messages = Object.values(errors);
+                    var msg = messages.length ? messages.join(' ') : 'Save failed.';
+                    if (GTS && GTS.showToast) GTS.showToast(msg, 'error');
+                    return;
+                }
+
+                if (GTS && GTS.showToast) GTS.showToast(data.message || 'Saved.', 'success');
+
+                if (data.after_save === 'back' && data.redirect_url) {
+                    window.location.href = data.redirect_url;
+                    return;
+                }
+
+                if (data.after_save === 'print' && data.redirect_url) {
+                    window.location.href = data.redirect_url;
+                    return;
+                }
+
+                if (data.wo_pk && !window.location.pathname.includes('/edit/')) {
+                    var editUrl = window.location.pathname.replace(/\/new\/.*$/, '/' + data.wo_pk + '/edit/');
+                    var nextParam = formData.get('next');
+                    if (nextParam) editUrl += '?next=' + encodeURIComponent(nextParam);
+                    window.history.replaceState(null, '', editUrl);
+                }
+
+                if (afterSaveInput) afterSaveInput.value = '';
+                window.dispatchEvent(new CustomEvent('wo-saved', { detail: data }));
+            }).catch(function(err) {
+                setSaving(false);
+                if (GTS && GTS.showToast) GTS.showToast('Save failed: ' + (err.message || 'Network error'), 'error');
+            });
         });
 
         window.__woUpdateSaveButton = updateSaveButtonState;
@@ -1392,9 +1469,16 @@
             });
         }
 
-        // Reset dirty state on successful form submission
         form.addEventListener('submit', function() {
             isDirty = false;
+        });
+
+        window.addEventListener('wo-saved', function() {
+            isDirty = false;
+            initialFormData = new FormData(form);
+            initialFormString = Array.from(initialFormData.entries()).map(function(pair) {
+                return pair[0] + '=' + (pair[1] || '');
+            }).sort().join('&');
         });
     }
 })();

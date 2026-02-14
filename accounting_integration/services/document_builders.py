@@ -116,7 +116,7 @@ def apply_discount_to_entries(
     discount_item: ItmItems,
     discount_unit: ItmItemUnit = None,
 ) -> Optional[AcctEntry]:
-    if not discount_amount or discount_amount <= 0:
+    if discount_amount is None or discount_amount <= 0:
         return None
 
     subtotal = sum(e.entrytotal for e in product_entries)

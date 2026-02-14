@@ -177,10 +177,12 @@
           <td class="right label">Subtotal:</td>
           <td class="right" style="width: 120px;">${{ work_order.subtotal|floatformat:2 }}</td>
         </tr>
+        {% if work_order.discount_amount %}
         <tr>
-          <td class="right label">Discount:</td>
+          <td class="right label">Discount{% if work_order.discount_type == "percent" %} ({{ work_order.discount_value|floatformat:0 }}%){% endif %}:</td>
           <td class="right">${{ work_order.discount_amount|floatformat:2 }}</td>
         </tr>
+        {% endif %}
         <tr>
           <td class="right label">Tax ({{ work_order.tax_rate_snapshot }}%):</td>
           <td class="right">${{ work_order.tax_amount|floatformat:2 }}</td>

@@ -35,6 +35,7 @@ def compute_work_order_totals(
     discount_type: str,
     discount_value: Decimal | int | float | str | None,
     tax_rate: Decimal | int | float | str | None = None,
+    clamp: bool = False,
 ) -> Tuple[Decimal, Decimal, Decimal, Decimal]:
     """
     Compute (subtotal, discount_amount, tax_amount, total).
@@ -46,6 +47,10 @@ def compute_work_order_totals(
       - "amount": discount_value must be 0–subtotal
     - tax_amount = (subtotal - discount_amount) * tax_rate / 100
     - total = subtotal - discount_amount + tax_amount
+
+    When *clamp* is True, out-of-range discount values are silently clamped
+    instead of raising ValidationError.  Use this for real-time preview
+    endpoints where the form may be in an intermediate editing state.
     """
 
     discount_value_dec = quantize_money(discount_value)
@@ -72,15 +77,24 @@ def compute_work_order_totals(
         raise ValidationError({"discount_type": "Invalid discount type."})
 
     if discount_value_dec < 0:
-        raise ValidationError({"discount_value": "Discount cannot be negative."})
+        if clamp:
+            discount_value_dec = Decimal("0.00")
+        else:
+            raise ValidationError({"discount_value": "Discount cannot be negative."})
 
     if discount_type == "percent":
         if discount_value_dec > Decimal("100.00"):
-            raise ValidationError({"discount_value": "Percent discount cannot exceed 100%."})
+            if clamp:
+                discount_value_dec = Decimal("100.00")
+            else:
+                raise ValidationError({"discount_value": "Percent discount cannot exceed 100%."})
         discount_amount = quantize_money(subtotal * (discount_value_dec / Decimal("100.00")))
     else:
         if discount_value_dec > subtotal:
-            raise ValidationError({"discount_value": "Discount cannot exceed subtotal."})
+            if clamp:
+                discount_value_dec = subtotal
+            else:
+                raise ValidationError({"discount_value": "Discount cannot exceed subtotal."})
         discount_amount = quantize_money(discount_value_dec)
 
     taxable_subtotal = subtotal - discount_amount

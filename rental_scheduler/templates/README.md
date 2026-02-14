@@ -30,8 +30,7 @@ rental_scheduler/templates/
     │   └── workspace_bar.html        # Bottom Job Workspace tab bar
     ├── partials/                      # Template partials
     │   ├── job_list_table.html
-    │   ├── job_row.html
-    │   └── work_order_line.html
+    │   └── job_row.html
     ├── jobs/                          # Job-related templates
     │   ├── job_list.html
     │   ├── _job_form_partial.html

@@ -308,8 +308,11 @@ def _find_possible_customer_duplicates(payload: dict) -> list[dict]:
 
 
 def _parse_decimal(value: str, *, field_name: str) -> Decimal:
+    cleaned = str(value).strip().replace("$", "").replace(",", "")
+    if not cleaned:
+        return Decimal("0.00")
     try:
-        return Decimal(str(value))
+        return Decimal(cleaned)
     except (InvalidOperation, TypeError, ValueError):
         raise forms.ValidationError(f"Invalid number for {field_name}.")
 
@@ -524,6 +527,17 @@ def _render_workorder_v2_form(
     )
 
 
+def _wo_error_response(request, *, job, work_order, initial, errors):
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        flat_errors = {}
+        for k, v in errors.items():
+            flat_errors[k] = v if isinstance(v, str) else str(v)
+        return JsonResponse({"ok": False, "errors": flat_errors}, status=400)
+    return _render_workorder_v2_form(
+        request, job=job, work_order=work_order, initial=initial, errors=errors,
+    )
+
+
 @require_http_methods(["GET", "POST"])
 @csrf_protect
 def workorder_new(request):
@@ -625,20 +639,33 @@ def workorder_new(request):
         errors["discount_value"] = str(e)
         discount_value = Decimal("0.00")
 
+    if lines and _accounting_is_configured():
+        from accounting_integration.models import ItmItems
+        requested_ids = {l["itemid"] for l in lines}
+        try:
+            found_ids = set(
+                ItmItems.objects.using("accounting")
+                .filter(itemid__in=requested_ids)
+                .values_list("itemid", flat=True)
+            )
+        except Exception as e:
+            errors["lines"] = f"Unable to validate Classic items: {e}"
+            found_ids = requested_ids
+        missing = requested_ids - found_ids
+        if missing:
+            errors["lines"] = f"Items not found in Classic Accounting: {missing}"
+
     if errors:
-        return _render_workorder_v2_form(
-            request,
-            job=job,
-            work_order=None,
-            initial=request.POST.dict(),
-            errors=errors,
+        return _wo_error_response(
+            request, job=job, work_order=None,
+            initial=request.POST.dict(), errors=errors,
         )
+
+    tax_rate = _get_tax_rate_for_customer(customer_org_id)
 
     try:
         with transaction.atomic():
-            temp_discount_value = discount_value
-            if discount_type == WorkOrderV2.DISCOUNT_TYPE_AMOUNT and discount_value > 0 and lines:
-                temp_discount_value = Decimal("0.00")
+            from rental_scheduler.utils.work_orders import quantize_money
 
             create_kwargs = dict(
                 job=job,
@@ -651,28 +678,29 @@ def workorder_new(request):
                 trailer_color=trailer_color,
                 trailer_serial=trailer_serial,
                 discount_type=discount_type,
-                discount_value=temp_discount_value,
+                discount_value=discount_value,
+                tax_rate_snapshot=tax_rate,
             )
             if wo_number:
                 create_kwargs["number"] = wo_number
 
             wo = WorkOrderV2.objects.create(**create_kwargs)
 
-            for line in lines:
-                WorkOrderLineV2.objects.create(
+            line_objects = [
+                WorkOrderLineV2(
                     work_order=wo,
                     itemid=line["itemid"],
                     qty=line["qty"],
                     price=line["price"],
+                    amount=quantize_money(line["qty"] * line["price"]),
                     itemnumber_snapshot=line["itemnumber_snapshot"],
                     description_snapshot=line["description_snapshot"],
                 )
+                for line in lines
+            ]
+            WorkOrderLineV2.objects.bulk_create(line_objects)
 
-            tax_rate = _get_tax_rate_for_customer(customer_org_id)
-            wo.discount_type = discount_type
-            wo.discount_value = discount_value
-            wo.tax_rate_snapshot = tax_rate
-            wo.save()
+            wo.recalculate_totals(save=True)
 
             if _accounting_is_configured():
                 try:
@@ -685,27 +713,41 @@ def workorder_new(request):
                     )
     except ValidationError as e:
         error_dict = e.message_dict if hasattr(e, "message_dict") else {"__all__": str(e)}
-        return _render_workorder_v2_form(
-            request,
-            job=job,
-            work_order=None,
-            initial=request.POST.dict(),
-            errors=error_dict,
+        return _wo_error_response(
+            request, job=job, work_order=None,
+            initial=request.POST.dict(), errors=error_dict,
         )
 
-    messages.success(request, f"Work Order #{wo.number} created.")
-    # Handle redirect after save
+    msg = f"Work Order #{wo.number} created."
     after_save = request.POST.get("after_save", "").strip()
-    if after_save == "back":
-        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
-        return redirect(back_ctx["back_url"])
-    # Preserve 'next' param for back navigation
     next_url = request.POST.get("next") or request.GET.get("next") or ""
     edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
     if next_url:
         from urllib.parse import urlencode
-
         edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
+    if after_save == "print":
+        edit_url += ("&" if "?" in edit_url else "?") + "auto_print=1"
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        redirect_url = ""
+        if after_save == "back":
+            back_ctx = _get_workorder_back_context(request, job_id=job.pk)
+            redirect_url = back_ctx["back_url"]
+        elif after_save == "print":
+            redirect_url = edit_url
+        return JsonResponse({
+            "ok": True,
+            "wo_number": wo.number,
+            "wo_pk": wo.pk,
+            "message": msg,
+            "redirect_url": redirect_url,
+            "after_save": after_save,
+        })
+
+    messages.success(request, msg)
+    if after_save == "back":
+        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
+        return redirect(back_ctx["back_url"])
     return redirect(edit_url)
 
 
@@ -795,22 +837,35 @@ def workorder_edit(request, pk: int):
         errors["discount_value"] = str(e)
         discount_value = Decimal("0.00")
 
+    if lines and _accounting_is_configured():
+        from accounting_integration.models import ItmItems
+        requested_ids = {l["itemid"] for l in lines}
+        try:
+            found_ids = set(
+                ItmItems.objects.using("accounting")
+                .filter(itemid__in=requested_ids)
+                .values_list("itemid", flat=True)
+            )
+        except Exception as e:
+            errors["lines"] = f"Unable to validate Classic items: {e}"
+            found_ids = requested_ids
+        missing = requested_ids - found_ids
+        if missing:
+            errors["lines"] = f"Items not found in Classic Accounting: {missing}"
+
     if errors:
-        return _render_workorder_v2_form(
-            request,
-            job=job,
-            work_order=wo,
-            initial=request.POST.dict(),
-            errors=errors,
+        return _wo_error_response(
+            request, job=job, work_order=wo,
+            initial=request.POST.dict(), errors=errors,
         )
+
+    tax_rate = _get_tax_rate_for_customer(customer_org_id)
 
     try:
         with transaction.atomic():
-            WorkOrderLineV2.objects.filter(work_order=wo).delete()
+            from rental_scheduler.utils.work_orders import quantize_money
 
-            temp_discount_value = discount_value
-            if discount_type == WorkOrderV2.DISCOUNT_TYPE_AMOUNT and discount_value > 0 and lines:
-                temp_discount_value = Decimal("0.00")
+            WorkOrderLineV2.objects.filter(work_order=wo).delete()
 
             wo.number = wo_number
             wo.customer_org_id = customer_org_id
@@ -822,24 +877,25 @@ def workorder_edit(request, pk: int):
             wo.trailer_color = trailer_color
             wo.trailer_serial = trailer_serial
             wo.discount_type = discount_type
-            wo.discount_value = temp_discount_value
+            wo.discount_value = discount_value
+            wo.tax_rate_snapshot = tax_rate
             wo.save()
 
-            for line in lines:
-                WorkOrderLineV2.objects.create(
+            line_objects = [
+                WorkOrderLineV2(
                     work_order=wo,
                     itemid=line["itemid"],
                     qty=line["qty"],
                     price=line["price"],
+                    amount=quantize_money(line["qty"] * line["price"]),
                     itemnumber_snapshot=line["itemnumber_snapshot"],
                     description_snapshot=line["description_snapshot"],
                 )
+                for line in lines
+            ]
+            WorkOrderLineV2.objects.bulk_create(line_objects)
 
-            tax_rate = _get_tax_rate_for_customer(customer_org_id)
-            wo.discount_type = discount_type
-            wo.discount_value = discount_value
-            wo.tax_rate_snapshot = tax_rate
-            wo.save()
+            wo.recalculate_totals(save=True)
 
             if _accounting_is_configured():
                 try:
@@ -859,27 +915,41 @@ def workorder_edit(request, pk: int):
     except ValidationError as e:
         wo.refresh_from_db()
         error_dict = e.message_dict if hasattr(e, "message_dict") else {"__all__": str(e)}
-        return _render_workorder_v2_form(
-            request,
-            job=job,
-            work_order=wo,
-            initial=request.POST.dict(),
-            errors=error_dict,
+        return _wo_error_response(
+            request, job=job, work_order=wo,
+            initial=request.POST.dict(), errors=error_dict,
         )
 
-    messages.success(request, f"Work Order #{wo.number} saved.")
-    # Handle redirect after save
+    msg = f"Work Order #{wo.number} saved."
     after_save = request.POST.get("after_save", "").strip()
-    if after_save == "back":
-        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
-        return redirect(back_ctx["back_url"])
-    # Preserve 'next' param for back navigation
     next_url = request.POST.get("next") or request.GET.get("next") or ""
     edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
     if next_url:
         from urllib.parse import urlencode
-
         edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
+    if after_save == "print":
+        edit_url += ("&" if "?" in edit_url else "?") + "auto_print=1"
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        redirect_url = ""
+        if after_save == "back":
+            back_ctx = _get_workorder_back_context(request, job_id=job.pk)
+            redirect_url = back_ctx["back_url"]
+        elif after_save == "print":
+            redirect_url = edit_url
+        return JsonResponse({
+            "ok": True,
+            "wo_number": wo.number,
+            "wo_pk": wo.pk,
+            "message": msg,
+            "redirect_url": redirect_url,
+            "after_save": after_save,
+        })
+
+    messages.success(request, msg)
+    if after_save == "back":
+        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
+        return redirect(back_ctx["back_url"])
     return redirect(edit_url)
 
 
@@ -974,9 +1044,6 @@ def api_sales_reps(request):
 
 @require_http_methods(["GET"])
 def work_order_customer_tax_rate(request):
-    if not _accounting_is_configured():
-        return JsonResponse({"tax_rate": "0.00", "exempt": True})
-
     customer_org_id_raw = (request.GET.get("customer_org_id") or "").strip()
     if not customer_org_id_raw:
         return JsonResponse({"error": "customer_org_id is required."}, status=400)
@@ -985,6 +1052,9 @@ def work_order_customer_tax_rate(request):
         customer_org_id = int(customer_org_id_raw)
     except (TypeError, ValueError):
         return JsonResponse({"error": "customer_org_id must be an integer."}, status=400)
+
+    if not _accounting_is_configured():
+        return JsonResponse({"tax_rate": "0.00", "exempt": True})
 
     from accounting_integration.services.tax_applicability import get_effective_tax_rate
 
@@ -1017,6 +1087,7 @@ def work_order_compute_totals(request):
             discount_type=discount_type,
             discount_value=discount_value,
             tax_rate=tax_rate,
+            clamp=True,
         )
     except Exception:
         return JsonResponse({"error": "Invalid input."}, status=400)

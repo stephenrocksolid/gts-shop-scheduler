@@ -22,15 +22,23 @@ def classic_accounting_db(settings, monkeypatch, tmp_path):
     monkeypatch.setattr(views_module, "_accounting_is_configured", lambda: True)
 
     conn = connections["accounting"]
+    with conn.cursor() as cursor:
+        cursor.execute("PRAGMA foreign_keys = OFF")
     with conn.schema_editor() as schema:
         schema.create_model(Org)
         schema.create_model(OrgAddress)
+    with conn.cursor() as cursor:
+        cursor.execute("PRAGMA foreign_keys = ON")
 
     yield conn
 
+    with conn.cursor() as cursor:
+        cursor.execute("PRAGMA foreign_keys = OFF")
     with conn.schema_editor() as schema:
         schema.delete_model(OrgAddress)
         schema.delete_model(Org)
+    with conn.cursor() as cursor:
+        cursor.execute("PRAGMA foreign_keys = ON")
 
 
 def _seed_customer(*, name, phone, address_line1, city, state, zip_code):

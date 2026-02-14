@@ -1,11 +1,10 @@
 """
 Management command to generate realistic fake data for GTS Shop Scheduler.
-Creates calendars, jobs, work orders, and call reminders with
+Creates calendars, jobs, and call reminders with
 comprehensive edge case coverage.
 """
 import random
 from datetime import datetime, timedelta, date
-from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -14,7 +13,7 @@ from django.db import transaction
 from django.contrib.auth import get_user_model
 
 from rental_scheduler.models import (
-    Calendar, Job, WorkOrder, WorkOrderLine,
+    Calendar, Job,
     CallReminder
 )
 
@@ -133,36 +132,6 @@ REPAIR_TYPES = [
     "Complete trailer refurbishment",
 ]
 
-WORK_ORDER_ITEMS = [
-    {"code": "LABOR-STD", "description": "Standard Labor", "rate": 85.00},
-    {"code": "LABOR-WELD", "description": "Welding Labor", "rate": 95.00},
-    {"code": "LABOR-ELEC", "description": "Electrical Labor", "rate": 90.00},
-    {"code": "LABOR-REF", "description": "Refrigeration Labor", "rate": 110.00},
-    {"code": "PART-BRK01", "description": "Brake Shoes (set of 4)", "rate": 245.00},
-    {"code": "PART-BRK02", "description": "Brake Drums", "rate": 185.00},
-    {"code": "PART-BRK03", "description": "Brake Chamber", "rate": 125.00},
-    {"code": "PART-AXL01", "description": "Wheel Bearing Kit", "rate": 89.00},
-    {"code": "PART-AXL02", "description": "Hub Seal", "rate": 35.00},
-    {"code": "PART-LGT01", "description": "LED Tail Light Assembly", "rate": 65.00},
-    {"code": "PART-LGT02", "description": "Marker Light Kit", "rate": 45.00},
-    {"code": "PART-LGT03", "description": "Wiring Harness", "rate": 175.00},
-    {"code": "PART-DR01", "description": "Door Hinge (heavy duty)", "rate": 95.00},
-    {"code": "PART-DR02", "description": "Door Seal Kit", "rate": 120.00},
-    {"code": "PART-DR03", "description": "Roll-up Door Spring", "rate": 155.00},
-    {"code": "PART-FLR01", "description": "Floor Board (per sheet)", "rate": 85.00},
-    {"code": "PART-FLR02", "description": "Floor Cross Member", "rate": 145.00},
-    {"code": "PART-LND01", "description": "Landing Gear Assembly", "rate": 425.00},
-    {"code": "PART-AIR01", "description": "Air Line Kit", "rate": 55.00},
-    {"code": "PART-AIR02", "description": "Gladhand Assembly", "rate": 38.00},
-    {"code": "PART-SUS01", "description": "Suspension Bushing Kit", "rate": 165.00},
-    {"code": "PART-SUS02", "description": "Shock Absorber", "rate": 95.00},
-    {"code": "PART-TIR01", "description": "Tire Mount & Balance", "rate": 45.00},
-    {"code": "PART-MUD01", "description": "Mud Flap Set", "rate": 55.00},
-    {"code": "INSP-DOT", "description": "DOT Annual Inspection", "rate": 150.00},
-    {"code": "MISC-SHOP", "description": "Shop Supplies", "rate": 25.00},
-    {"code": "MISC-DISP", "description": "Disposal Fee", "rate": 35.00},
-]
-
 HEX_COLORS = [
     "#EF4444", "#F97316", "#F59E0B", "#EAB308", "#84CC16",
     "#22C55E", "#10B981", "#14B8A6", "#06B6D4", "#0EA5E9",
@@ -262,19 +231,16 @@ class Command(BaseCommand):
         # Generate data
         calendars = self.generate_calendars(options['calendars'])
         jobs = self.generate_jobs(calendars, options['jobs'])
-        work_orders = self.generate_work_orders(jobs)
         reminders = self.generate_call_reminders(calendars, jobs)
         
         elapsed = (timezone.now() - start_time).total_seconds()
-        self.print_summary(calendars, jobs, work_orders, reminders, elapsed)
+        self.print_summary(calendars, jobs, reminders, elapsed)
 
     def clear_data(self):
         """Clear existing data from the database."""
         self.stdout.write(self.style.WARNING('Clearing existing data...'))
         
         with transaction.atomic():
-            WorkOrderLine.objects.all().delete()
-            WorkOrder.objects.all().delete()
             CallReminder.objects.all().delete()
             Job.objects.all().delete()
             Calendar.objects.all().delete()
@@ -544,73 +510,6 @@ class Command(BaseCommand):
         
         return jobs
 
-    def generate_work_orders(self, jobs):
-        """Generate work orders for some jobs."""
-        # Select ~25% of completed/uncompleted jobs
-        eligible_jobs = [j for j in jobs if j.status in ['completed', 'uncompleted']]
-        selected_jobs = random.sample(eligible_jobs, min(len(eligible_jobs), int(len(eligible_jobs) * 0.25)))
-        
-        self.stdout.write(self.style.NOTICE(f'Generating {len(selected_jobs)} work orders...'))
-        
-        work_orders = []
-        
-        # Find the highest existing WO number to continue from
-        existing_wos = WorkOrder.objects.filter(wo_number__startswith='WO-2024-')
-        wo_counter = 1
-        if existing_wos.exists():
-            # Extract numbers from existing WO numbers and find max
-            for wo in existing_wos:
-                try:
-                    num = int(wo.wo_number.split('-')[-1])
-                    wo_counter = max(wo_counter, num + 1)
-                except (ValueError, IndexError):
-                    pass
-        
-        with transaction.atomic():
-            for job in selected_jobs:
-                # Check if job already has a work order
-                if hasattr(job, 'work_order'):
-                    continue
-                
-                wo_number = f"WO-2024-{wo_counter:03d}"
-                wo_counter += 1
-                
-                # Work order date is around job start
-                wo_date = job.start_dt.date() - timedelta(days=random.randint(0, 3))
-                
-                work_order = WorkOrder.objects.create(
-                    job=job,
-                    wo_number=wo_number,
-                    wo_date=wo_date,
-                    notes=f"Work order for {job.display_name}" if random.random() < 0.5 else "",
-                )
-                
-                # Add 2-5 line items
-                num_lines = random.randint(2, 5)
-                selected_items = random.sample(WORK_ORDER_ITEMS, num_lines)
-                
-                for item in selected_items:
-                    qty = Decimal(str(random.randint(1, 4)))
-                    if 'LABOR' in item['code']:
-                        qty = Decimal(str(random.uniform(0.5, 8.0))).quantize(Decimal('0.01'))
-                    
-                    rate = Decimal(str(item['rate'])).quantize(Decimal('0.01'))
-                    total = (qty * rate).quantize(Decimal('0.01'))
-                    
-                    WorkOrderLine.objects.create(
-                        work_order=work_order,
-                        item_code=item['code'],
-                        description=item['description'],
-                        qty=qty,
-                        rate=rate,
-                        total=total,
-                    )
-                
-                work_orders.append(work_order)
-        
-        self.stdout.write(self.style.SUCCESS(f'  {len(work_orders)} work orders created.\n'))
-        return work_orders
-
     def generate_call_reminders(self, calendars, jobs):
         """Generate standalone call reminders."""
         self.stdout.write(self.style.NOTICE('Generating call reminders...'))
@@ -667,7 +566,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f'  {len(reminders)} call reminders created.\n'))
         return reminders
 
-    def print_summary(self, calendars, jobs, work_orders, reminders, elapsed):
+    def print_summary(self, calendars, jobs, reminders, elapsed):
         """Print summary statistics."""
         self.stdout.write(self.style.SUCCESS('\n' + '='*60))
         self.stdout.write(self.style.SUCCESS('GENERATION COMPLETE'))
@@ -675,7 +574,6 @@ class Command(BaseCommand):
         
         self.stdout.write(f'\n  Calendars:      {len(calendars)}')
         self.stdout.write(f'  Jobs:           {len(jobs)}')
-        self.stdout.write(f'  Work Orders:    {len(work_orders)}')
         self.stdout.write(f'  Call Reminders: {len(reminders)}')
         self.stdout.write(f'\n  Time elapsed:   {elapsed:.2f} seconds')
         
