@@ -10,12 +10,12 @@ from django.utils import timezone
 @pytest.fixture
 def classic_accounting_db(settings, monkeypatch, tmp_path):
     from rental_scheduler import views as views_module
-    from accounting_integration.models import Org, OrgAddress
 
     db_path = tmp_path / "accounting.sqlite3"
     settings.DATABASES["accounting"] = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": str(db_path),
+        "ATOMIC_REQUESTS": False,
     }
     connections.databases["accounting"] = settings.DATABASES["accounting"]
     connections["accounting"].close()
@@ -23,22 +23,64 @@ def classic_accounting_db(settings, monkeypatch, tmp_path):
 
     conn = connections["accounting"]
     with conn.cursor() as cursor:
-        cursor.execute("PRAGMA foreign_keys = OFF")
-    with conn.schema_editor() as schema:
-        schema.create_model(Org)
-        schema.create_model(OrgAddress)
-    with conn.cursor() as cursor:
-        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS org (
+                org_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                orgdiscriminator VARCHAR(31) NOT NULL,
+                org_name_extension VARCHAR(60) NOT NULL DEFAULT '',
+                active BOOLEAN NOT NULL,
+                autoactive BOOLEAN NOT NULL,
+                balance DECIMAL(16,2) NOT NULL,
+                createdate DATETIME NOT NULL,
+                moddate DATETIME,
+                orgname VARCHAR(60),
+                phone1 VARCHAR(45),
+                contact1 VARCHAR(45),
+                email VARCHAR(300),
+                fax1 VARCHAR(45),
+                notes VARCHAR(2000),
+                alertnotes VARCHAR(1000),
+                exported BOOLEAN,
+                fiscalmonth INTEGER,
+                taxmonth INTEGER,
+                logo BLOB,
+                companyname VARCHAR(60),
+                creditlimit DECIMAL(16,4),
+                tax_exempt_expiration_date DATE,
+                tax_exempt_number VARCHAR(60) NOT NULL DEFAULT '',
+                taxable BOOLEAN,
+                eligible1099 BOOLEAN,
+                taxidno VARCHAR(40),
+                lastfcdate DATE,
+                is_cash_customer BOOLEAN NOT NULL,
+                is_no_charge_sales BOOLEAN NOT NULL,
+                def_sales_rep_id VARCHAR(36)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS org_address (
+                gen_addr_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                addresstype VARCHAR(45) NOT NULL,
+                active BOOLEAN NOT NULL,
+                addrname VARCHAR(45),
+                txtcity VARCHAR(60),
+                txtcountry VARCHAR(25),
+                createdate DATETIME NOT NULL,
+                moddate DATETIME,
+                txtstate VARCHAR(25),
+                streetone VARCHAR(60),
+                streettwo VARCHAR(60),
+                txtzip VARCHAR(45),
+                is_default BOOLEAN NOT NULL,
+                orgid INTEGER REFERENCES org(org_id)
+            )
+        """)
 
     yield conn
 
     with conn.cursor() as cursor:
-        cursor.execute("PRAGMA foreign_keys = OFF")
-    with conn.schema_editor() as schema:
-        schema.delete_model(OrgAddress)
-        schema.delete_model(Org)
-    with conn.cursor() as cursor:
-        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("DROP TABLE IF EXISTS org_address")
+        cursor.execute("DROP TABLE IF EXISTS org")
 
 
 def _seed_customer(*, name, phone, address_line1, city, state, zip_code):

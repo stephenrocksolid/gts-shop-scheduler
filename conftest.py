@@ -55,6 +55,7 @@ def disable_classic_accounting_in_tests(settings):
     db = settings.DATABASES.get("accounting") or {}
     db["ENGINE"] = "django.db.backends.sqlite3"
     db["NAME"] = ":memory:"
+    db.setdefault("ATOMIC_REQUESTS", False)
     settings.DATABASES["accounting"] = db
 
 

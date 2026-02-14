@@ -588,6 +588,11 @@ def test_workorder_new_with_user_specified_number(api_client, job):
             "job_by_rep_id": "",
             "discount_type": "amount",
             "discount_value": "0.00",
+            "line_itemid": ["1"],
+            "line_itemnumber_snapshot": ["PN-1"],
+            "line_description_snapshot": ["Part"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
         },
     )
 
@@ -613,6 +618,11 @@ def test_workorder_new_user_number_advances_sequence(api_client, job):
             "job_by_rep_id": "",
             "discount_type": "amount",
             "discount_value": "0.00",
+            "line_itemid": ["1"],
+            "line_itemnumber_snapshot": ["PN-1"],
+            "line_description_snapshot": ["Part"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
         },
     )
 
@@ -628,7 +638,8 @@ def test_workorder_new_duplicate_number_shows_error(api_client, job):
 
     from rental_scheduler.models import Job
     other_job = Job.objects.create(
-        display_name="Other Job",
+        calendar=job.calendar,
+        business_name="Other Job",
         start_dt=job.start_dt,
         end_dt=job.end_dt,
     )
@@ -651,6 +662,11 @@ def test_workorder_new_duplicate_number_shows_error(api_client, job):
             "job_by_rep_id": "",
             "discount_type": "amount",
             "discount_value": "0.00",
+            "line_itemid": ["1"],
+            "line_itemnumber_snapshot": ["PN-1"],
+            "line_description_snapshot": ["Part"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
         },
     )
 
@@ -683,6 +699,11 @@ def test_workorder_edit_change_number(api_client, job):
             "job_by_rep_id": "",
             "discount_type": "amount",
             "discount_value": "0.00",
+            "line_itemid": ["1"],
+            "line_itemnumber_snapshot": ["PN-1"],
+            "line_description_snapshot": ["Part"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
         },
     )
 
@@ -706,7 +727,8 @@ def test_workorder_edit_duplicate_number_shows_error(api_client, job):
 
     from rental_scheduler.models import Job
     other_job = Job.objects.create(
-        display_name="Other Job",
+        calendar=job.calendar,
+        business_name="Other Job",
         start_dt=job.start_dt,
         end_dt=job.end_dt,
     )
@@ -728,6 +750,11 @@ def test_workorder_edit_duplicate_number_shows_error(api_client, job):
             "job_by_rep_id": "",
             "discount_type": "amount",
             "discount_value": "0.00",
+            "line_itemid": ["1"],
+            "line_itemnumber_snapshot": ["PN-1"],
+            "line_description_snapshot": ["Part"],
+            "line_qty": ["1.00"],
+            "line_price": ["10.00"],
         },
     )
 
