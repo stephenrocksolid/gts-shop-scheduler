@@ -918,7 +918,7 @@
                 btn._item = item;
                 var left = '<div class="text-left">' +
                     '<div class="font-medium text-gray-900 text-sm">' + (item.itemnumber || '') + '</div>' +
-                    '<div class="text-xs text-gray-500 truncate max-w-xs">' + (item.salesdesc || '') + '</div>' +
+                    '<div class="text-xs text-gray-500 truncate max-w-md">' + (item.salesdesc || '') + '</div>' +
                     '</div>';
                 var right = (item.price != null && String(item.price) !== '') ? '<div class="text-sm font-medium text-gray-700 ml-4 whitespace-nowrap">' + fmtMoney(parseMoney(item.price)) + '</div>' : '';
                 btn.innerHTML = left + right;
