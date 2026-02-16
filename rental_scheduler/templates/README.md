@@ -29,8 +29,14 @@ rental_scheduler/templates/
     │   ├── panel.html                # Floating Job Panel shell
     │   └── workspace_bar.html        # Bottom Job Workspace tab bar
     ├── partials/                      # Template partials
+    │   ├── invoice_line.html
+    │   ├── invoice_line_form.html
     │   ├── job_list_table.html
-    │   └── job_row.html
+    │   ├── job_row.html
+    │   ├── work_order_line.html
+    │   ├── workorder_line_row.html
+    │   ├── workorder_list_table.html
+    │   └── workorder_row.html
     ├── jobs/                          # Job-related templates
     │   ├── job_list.html
     │   ├── _job_form_partial.html
@@ -38,12 +44,26 @@ rental_scheduler/templates/
     │   ├── job_confirm_delete.html
     │   ├── job_import.html
     │   ├── job_import_json.html
-    │   └── import_history.html
+    │   ├── import_history.html
+    │   ├── job_print_invoice.html
+    │   ├── job_print_wo_customer.html
+    │   └── job_print_wo.html
     ├── call_reminders/                # Call reminder partials
     │   └── _call_reminder_form_partial.html
-    ├── workorders_v2/                 # Work order v2 templates
+    ├── invoices/                      # Invoice-related templates
+    │   ├── invoice_confirm_delete.html
+    │   ├── invoice_detail.html
+    │   ├── invoice_form.html
+    │   ├── invoice_list.html
+    │   ├── invoice_print.html
+    │   └── invoiceline_form.html
+    ├── workorders/                    # Work order templates
+    │   ├── workorder_confirm_delete.html
+    │   ├── workorder_customer_print.html
+    │   ├── workorder_detail.html
     │   ├── workorder_form.html
-    │   └── workorder_pdf.html
+    │   ├── workorder_list.html
+    │   └── workorder_print.html
     ├── calendars/                     # Calendar templates
     │   ├── calendar_confirm_delete.html
     │   ├── calendar_form.html
@@ -67,7 +87,8 @@ rental_scheduler/templates/
 
 ### Feature-Specific Templates
 - **`jobs/`**: All job-related templates (CRUD operations, modals, prints)
-- **`workorders_v2/`**: Work order v2 templates (revamp)
+- **`invoices/`**: All invoice-related templates
+- **`workorders/`**: All work order templates
 - **`calendars/`**: All calendar-related templates
 
 ## Naming Conventions

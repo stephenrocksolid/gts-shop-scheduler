@@ -1,18 +1,6 @@
 """
 pytest configuration for rental_scheduler tests.
 """
-import os
-
-# -----------------------------------------------------------------------------
-# Test isolation: Classic Accounting is an external system.
-#
-# `gts_django/settings.py` calls `load_dotenv()` at import time. To keep the test
-# suite deterministic (and avoid accidentally enabling Classic DB access via a
-# developer's local `.env`), force Classic Accounting to be "not configured"
-# unless a test explicitly overrides settings.DATABASES.
-# -----------------------------------------------------------------------------
-os.environ["ACCOUNTING_DB_NAME"] = ""
-
 import pytest
 import django
 from django.conf import settings
@@ -39,24 +27,6 @@ def use_simple_staticfiles_storage(settings):
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
     }
-
-
-@pytest.fixture(autouse=True)
-def disable_classic_accounting_in_tests(settings):
-    """
-    Ensure tests never attempt to query the Classic Accounting database.
-
-    Classic is an external system (no migrations), and local developer `.env`
-    files may point the alias at a real DB. For the unit/integration test suite,
-    force the alias into a harmless placeholder configuration.
-    """
-    # IMPORTANT: mutate in-place so Django's per-alias defaults (e.g. ATOMIC_REQUESTS)
-    # added during setup are preserved.
-    db = settings.DATABASES.get("accounting") or {}
-    db["ENGINE"] = "django.db.backends.sqlite3"
-    db["NAME"] = ":memory:"
-    db.setdefault("ATOMIC_REQUESTS", False)
-    settings.DATABASES["accounting"] = db
 
 
 @pytest.fixture

@@ -1,0 +1,305 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">{{ title }}</h1>
+            <div class="flex space-x-3">
+                <a href="{% url 'rental_scheduler:invoice_list' %}" 
+                   class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Back to Invoices
+                </a>
+            </div>
+        </div>
+
+        <!-- Work Order Preview (if creating from work order) -->
+        {% if work_order %}
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <h3 class="text-lg font-semibold text-blue-900 mb-2">Creating Invoice from Work Order</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <span class="text-sm font-medium text-blue-700">Work Order:</span>
+                    <span class="ml-2 text-blue-900">{{ work_order.wo_number }}</span>
+                </div>
+                <div>
+                    <span class="text-sm font-medium text-blue-700">Customer:</span>
+                    <span class="ml-2 text-blue-900">{{ job.display_name }}</span>
+                </div>
+                <div>
+                    <span class="text-sm font-medium text-blue-700">Work Order Total:</span>
+                    <span class="ml-2 text-blue-900 font-bold">${{ work_order_total|floatformat:2 }}</span>
+                </div>
+            </div>
+            <div class="mt-3">
+                <span class="text-sm font-medium text-blue-700">Trailer:</span>
+                <span class="ml-2 text-blue-900">{{ job.trailer.number }} - {{ job.trailer.model }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Invoice Form -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <form method="post" class="space-y-6">
+                {% csrf_token %}
+                
+                <!-- Invoice Details -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="{{ form.invoice_number.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Invoice Number *
+                        </label>
+                        {{ form.invoice_number }}
+                        {% if form.invoice_number.errors %}
+                            <div class="text-red-600 text-sm mt-1">{{ form.invoice_number.errors.0 }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div>
+                        <label for="{{ form.invoice_date.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                            Invoice Date *
+                        </label>
+                        {{ form.invoice_date }}
+                        {% if form.invoice_date.errors %}
+                            <div class="text-red-600 text-sm mt-1">{{ form.invoice_date.errors.0 }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Billing Information -->
+                <div class="border-t border-gray-200 pt-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Billing Information</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="{{ form.bill_to_name.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Bill To Name
+                            </label>
+                            {{ form.bill_to_name }}
+                            {% if form.bill_to_name.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.bill_to_name.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div>
+                            <label for="{{ form.bill_to_phone.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Bill To Phone
+                            </label>
+                            {{ form.bill_to_phone }}
+                            {% if form.bill_to_phone.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.bill_to_phone.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                        <div>
+                            <label for="{{ form.bill_to_address_line1.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Address Line 1
+                            </label>
+                            {{ form.bill_to_address_line1 }}
+                            {% if form.bill_to_address_line1.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.bill_to_address_line1.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div>
+                            <label for="{{ form.bill_to_address_line2.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Address Line 2
+                            </label>
+                            {{ form.bill_to_address_line2 }}
+                            {% if form.bill_to_address_line2.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.bill_to_address_line2.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
+                        <div>
+                            <label for="{{ form.bill_to_city.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                City
+                            </label>
+                            {{ form.bill_to_city }}
+                            {% if form.bill_to_city.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.bill_to_city.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div>
+                            <label for="{{ form.bill_to_state.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                State
+                            </label>
+                            {{ form.bill_to_state }}
+                            {% if form.bill_to_state.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.bill_to_state.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div>
+                            <label for="{{ form.bill_to_postal_code.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Postal Code
+                            </label>
+                            {{ form.bill_to_postal_code }}
+                            {% if form.bill_to_postal_code.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.bill_to_postal_code.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tax Information -->
+                <div class="border-t border-gray-200 pt-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Tax Information</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="{{ form.tax_rate.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Tax Rate (%)
+                            </label>
+                            {{ form.tax_rate }}
+                            {% if form.tax_rate.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.tax_rate.errors.0 }}</div>
+                            {% endif %}
+                            <p class="text-sm text-gray-500 mt-1">Enter as decimal (e.g., 0.0825 for 8.25%)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notes -->
+                <div class="border-t border-gray-200 pt-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Notes</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="{{ form.notes_public.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Public Notes
+                            </label>
+                            {{ form.notes_public }}
+                            {% if form.notes_public.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.notes_public.errors.0 }}</div>
+                            {% endif %}
+                            <p class="text-sm text-gray-500 mt-1">Visible to customer on invoice</p>
+                        </div>
+                        
+                        <div>
+                            <label for="{{ form.notes_private.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                Private Notes
+                            </label>
+                            {{ form.notes_private }}
+                            {% if form.notes_private.errors %}
+                                <div class="text-red-600 text-sm mt-1">{{ form.notes_private.errors.0 }}</div>
+                            {% endif %}
+                            <p class="text-sm text-gray-500 mt-1">Internal notes only</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Line Items Preview (if creating from work order) -->
+                {% if work_order and lines %}
+                <div class="border-t border-gray-200 pt-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Line Items (from Work Order)</h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Code</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for line in lines %}
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ line.item_code|default:"-" }}
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-gray-900">
+                                        {{ line.description }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {{ line.qty|floatformat:2 }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        ${{ line.rate|floatformat:2 }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        ${{ line.total|floatformat:2 }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot class="bg-gray-50">
+                                <tr>
+                                    <td colspan="4" class="px-6 py-3 text-right text-sm font-bold text-gray-900">Total:</td>
+                                    <td class="px-6 py-3 text-sm font-bold text-gray-900">${{ work_order_total|floatformat:2 }}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-2">
+                        These line items will be automatically copied to the invoice when you save.
+                    </p>
+                </div>
+                {% endif %}
+
+                <!-- Form Actions -->
+                <div class="border-t border-gray-200 pt-6">
+                    <div class="flex justify-end space-x-3">
+                        <a href="{% url 'rental_scheduler:invoice_list' %}" 
+                           class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                            Cancel
+                        </a>
+                        <button type="submit" 
+                                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                            {% if work_order %}Create Invoice{% else %}Save Invoice{% endif %}
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Form field styling */
+input[type="text"], input[type="email"], input[type="number"], input[type="date"], textarea, select {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+input[type="text"]:focus, input[type="email"]:focus, input[type="number"]:focus, input[type="date"]:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+textarea {
+    resize: vertical;
+    min-height: 100px;
+}
+
+/* Error styling */
+input[type="text"].error, input[type="email"].error, input[type="number"].error, input[type="date"].error, textarea.error, select.error {
+    border-color: #dc2626;
+}
+
+input[type="text"].error:focus, input[type="email"].error:focus, input[type="number"].error:focus, input[type="date"].error:focus, textarea.error:focus, select.error:focus {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+</style>
+{% endblock %}
+
+
+

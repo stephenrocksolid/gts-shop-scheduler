@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto p-8 bg-white">
+    <div class="text-center mb-8">
+        <h1 class="text-2xl font-bold text-gray-900">WORK ORDER - CUSTOMER COPY</h1>
+        <p class="text-lg text-gray-600">Job #{{ job.id }}</p>
+    </div>
+    
+    <div class="grid grid-cols-2 gap-8 mb-8">
+        <div>
+            <h2 class="text-lg font-semibold mb-4">Customer Information</h2>
+            <p><strong>Business:</strong> {{ job.business_name|default:"N/A" }}</p>
+            <p><strong>Contact:</strong> {{ job.contact_name|default:"N/A" }}</p>
+            <p><strong>Phone:</strong> {{ job.phone|default:"N/A" }}</p>
+            <p>&nbsp;</p>
+            {% if job.date_call_received %}
+            <p><strong>Call Received:</strong> {{ job.date_call_received|date:"M d, Y" }}</p>
+            <p>&nbsp;</p>
+            {% endif %}
+            <p><strong>Scheduled:</strong> {{ job.start_dt|date:"M d, Y" }} - {{ job.end_dt|date:"M d, Y" }}</p>
+            {% if job.address_line1 %}
+            <p><strong>Address:</strong><br>
+            {{ job.address_line1 }}<br>
+            {% if job.address_line2 %}{{ job.address_line2 }}<br>{% endif %}
+            {% if job.city or job.state or job.postal_code %}
+            {{ job.city }}{% if job.city and job.state %}, {% endif %}{{ job.state }} {{ job.postal_code }}
+            {% endif %}
+            </p>
+            {% endif %}
+        </div>
+        <div>
+            <h2 class="text-lg font-semibold mb-4">Service Details</h2>
+            <p><strong>Calendar:</strong> {{ job.calendar.name }}</p>
+            <p><strong>Status:</strong> {{ job.get_status_display }}</p>
+        </div>
+    </div>
+    
+    {% if job.notes %}
+    <div class="mb-8">
+        <h2 class="text-lg font-semibold mb-4">General Notes</h2>
+        <div class="bg-gray-50 p-4 rounded-md">
+            {{ job.notes|linebreaks }}
+        </div>
+    </div>
+    {% endif %}
+    
+    <div class="mb-8">
+        <h2 class="text-lg font-semibold mb-4">Equipment</h2>
+        {% if job.trailer_details %}<p><strong>Description:</strong> {{ job.trailer_details }}</p>{% endif %}
+        {% if job.trailer_color %}<p><strong>Color:</strong> {{ job.trailer_color }}</p>{% endif %}
+        {% if job.trailer_serial %}<p><strong>Serial #:</strong> {{ job.trailer_serial }}</p>{% endif %}
+    </div>
+    
+    {% if job.repair_notes %}
+    <div class="mb-8">
+        <h2 class="text-lg font-semibold mb-4">Repair Notes</h2>
+        <div class="bg-gray-50 p-4 rounded-md">
+            {{ job.repair_notes|linebreaks }}
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if job.quote %}
+    <div class="text-right mb-8">
+        <p class="text-xl font-semibold">Estimated Cost: ${{ job.quote }}</p>
+    </div>
+    {% endif %}
+    
+    <div class="border-t pt-4 text-sm text-gray-600">
+        <p>Thank you for choosing our services. Please keep this copy for your records.</p>
+    </div>
+</div>
+
+<script>
+window.print();
+</script>
+{% endblock %}

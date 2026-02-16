@@ -44,7 +44,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'rental_scheduler',
-    'accounting_integration',
 ]
 
 MIDDLEWARE = [
@@ -113,35 +112,6 @@ else:
     }
 
 
-# Classic Accounting database (optional; configured via env vars)
-#
-# This repo needs the alias to exist so router/config tests can validate setup.
-# When Classic env vars aren't present (e.g. CI/tests), we point it at SQLite so
-# Django doesn't require a live external database just to boot.
-if os.getenv("ACCOUNTING_DB_NAME"):
-    DATABASES["accounting"] = {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("ACCOUNTING_DB_NAME"),
-        "USER": os.getenv("ACCOUNTING_DB_USER", "postgres"),
-        "PASSWORD": os.getenv("ACCOUNTING_DB_PASSWORD", ""),
-        "HOST": os.getenv("ACCOUNTING_DB_HOST", "localhost"),
-        "PORT": os.getenv("ACCOUNTING_DB_PORT", "5432"),
-        "ATOMIC_REQUESTS": False,
-        "OPTIONS": {
-            "connect_timeout": 10,
-        },
-    }
-else:
-    DATABASES["accounting"] = {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "accounting.sqlite3",
-        "ATOMIC_REQUESTS": False,
-    }
-
-# Database Routers (route accounting_integration models to "accounting")
-DATABASE_ROUTERS = ["accounting_integration.router.AccountingRouter"]
-
-
 # Cache configuration for calendar API performance
 # LocMemCache is suitable for single-worker dev; for multi-worker prod, use Redis
 CACHES = {
@@ -198,18 +168,13 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = []
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# IMPORTANT: Use unhashed static storage in DEBUG for fast iteration.
-staticfiles_backend = (
-    "django.contrib.staticfiles.storage.StaticFilesStorage"
-    if DEBUG
-    else "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
-)
+#IMPORTANT: This is to make that the static files get collected with a hashed filename!!!!!
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
-        "BACKEND": staticfiles_backend,
+        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
     },
 }
 

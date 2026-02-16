@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import "./components.css";
-@import "./calendar.css";
 
 @layer components {
     select option {

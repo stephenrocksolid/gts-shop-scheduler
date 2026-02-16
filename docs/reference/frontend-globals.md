@@ -22,8 +22,6 @@ See also: `docs/reference/urls-and-routing.md`.
 
 Defined in: `rental_scheduler/static/rental_scheduler/js/panel.js`
 
-**Note**: `window.JobPanel` is **not available** on Work Order v2 pages (`workorder_new`, `workorder_edit`) as those pages intentionally exclude the Job Panel and Workspace bar to provide a focused editing experience.
-
 ### Core methods
 
 - `JobPanel.open()`: open the panel UI
@@ -47,8 +45,6 @@ Defined in: `rental_scheduler/static/rental_scheduler/js/panel.js`
 ## `window.JobWorkspace` (bottom tabs)
 
 Defined in: `rental_scheduler/static/rental_scheduler/js/workspace.js` (class instance assigned to `window.JobWorkspace`)
-
-**Note**: `window.JobWorkspace` is **not available** on Work Order v2 pages (`workorder_new`, `workorder_edit`) as those pages intentionally exclude the Workspace bar.
 
 ### Core methods
 
@@ -88,23 +84,6 @@ Injected by Django in `base.html`. See `docs/reference/urls-and-routing.md` for 
 - `GTS.urls.jobDeleteRecurringTemplate` → `/api/jobs/{job_id}/delete-recurring/` (template)
 - `GTS.urls.jobDeleteRecurring(jobId)` → helper function (in `urls.js`)
 - `GTS.urls.seriesOccurrences` → `/api/recurrence/series-occurrences/` (grouped search expansion)
-
-### Recent additions (Jan 2026)
-
-- Work Orders (revamp):
-  - `GTS.urls.workOrderNewBase`
-  - `GTS.urls.workOrderEditTemplate`
-  - `GTS.urls.workOrderPdfTemplate`
-  - `GTS.urls.workOrderNew({ job: jobId })`
-  - `GTS.urls.workOrderEdit(pk)`
-  - `GTS.urls.workOrderPdf(pk)`
-
-- Classic Accounting APIs:
-  - `GTS.urls.accountingCustomerSearch`
-  - `GTS.urls.accountingCustomerCreate`
-  - `GTS.urls.accountingCustomerUpdateTemplate`
-  - `GTS.urls.accountingItemSearch`
-  - `GTS.urls.accountingCustomerUpdate(orgid)`
 
 ## Legacy globals (kept for compatibility)
 

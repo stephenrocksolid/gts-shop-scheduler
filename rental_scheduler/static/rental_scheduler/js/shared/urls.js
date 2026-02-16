@@ -239,110 +239,24 @@
         return GTS.urls.interpolate(template, { job_id: jobId });
     };
 
-    // =========================================================================
-    // WORK ORDERS (v2)
-    // =========================================================================
-
     /**
-     * Work Order create URL (with query params).
-     * @param {Object} [queryParams] - e.g. { job: 123 }
+     * Get job print URL
+     * @param {string|number} jobId
+     * @param {string} printType - 'wo', 'wo-customer', or 'invoice'
      * @returns {string}
      */
-    GTS.urls.workOrderNew = function(queryParams) {
-        var baseUrl = GTS.urls.workOrderNewBase;
-        if (!baseUrl) {
-            console.error('[GTS.urls] workOrderNewBase not configured');
-            return '';
-        }
-        return GTS.urls.withQuery(baseUrl, queryParams);
-    };
-
-    /**
-     * Work Order edit URL.
-     * @param {string|number} pk
-     * @returns {string}
-     */
-    GTS.urls.workOrderEdit = function(pk) {
-        var template = GTS.urls.workOrderEditTemplate;
+    GTS.urls.jobPrint = function(jobId, printType) {
+        var templateMap = {
+            'wo': GTS.urls.jobPrintWoTemplate,
+            'wo-customer': GTS.urls.jobPrintWoCustomerTemplate,
+            'invoice': GTS.urls.jobPrintInvoiceTemplate
+        };
+        var template = templateMap[printType];
         if (!template) {
-            console.error('[GTS.urls] workOrderEditTemplate not configured');
+            console.error('[GTS.urls] Print template not configured for type: ' + printType);
             return '';
         }
-        return GTS.urls.interpolate(template, { pk: pk });
-    };
-
-    /**
-     * Work Order PDF URL.
-     * @param {string|number} pk
-     * @returns {string}
-     */
-    GTS.urls.workOrderPdf = function(pk) {
-        var template = GTS.urls.workOrderPdfTemplate;
-        if (!template) {
-            console.error('[GTS.urls] workOrderPdfTemplate not configured');
-            return '';
-        }
-        return GTS.urls.interpolate(template, { pk: pk });
-    };
-
-    /**
-     * Accounting customer update URL.
-     * @param {string|number} orgid
-     * @returns {string}
-     */
-    GTS.urls.accountingCustomerUpdate = function(orgid) {
-        var template = GTS.urls.accountingCustomerUpdateTemplate;
-        if (!template) {
-            console.error('[GTS.urls] accountingCustomerUpdateTemplate not configured');
-            return '';
-        }
-        return GTS.urls.interpolate(template, { orgid: orgid });
-    };
-
-    /**
-     * Accounting customer search URL (with query params).
-     * @param {Object} [queryParams] - e.g. { q: 'acme' }
-     * @returns {string}
-     */
-    GTS.urls.accountingCustomerSearchUrl = function(queryParams) {
-        var baseUrl = GTS.urls.accountingCustomerSearch;
-        if (!baseUrl) {
-            console.error('[GTS.urls] accountingCustomerSearch not configured');
-            return '';
-        }
-        return GTS.urls.withQuery(baseUrl, queryParams);
-    };
-
-    /**
-     * Accounting item search URL (with query params).
-     * @param {Object} [queryParams] - e.g. { q: 'bolt' }
-     * @returns {string}
-     */
-    GTS.urls.accountingItemSearchUrl = function(queryParams) {
-        var baseUrl = GTS.urls.accountingItemSearch;
-        if (!baseUrl) {
-            console.error('[GTS.urls] accountingItemSearch not configured');
-            return '';
-        }
-        return GTS.urls.withQuery(baseUrl, queryParams);
-    };
-
-    GTS.urls.workOrderCustomerTaxRateUrl = function(queryParams) {
-        var baseUrl = GTS.urls.workOrderCustomerTaxRate;
-        if (!baseUrl) {
-            console.error('[GTS.urls] workOrderCustomerTaxRate not configured');
-            return '';
-        }
-        return GTS.urls.withQuery(baseUrl, queryParams);
-    };
-
-    GTS.urls.workOrderComputeTotalsUrl = function() {
-        var baseUrl = GTS.urls.workOrderComputeTotals;
-        if (!baseUrl) {
-            console.error('[GTS.urls] workOrderComputeTotals not configured');
-            return '';
-        }
-        return baseUrl;
+        return GTS.urls.interpolate(template, { job_id: jobId });
     };
 
 })();

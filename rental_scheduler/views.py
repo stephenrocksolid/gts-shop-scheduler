@@ -6,30 +6,27 @@ Optimized for performance:
 - Calendar feed endpoint is read-only (no DB writes)
 - Payloads minimized with .only() where appropriate
 """
-import difflib
 import json
 import logging
 import re
-from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, timedelta
 
 from django import forms
 from django.contrib import messages
-from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 from django.views.generic import (
     CreateView,
     DeleteView,
+    DetailView,
     ListView,
     TemplateView,
     UpdateView,
@@ -43,1394 +40,8 @@ from rental_scheduler.utils.events import (
 )
 from rental_scheduler.utils.phone import format_phone
 
-from .forms import CalendarImportForm, JobForm
-from .models import (
-    Calendar,
-    Job,
-    WorkOrderLineV2,
-    WorkOrderNumberSequence,
-    WorkOrderV2,
-)
-
-# ============================================================================
-# Work Order (v2) / Classic Accounting helpers
-# ============================================================================
-
-
-def _accounting_is_configured() -> bool:
-    """
-    Return True when Classic Accounting DB is configured for real use.
-
-    In tests/CI/dev without Classic env vars, we configure a placeholder SQLite
-    DB for the alias; in that case we must not attempt to query Classic tables.
-    """
-
-    accounting_db = (settings.DATABASES or {}).get("accounting") or {}
-    return accounting_db.get("ENGINE") == "django.db.backends.postgresql"
-
-
-def _get_tax_rate_for_customer(customer_org_id) -> Decimal:
-    if not customer_org_id or not _accounting_is_configured():
-        return Decimal("0.0000")
-    try:
-        from accounting_integration.services.tax_applicability import get_effective_tax_rate
-
-        rate, _exempt = get_effective_tax_rate(int(customer_org_id))
-        return rate
-    except Exception:
-        return Decimal("0.0000")
-
-
-_DUPLICATE_NAME_THRESHOLD = 0.82
-_DUPLICATE_MAX_RESULTS = 10
-_DUPLICATE_CANDIDATE_LIMIT = 200
-
-
-def _normalize_simple_text(value: str) -> str:
-    text = (value or "").strip().lower()
-    if not text:
-        return ""
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _strip_classic_name_suffix(value: str) -> str:
-    if not value:
-        return ""
-    value = str(value).strip()
-    value = re.sub(r"\s*\(\d+\)\s*$", "", value)
-    value = re.sub(r"\s*#\d+\s*$", "", value)
-    return value.strip()
-
-
-def _normalize_name(value: str) -> str:
-    return _normalize_simple_text(_strip_classic_name_suffix(value))
-
-
-def _normalize_phone_digits(value: str) -> str:
-    return re.sub(r"\D", "", value or "")
-
-
-def _normalize_phone_tail(value: str) -> str:
-    digits = _normalize_phone_digits(value)
-    if not digits:
-        return ""
-    if len(digits) == 11 and digits.startswith("1"):
-        digits = digits[1:]
-    if len(digits) > 10:
-        digits = digits[-10:]
-    if len(digits) < 7:
-        return ""
-    return digits
-
-
-def _phone_matches(target_digits: str, candidate_digits: str) -> bool:
-    if not target_digits or not candidate_digits:
-        return False
-    if len(target_digits) >= 10 and len(candidate_digits) >= 10:
-        return target_digits[-10:] == candidate_digits[-10:]
-    return target_digits[-7:] == candidate_digits[-7:]
-
-
-def _normalize_zip(value: str) -> str:
-    return re.sub(r"\D", "", value or "")
-
-
-def _normalize_state(value: str) -> str:
-    return (value or "").strip().upper()
-
-
-def _name_similarity(a: str, b: str) -> float:
-    if not a or not b:
-        return 0.0
-    return difflib.SequenceMatcher(None, a, b).ratio()
-
-
-def _address_matches(target: dict, candidate: dict) -> bool:
-    target_line = _normalize_simple_text(target.get("address_line1") or "")
-    candidate_line = _normalize_simple_text(candidate.get("address_line1") or "")
-    if not target_line or not candidate_line or target_line != candidate_line:
-        return False
-
-    target_zip = _normalize_zip(target.get("zip") or "")
-    candidate_zip = _normalize_zip(candidate.get("zip") or "")
-    if target_zip and candidate_zip:
-        return target_zip == candidate_zip
-
-    target_city = _normalize_simple_text(target.get("city") or "")
-    candidate_city = _normalize_simple_text(candidate.get("city") or "")
-    target_state = _normalize_state(target.get("state") or "")
-    candidate_state = _normalize_state(candidate.get("state") or "")
-
-    return bool(target_city and target_state and target_city == candidate_city and target_state == candidate_state)
-
-
-def _find_possible_customer_duplicates(payload: dict) -> list[dict]:
-    from accounting_integration.models import Org, OrgAddress
-
-    name_raw = payload.get("name") or ""
-    phone_raw = payload.get("phone") or ""
-    address_line1 = payload.get("address_line1") or ""
-    city = payload.get("city") or ""
-    state = payload.get("state") or ""
-    zip_code = payload.get("zip") or ""
-
-    normalized_name = _normalize_name(name_raw)
-    target_phone_digits = _normalize_phone_tail(phone_raw)
-    target_zip = _normalize_zip(zip_code)
-
-    if not (normalized_name or target_phone_digits or address_line1 or target_zip):
-        return []
-
-    candidate_ids: set[int] = set()
-    org_qs = Org.objects.using("accounting").filter(orgdiscriminator="CUST")
-
-    if normalized_name:
-        name_tokens = [t for t in normalized_name.split(" ") if len(t) > 2][:3]
-        if name_tokens:
-            name_q = models.Q()
-            for token in name_tokens:
-                name_q |= models.Q(orgname__icontains=token)
-            candidate_ids.update(
-                list(
-                    org_qs.filter(name_q).values_list("org_id", flat=True)[:_DUPLICATE_CANDIDATE_LIMIT]
-                )
-            )
-
-    if target_phone_digits:
-        last4 = target_phone_digits[-4:]
-        if last4:
-            candidate_ids.update(
-                list(
-                    org_qs.filter(phone1__icontains=last4).values_list("org_id", flat=True)[:_DUPLICATE_CANDIDATE_LIMIT]
-                )
-            )
-
-    addr_token = []
-    if not target_zip:
-        addr_token = [token for token in _normalize_simple_text(address_line1).split(" ") if token]
-    if target_zip or addr_token:
-        addr_qs = OrgAddress.objects.using("accounting").filter(addresstype="BILLTO")
-        if target_zip:
-            addr_qs = addr_qs.filter(txtzip__icontains=target_zip)
-        elif addr_token:
-            addr_qs = addr_qs.filter(streetone__icontains=addr_token[0])
-        candidate_ids.update(
-            list(addr_qs.values_list("orgid_id", flat=True)[:_DUPLICATE_CANDIDATE_LIMIT])
-        )
-
-    if not candidate_ids:
-        return []
-
-    candidate_list = list(candidate_ids)[:_DUPLICATE_CANDIDATE_LIMIT]
-    orgs = list(org_qs.filter(org_id__in=candidate_list))
-    if not orgs:
-        return []
-
-    org_ids = [org.org_id for org in orgs]
-    address_map: dict[int, dict] = {}
-    addr_rows = (
-        OrgAddress.objects.using("accounting")
-        .filter(orgid_id__in=org_ids, addresstype="BILLTO")
-        .order_by("orgid_id", "-is_default", "-gen_addr_id")
-    )
-    for addr in addr_rows:
-        org_id = addr.orgid_id
-        if org_id in address_map:
-            continue
-        address_map[org_id] = {
-            "address_line1": addr.streetone or "",
-            "address_line2": addr.streettwo or "",
-            "city": addr.txtcity or "",
-            "state": addr.txtstate or "",
-            "zip": addr.txtzip or "",
-        }
-
-    results: list[dict] = []
-    for org in orgs:
-        reasons: list[str] = []
-        org_phone_digits = _normalize_phone_tail(org.phone1 or "")
-        if target_phone_digits and org_phone_digits and _phone_matches(target_phone_digits, org_phone_digits):
-            reasons.append("phone")
-
-        org_name_norm = _normalize_name(org.orgname or "")
-        name_score = _name_similarity(normalized_name, org_name_norm)
-        if normalized_name and org_name_norm:
-            if name_score >= _DUPLICATE_NAME_THRESHOLD or (
-                (normalized_name in org_name_norm or org_name_norm in normalized_name)
-                and min(len(normalized_name), len(org_name_norm)) >= 4
-            ):
-                reasons.append("name")
-
-        addr_payload = address_map.get(org.org_id, {})
-        if _address_matches(
-            {
-                "address_line1": address_line1,
-                "city": city,
-                "state": state,
-                "zip": zip_code,
-            },
-            addr_payload,
-        ):
-            reasons.append("address")
-
-        if not reasons:
-            continue
-
-        score = 0.0
-        if "phone" in reasons:
-            score += 1.2
-        if "address" in reasons:
-            score += 0.9
-        if "name" in reasons:
-            score += 0.5 + (name_score * 0.5)
-
-        results.append(
-            {
-                "org_id": org.org_id,
-                "name": org.orgname or "",
-                "phone": org.phone1 or "",
-                "contact": org.contact1 or "",
-                "email": org.email or "",
-                "address_line1": addr_payload.get("address_line1", ""),
-                "address_line2": addr_payload.get("address_line2", ""),
-                "city": addr_payload.get("city", ""),
-                "state": addr_payload.get("state", ""),
-                "zip": addr_payload.get("zip", ""),
-                "match_reasons": reasons,
-                "name_score": round(name_score, 3) if name_score else 0.0,
-                "score": round(score, 3),
-            }
-        )
-
-    results.sort(key=lambda item: (item.get("score", 0), item.get("name", "")), reverse=True)
-    return results[:_DUPLICATE_MAX_RESULTS]
-
-
-def _parse_decimal(value: str, *, field_name: str) -> Decimal:
-    cleaned = str(value).strip().replace("$", "").replace(",", "")
-    if not cleaned:
-        return Decimal("0.00")
-    try:
-        return Decimal(cleaned)
-    except (InvalidOperation, TypeError, ValueError):
-        raise forms.ValidationError(f"Invalid number for {field_name}.")
-
-
-def _parse_line_items_from_post(request) -> list[dict]:
-    itemids = request.POST.getlist("line_itemid")
-    qtys = request.POST.getlist("line_qty")
-    prices = request.POST.getlist("line_price")
-    itemnumbers = request.POST.getlist("line_itemnumber_snapshot")
-    descs = request.POST.getlist("line_description_snapshot")
-
-    # Normalize lengths (missing lists become empty strings)
-    max_len = max(len(itemids), len(qtys), len(prices), len(itemnumbers), len(descs), 0)
-
-    def _get(lst, idx):
-        return lst[idx] if idx < len(lst) else ""
-
-    lines: list[dict] = []
-    for i in range(max_len):
-        raw_itemid = str(_get(itemids, i)).strip()
-        if not raw_itemid:
-            continue
-
-        try:
-            itemid = int(raw_itemid)
-        except (TypeError, ValueError):
-            raise forms.ValidationError(f"Invalid itemid at line {i + 1}.")
-
-        qty = _parse_decimal(_get(qtys, i), field_name=f"qty (line {i + 1})")
-        price = _parse_decimal(_get(prices, i), field_name=f"price (line {i + 1})")
-
-        lines.append(
-            {
-                "itemid": itemid,
-                "qty": qty,
-                "price": price,
-                "itemnumber_snapshot": str(_get(itemnumbers, i)).strip(),
-                "description_snapshot": str(_get(descs, i)).strip(),
-            }
-        )
-
-    return lines
-
-
-def _get_workorder_back_context(request, *, job_id: int | None = None) -> dict:
-    """
-    Compute back_url and back_label for Work Order pages.
-
-    Reads the 'next' query param (GET or POST), validates it is same-host,
-    and returns a dict with:
-      - back_url: validated URL or fallback to job_list
-      - back_label: human-readable label based on the URL
-      - next_value: the raw validated value (to embed in form for POST round-trip)
-    """
-
-    def _with_query(url: str, extra_params: dict[str, str | int]) -> str:
-        """
-        Merge query params into a URL while preserving existing duplicates for
-        keys we don't touch (e.g., calendars=1&calendars=2).
-        """
-        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
-        parts = urlsplit(url)
-        existing_pairs = parse_qsl(parts.query, keep_blank_values=True)
-        extra_keys = set(extra_params.keys())
-
-        merged_pairs = [(k, v) for (k, v) in existing_pairs if k not in extra_keys]
-        for k, v in extra_params.items():
-            if v is None or v == "":
-                continue
-            merged_pairs.append((k, str(v)))
-
-        return urlunsplit(
-            (
-                parts.scheme,
-                parts.netloc,
-                parts.path,
-                urlencode(merged_pairs, doseq=True),
-                parts.fragment,
-            )
-        )
-
-    next_url = request.GET.get("next") or request.POST.get("next") or ""
-    fallback = reverse("rental_scheduler:job_list")
-
-    # Validate: must be same-host (no open redirect)
-    if next_url and url_has_allowed_host_and_scheme(
-        next_url,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
-    ):
-        back_url = next_url
-    else:
-        back_url = fallback
-
-    # Determine label
-    from urllib.parse import urlsplit
-
-    calendar_url = reverse("rental_scheduler:calendar")
-    job_list_url = reverse("rental_scheduler:job_list")
-    back_path = urlsplit(back_url).path
-
-    if back_path.startswith(calendar_url):
-        back_label = "Back to Calendar"
-        if job_id:
-            back_url = _with_query(back_url, {"open_job": job_id})
-    elif back_path.startswith(job_list_url):
-        back_label = "Back to Jobs"
-        if job_id:
-            back_url = _with_query(back_url, {"open_job": job_id})
-    else:
-        back_label = "Back"
-
-    return {
-        "back_url": back_url,
-        "back_label": back_label,
-        "next_value": back_url if back_url != fallback else "",
-    }
-
-
-def _render_workorder_v2_form(
-    request,
-    *,
-    job: Job,
-    work_order: WorkOrderV2 | None,
-    initial: dict | None = None,
-    errors: dict | None = None,
-):
-    from rental_scheduler.constants import US_STATE_TERRITORY_CHOICES
-    
-    sales_reps = []
-    if _accounting_is_configured():
-        try:
-            from accounting_integration.models import AcctSalesRep
-            sales_reps = list(AcctSalesRep.objects.using("accounting").filter(active=True).order_by("rep_name"))
-        except Exception:
-            pass
-    back_ctx = _get_workorder_back_context(request, job_id=job.pk)
-    # Title format: "Work Order: Customer (Phone)" to match header
-    title = f"Work Order: {job.display_name}"
-    if job.phone:
-        title += f" ({job.phone})"
-
-    initial_data = initial or {}
-    initial_customer = None
-    customer_org_id = None
-    customer_org_id_raw = initial_data.get("customer_org_id", "")
-    customer_org_id_raw = str(customer_org_id_raw).strip() if customer_org_id_raw is not None else ""
-    if customer_org_id_raw:
-        try:
-            customer_org_id = int(customer_org_id_raw)
-        except (TypeError, ValueError):
-            customer_org_id = None
-
-    if customer_org_id:
-        initial_customer = {"org_id": customer_org_id}
-        if _accounting_is_configured():
-            try:
-                from accounting_integration.models import Org, OrgAddress
-
-                org = Org.objects.using("accounting").filter(org_id=customer_org_id).first()
-                if org:
-                    initial_customer.update(
-                        {
-                            "name": org.orgname or "",
-                            "phone": org.phone1 or "",
-                            "contact": org.contact1 or "",
-                            "email": org.email or "",
-                            "taxable": org.taxable,
-                        }
-                    )
-                    address = (
-                        OrgAddress.objects.using("accounting")
-                        .filter(orgid=org, addresstype="BILLTO")
-                        .order_by("-is_default", "-gen_addr_id")
-                        .first()
-                    )
-                    if address:
-                        initial_customer.update(
-                            {
-                                "address_line1": address.streetone or "",
-                                "address_line2": address.streettwo or "",
-                                "city": address.txtcity or "",
-                                "state": address.txtstate or "",
-                                "zip": address.txtzip or "",
-                            }
-                        )
-            except Exception:
-                pass
-    from django.db.models import Max
-    seq_number = WorkOrderNumberSequence.get_solo().next_number
-    max_existing = WorkOrderV2.objects.aggregate(m=Max('number'))['m'] or 0
-    next_wo_number = max(seq_number, max_existing + 1)
-
-    return render(
-        request,
-        "rental_scheduler/workorders_v2/workorder_form.html",
-        {
-            "title": title,
-            "job": job,
-            "work_order": work_order,
-            "sales_reps": sales_reps,
-            "state_choices": US_STATE_TERRITORY_CHOICES,
-            "initial": initial_data,
-            "initial_customer": initial_customer,
-            "errors": errors or {},
-            "back_url": back_ctx["back_url"],
-            "back_label": back_ctx["back_label"],
-            "next_value": back_ctx["next_value"],
-            "next_wo_number": next_wo_number,
-        },
-    )
-
-
-def _wo_error_response(request, *, job, work_order, initial, errors):
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        flat_errors = {}
-        for k, v in errors.items():
-            flat_errors[k] = v if isinstance(v, str) else str(v)
-        return JsonResponse({"ok": False, "errors": flat_errors}, status=400)
-    return _render_workorder_v2_form(
-        request, job=job, work_order=work_order, initial=initial, errors=errors,
-    )
-
-
-@require_http_methods(["GET", "POST"])
-@csrf_protect
-def workorder_new(request):
-    job_id = request.GET.get("job")
-    if not job_id:
-        return HttpResponse("Missing required query param: job", status=400)
-
-    job = get_object_or_404(Job, pk=job_id)
-
-    existing = WorkOrderV2.objects.filter(job=job).first()
-    if existing:
-        # Preserve 'next' param for back navigation
-        next_url = request.GET.get("next") or ""
-        edit_url = reverse("rental_scheduler:workorder_edit", args=[existing.pk])
-        if next_url:
-            from urllib.parse import urlencode
-
-            edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
-        return redirect(edit_url)
-
-    if request.method == "GET":
-        initial = {
-            "notes": job.repair_notes or "",
-            "trailer_make_model": job.trailer_details or "",
-            "trailer_color": job.trailer_color or "",
-            "trailer_serial": job.trailer_serial or "",
-            "discount_type": "amount",
-            "discount_value": "0.00",
-            "customer_org_id": "",
-            "job_by_rep_id": "",
-            "date": job.start_dt.date().isoformat() if job.start_dt else "",
-        }
-        return _render_workorder_v2_form(request, job=job, work_order=None, initial=initial)
-
-    # POST: create work order + lines (transactional)
-    errors: dict = {}
-    try:
-        lines = _parse_line_items_from_post(request)
-    except forms.ValidationError as e:
-        errors["lines"] = str(e)
-        lines = []
-
-    if not lines and "lines" not in errors:
-        errors["lines"] = "At least one line item is required."
-
-    notes = request.POST.get("notes", "")
-    trailer_make_model = job.trailer_details or ""
-    trailer_color = job.trailer_color or ""
-    trailer_serial = job.trailer_serial or ""
-    discount_type = request.POST.get("discount_type", "amount")
-    discount_value_raw = request.POST.get("discount_value", "0.00")
-    customer_org_id_raw = str(request.POST.get("customer_org_id", "")).strip()
-    job_by_rep_id_raw = str(request.POST.get("job_by_rep_id", "")).strip()
-    number_raw = str(request.POST.get("number", "")).strip()
-    date_raw = request.POST.get("date", "").strip()
-
-    wo_date = None
-    if date_raw:
-        from datetime import date as date_type
-        try:
-            wo_date = date_type.fromisoformat(date_raw)
-        except (ValueError, TypeError):
-            errors["date"] = "Invalid date format."
-    else:
-        errors["date"] = "Date is required."
-
-    wo_number = None
-    if number_raw:
-        try:
-            wo_number = int(number_raw)
-            if wo_number < 1:
-                errors["number"] = "Work order number must be a positive integer."
-        except (TypeError, ValueError):
-            errors["number"] = "Work order number must be a positive integer."
-
-    customer_org_id = None
-    if not customer_org_id_raw:
-        errors["customer_org_id"] = "Customer is required."
-    else:
-        try:
-            customer_org_id = int(customer_org_id_raw)
-        except (TypeError, ValueError):
-            errors["customer_org_id"] = "Customer ID must be an integer."
-
-    job_by_rep_id = ""
-    job_by_name = ""
-    if job_by_rep_id_raw and _accounting_is_configured():
-        try:
-            from accounting_integration.models import AcctSalesRep
-            rep = AcctSalesRep.objects.using("accounting").get(pk=job_by_rep_id_raw)
-            job_by_rep_id = rep.id
-            job_by_name = rep.rep_name or ""
-        except AcctSalesRep.DoesNotExist:
-            errors["job_by_rep_id"] = "Invalid sales rep."
-
-    try:
-        discount_value = _parse_decimal(discount_value_raw, field_name="discount")
-    except forms.ValidationError as e:
-        errors["discount_value"] = str(e)
-        discount_value = Decimal("0.00")
-
-    if lines and _accounting_is_configured():
-        from accounting_integration.models import ItmItems
-        requested_ids = {l["itemid"] for l in lines}
-        try:
-            found_ids = set(
-                ItmItems.objects.using("accounting")
-                .filter(itemid__in=requested_ids)
-                .values_list("itemid", flat=True)
-            )
-        except Exception as e:
-            errors["lines"] = f"Unable to validate Classic items: {e}"
-            found_ids = requested_ids
-        missing = requested_ids - found_ids
-        if missing:
-            errors["lines"] = f"Items not found in Classic Accounting: {missing}"
-
-    if errors:
-        return _wo_error_response(
-            request, job=job, work_order=None,
-            initial=request.POST.dict(), errors=errors,
-        )
-
-    tax_rate = _get_tax_rate_for_customer(customer_org_id)
-
-    try:
-        with transaction.atomic():
-            from rental_scheduler.utils.work_orders import quantize_money
-
-            create_kwargs = dict(
-                job=job,
-                customer_org_id=customer_org_id,
-                job_by_rep_id=job_by_rep_id,
-                job_by_name=job_by_name,
-                date=wo_date,
-                notes=notes,
-                trailer_make_model=trailer_make_model,
-                trailer_color=trailer_color,
-                trailer_serial=trailer_serial,
-                discount_type=discount_type,
-                discount_value=discount_value,
-                tax_rate_snapshot=tax_rate,
-            )
-            if wo_number:
-                create_kwargs["number"] = wo_number
-
-            wo = WorkOrderV2.objects.create(**create_kwargs)
-
-            line_objects = [
-                WorkOrderLineV2(
-                    work_order=wo,
-                    itemid=line["itemid"],
-                    qty=line["qty"],
-                    price=line["price"],
-                    amount=quantize_money(line["qty"] * line["price"]),
-                    itemnumber_snapshot=line["itemnumber_snapshot"],
-                    description_snapshot=line["description_snapshot"],
-                )
-                for line in lines
-            ]
-            WorkOrderLineV2.objects.bulk_create(line_objects)
-
-            wo.recalculate_totals(save=True)
-
-            if _accounting_is_configured():
-                try:
-                    from accounting_integration.services.invoice import create_invoice_from_work_order
-                    create_invoice_from_work_order(wo, strict=True)
-                except Exception as e:
-                    logger.error(f"Invoice creation failed for WO #{wo.number}: {e}", exc_info=True)
-                    raise ValidationError(
-                        f"Work order saved but invoice creation failed: {e}"
-                    )
-    except ValidationError as e:
-        error_dict = e.message_dict if hasattr(e, "message_dict") else {"__all__": str(e)}
-        return _wo_error_response(
-            request, job=job, work_order=None,
-            initial=request.POST.dict(), errors=error_dict,
-        )
-
-    msg = f"Work Order #{wo.number} created."
-    after_save = request.POST.get("after_save", "").strip()
-    next_url = request.POST.get("next") or request.GET.get("next") or ""
-    edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
-    if next_url:
-        from urllib.parse import urlencode
-        edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
-    if after_save == "print":
-        edit_url += ("&" if "?" in edit_url else "?") + "auto_print=1"
-
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        redirect_url = ""
-        if after_save == "back":
-            back_ctx = _get_workorder_back_context(request, job_id=job.pk)
-            redirect_url = back_ctx["back_url"]
-        elif after_save == "print":
-            redirect_url = edit_url
-        return JsonResponse({
-            "ok": True,
-            "wo_number": wo.number,
-            "wo_pk": wo.pk,
-            "message": msg,
-            "redirect_url": redirect_url,
-            "after_save": after_save,
-        })
-
-    messages.success(request, msg)
-    if after_save == "back":
-        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
-        return redirect(back_ctx["back_url"])
-    return redirect(edit_url)
-
-
-@require_http_methods(["GET", "POST"])
-@csrf_protect
-def workorder_edit(request, pk: int):
-    wo = get_object_or_404(WorkOrderV2.objects.select_related("job").prefetch_related("lines"), pk=pk)
-    job = wo.job
-
-    if request.method == "GET":
-        initial = {
-            "notes": wo.notes,
-            "trailer_make_model": job.trailer_details or "",
-            "trailer_color": job.trailer_color or "",
-            "trailer_serial": job.trailer_serial or "",
-            "discount_type": wo.discount_type,
-            "discount_value": str(wo.discount_value),
-            "customer_org_id": wo.customer_org_id or "",
-            "job_by_rep_id": wo.job_by_rep_id or "",
-            "date": wo.date.isoformat() if wo.date else "",
-        }
-        return _render_workorder_v2_form(request, job=job, work_order=wo, initial=initial)
-
-    errors: dict = {}
-    try:
-        lines = _parse_line_items_from_post(request)
-    except forms.ValidationError as e:
-        errors["lines"] = str(e)
-        lines = []
-
-    if not lines and "lines" not in errors:
-        errors["lines"] = "At least one line item is required."
-
-    notes = request.POST.get("notes", "")
-    trailer_make_model = job.trailer_details or ""
-    trailer_color = job.trailer_color or ""
-    trailer_serial = job.trailer_serial or ""
-    discount_type = request.POST.get("discount_type", "amount")
-    discount_value_raw = request.POST.get("discount_value", "0.00")
-    customer_org_id_raw = str(request.POST.get("customer_org_id", "")).strip()
-    job_by_rep_id_raw = str(request.POST.get("job_by_rep_id", "")).strip()
-    number_raw = str(request.POST.get("number", "")).strip()
-    date_raw = request.POST.get("date", "").strip()
-
-    wo_date = None
-    if date_raw:
-        from datetime import date as date_type
-        try:
-            wo_date = date_type.fromisoformat(date_raw)
-        except (ValueError, TypeError):
-            errors["date"] = "Invalid date format."
-    else:
-        errors["date"] = "Date is required."
-
-    wo_number = wo.number
-    if number_raw:
-        try:
-            wo_number = int(number_raw)
-            if wo_number < 1:
-                errors["number"] = "Work order number must be a positive integer."
-        except (TypeError, ValueError):
-            errors["number"] = "Work order number must be a positive integer."
-
-    customer_org_id = None
-    if not customer_org_id_raw:
-        errors["customer_org_id"] = "Customer is required."
-    else:
-        try:
-            customer_org_id = int(customer_org_id_raw)
-        except (TypeError, ValueError):
-            errors["customer_org_id"] = "Customer ID must be an integer."
-
-    job_by_rep_id = ""
-    job_by_name = ""
-    if job_by_rep_id_raw and _accounting_is_configured():
-        try:
-            from accounting_integration.models import AcctSalesRep
-            rep = AcctSalesRep.objects.using("accounting").get(pk=job_by_rep_id_raw)
-            job_by_rep_id = rep.id
-            job_by_name = rep.rep_name or ""
-        except AcctSalesRep.DoesNotExist:
-            errors["job_by_rep_id"] = "Invalid sales rep."
-
-    try:
-        discount_value = _parse_decimal(discount_value_raw, field_name="discount")
-    except forms.ValidationError as e:
-        errors["discount_value"] = str(e)
-        discount_value = Decimal("0.00")
-
-    if lines and _accounting_is_configured():
-        from accounting_integration.models import ItmItems
-        requested_ids = {l["itemid"] for l in lines}
-        try:
-            found_ids = set(
-                ItmItems.objects.using("accounting")
-                .filter(itemid__in=requested_ids)
-                .values_list("itemid", flat=True)
-            )
-        except Exception as e:
-            errors["lines"] = f"Unable to validate Classic items: {e}"
-            found_ids = requested_ids
-        missing = requested_ids - found_ids
-        if missing:
-            errors["lines"] = f"Items not found in Classic Accounting: {missing}"
-
-    if errors:
-        return _wo_error_response(
-            request, job=job, work_order=wo,
-            initial=request.POST.dict(), errors=errors,
-        )
-
-    tax_rate = _get_tax_rate_for_customer(customer_org_id)
-
-    try:
-        with transaction.atomic():
-            from rental_scheduler.utils.work_orders import quantize_money
-
-            WorkOrderLineV2.objects.filter(work_order=wo).delete()
-
-            wo.number = wo_number
-            wo.customer_org_id = customer_org_id
-            wo.job_by_rep_id = job_by_rep_id
-            wo.job_by_name = job_by_name
-            wo.date = wo_date
-            wo.notes = notes
-            wo.trailer_make_model = trailer_make_model
-            wo.trailer_color = trailer_color
-            wo.trailer_serial = trailer_serial
-            wo.discount_type = discount_type
-            wo.discount_value = discount_value
-            wo.tax_rate_snapshot = tax_rate
-            wo.save()
-
-            line_objects = [
-                WorkOrderLineV2(
-                    work_order=wo,
-                    itemid=line["itemid"],
-                    qty=line["qty"],
-                    price=line["price"],
-                    amount=quantize_money(line["qty"] * line["price"]),
-                    itemnumber_snapshot=line["itemnumber_snapshot"],
-                    description_snapshot=line["description_snapshot"],
-                )
-                for line in lines
-            ]
-            WorkOrderLineV2.objects.bulk_create(line_objects)
-
-            wo.recalculate_totals(save=True)
-
-            if _accounting_is_configured():
-                try:
-                    from accounting_integration.services.invoice import (
-                        create_invoice_from_work_order,
-                        update_invoice_from_work_order,
-                    )
-                    if wo.accounting_invoice_id:
-                        update_invoice_from_work_order(wo)
-                    else:
-                        create_invoice_from_work_order(wo, strict=True)
-                except Exception as e:
-                    logger.error(f"Invoice sync failed for WO #{wo.number}: {e}", exc_info=True)
-                    raise ValidationError(
-                        f"Work order saved but invoice sync failed: {e}"
-                    )
-    except ValidationError as e:
-        wo.refresh_from_db()
-        error_dict = e.message_dict if hasattr(e, "message_dict") else {"__all__": str(e)}
-        return _wo_error_response(
-            request, job=job, work_order=wo,
-            initial=request.POST.dict(), errors=error_dict,
-        )
-
-    msg = f"Work Order #{wo.number} saved."
-    after_save = request.POST.get("after_save", "").strip()
-    next_url = request.POST.get("next") or request.GET.get("next") or ""
-    edit_url = reverse("rental_scheduler:workorder_edit", args=[wo.pk])
-    if next_url:
-        from urllib.parse import urlencode
-        edit_url = f"{edit_url}?{urlencode({'next': next_url})}"
-    if after_save == "print":
-        edit_url += ("&" if "?" in edit_url else "?") + "auto_print=1"
-
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        redirect_url = ""
-        if after_save == "back":
-            back_ctx = _get_workorder_back_context(request, job_id=job.pk)
-            redirect_url = back_ctx["back_url"]
-        elif after_save == "print":
-            redirect_url = edit_url
-        return JsonResponse({
-            "ok": True,
-            "wo_number": wo.number,
-            "wo_pk": wo.pk,
-            "message": msg,
-            "redirect_url": redirect_url,
-            "after_save": after_save,
-        })
-
-    messages.success(request, msg)
-    if after_save == "back":
-        back_ctx = _get_workorder_back_context(request, job_id=job.pk)
-        return redirect(back_ctx["back_url"])
-    return redirect(edit_url)
-
-
-@require_http_methods(["GET"])
-def accounting_customers_search(request):
-    if not _accounting_is_configured():
-        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
-
-    q = (request.GET.get("q") or "").strip()
-
-    from accounting_integration.models import Org
-
-    qs = Org.objects.using("accounting").filter(orgdiscriminator="CUST")
-    if q:
-        qs = qs.filter(
-            models.Q(orgname__icontains=q)
-            | models.Q(phone1__icontains=q)
-            | models.Q(contact1__icontains=q)
-            | models.Q(email__icontains=q)
-        )
-
-    results = []
-    for org in qs.order_by("orgname")[:20]:
-        results.append(
-            {
-                "org_id": org.org_id,
-                "name": org.orgname or "",
-                "phone": org.phone1 or "",
-                "contact": org.contact1 or "",
-                "email": org.email or "",
-                "taxable": org.taxable,
-            }
-        )
-
-    return JsonResponse({"results": results})
-
-
-@require_http_methods(["GET"])
-def accounting_items_search(request):
-    if not _accounting_is_configured():
-        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
-
-    q = (request.GET.get("q") or "").strip()
-
-    from accounting_integration.models import ItmItems
-
-    qs = ItmItems.objects.using("accounting").all()
-    if q:
-        qs = qs.filter(models.Q(itemnumber__icontains=q) | models.Q(salesdesc__icontains=q))
-
-    results = []
-    for item in qs.order_by("itemnumber")[:20]:
-        results.append(
-            {
-                "itemid": item.itemid,
-                "itemnumber": item.itemnumber,
-                "salesdesc": item.salesdesc,
-                # Send price as string to preserve precision in JSON
-                "price": str(item.price),
-            }
-        )
-
-    return JsonResponse({"results": results})
-
-
-@require_http_methods(["GET"])
-def api_sales_reps(request):
-    if not _accounting_is_configured():
-        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
-
-    from accounting_integration.models import AcctSalesRep
-
-    reps = AcctSalesRep.objects.using("accounting").filter(active=True).order_by("rep_name")
-    results = [
-        {"id": rep.id, "rep_name": rep.rep_name or "", "rep_initials": rep.rep_initials or ""}
-        for rep in reps
-    ]
-
-    customer_default_rep_id = ""
-    customer_org_id = (request.GET.get("customer_org_id") or "").strip()
-    if customer_org_id:
-        try:
-            from accounting_integration.models import Org
-            org = Org.objects.using("accounting").filter(org_id=int(customer_org_id)).first()
-            if org and org.def_sales_rep_id_id:
-                customer_default_rep_id = org.def_sales_rep_id_id
-        except (ValueError, TypeError):
-            pass
-
-    return JsonResponse({"results": results, "customer_default_rep_id": customer_default_rep_id})
-
-
-@require_http_methods(["GET"])
-def work_order_customer_tax_rate(request):
-    customer_org_id_raw = (request.GET.get("customer_org_id") or "").strip()
-    if not customer_org_id_raw:
-        return JsonResponse({"error": "customer_org_id is required."}, status=400)
-
-    try:
-        customer_org_id = int(customer_org_id_raw)
-    except (TypeError, ValueError):
-        return JsonResponse({"error": "customer_org_id must be an integer."}, status=400)
-
-    if not _accounting_is_configured():
-        return JsonResponse({"tax_rate": "0.00", "exempt": True})
-
-    from accounting_integration.services.tax_applicability import get_effective_tax_rate
-
-    try:
-        rate, exempt = get_effective_tax_rate(customer_org_id)
-    except Exception:
-        return JsonResponse({"tax_rate": "0.00", "exempt": True})
-
-    return JsonResponse({"tax_rate": str(rate), "exempt": exempt})
-
-
-@require_http_methods(["POST"])
-@csrf_protect
-def work_order_compute_totals(request):
-    from rental_scheduler.utils.work_orders import compute_work_order_totals
-
-    try:
-        body = json.loads(request.body)
-    except (json.JSONDecodeError, ValueError):
-        return JsonResponse({"error": "Invalid JSON."}, status=400)
-
-    line_items = body.get("line_items") or []
-    discount_type = body.get("discount_type", "amount")
-    discount_value = body.get("discount_value", "0.00")
-    tax_rate = body.get("tax_rate", "0.00")
-
-    try:
-        subtotal, discount_amount, tax_amount, total = compute_work_order_totals(
-            line_items=line_items,
-            discount_type=discount_type,
-            discount_value=discount_value,
-            tax_rate=tax_rate,
-            clamp=True,
-        )
-    except Exception:
-        return JsonResponse({"error": "Invalid input."}, status=400)
-
-    return JsonResponse({
-        "subtotal": str(subtotal),
-        "discount_amount": str(discount_amount),
-        "tax_amount": str(tax_amount),
-        "total": str(total),
-    })
-
-
-def _normalize_state_code(value: str) -> str:
-    """
-    Normalize and validate US state/territory code.
-    
-    Args:
-        value: Raw state input (2-letter code or full name)
-    
-    Returns:
-        Normalized 2-letter USPS code (uppercase) or empty string
-    
-    Raises:
-        ValidationError: If value is non-empty and not a valid state/territory
-    """
-    from rental_scheduler.constants import US_STATE_TERRITORY_CODE_SET, US_STATE_TERRITORY_NAME_TO_CODE
-    
-    normalized = (value or "").strip().upper()
-    
-    if not normalized:
-        return ""
-    
-    # Already a valid 2-letter code
-    if normalized in US_STATE_TERRITORY_CODE_SET:
-        return normalized
-    
-    # Try mapping full name to code (defensive: allows "Tennessee" → "TN")
-    if normalized in US_STATE_TERRITORY_NAME_TO_CODE:
-        return US_STATE_TERRITORY_NAME_TO_CODE[normalized]
-    
-    # Invalid state
-    from django.core.exceptions import ValidationError
-    raise ValidationError(f"State must be a valid 2-letter USPS code (e.g., TN, KY). Received: {value[:20]}")
-
-
-def _classic_customer_payload(data: dict) -> dict:
-    """Normalize Classic customer payload from JSON/form data."""
-    raw_state = (data.get("state") or data.get("txtstate") or "").strip()
-    
-    return {
-        "name": (data.get("name") or data.get("orgname") or "").strip(),
-        "phone": (data.get("phone") or data.get("phone1") or "").strip(),
-        "contact": (data.get("contact") or data.get("contact1") or "").strip(),
-        "email": (data.get("email") or "").strip(),
-        "address_line1": (data.get("address_line1") or data.get("streetone") or "").strip(),
-        "address_line2": (data.get("address_line2") or data.get("streettwo") or "").strip(),
-        "city": (data.get("city") or data.get("txtcity") or "").strip(),
-        "state": raw_state,  # Will be normalized/validated separately
-        "zip": (data.get("zip") or data.get("txtzip") or "").strip(),
-    }
-
-
-def _create_unique_classic_orgname(name: str) -> str:
-    """
-    Classic uniqueness constraint: (orgdiscriminator, orgname, org_name_extension).
-
-    We keep org_name_extension blank and add a numeric suffix to orgname when needed.
-    """
-    from accounting_integration.models import Org
-
-    base = (name or "").strip()[:60]
-    if not base:
-        return ""
-
-    candidate = base[:60]
-    if not Org.objects.using("accounting").filter(
-        orgdiscriminator="CUST",
-        orgname=candidate,
-        org_name_extension="",
-    ).exists():
-        return candidate
-
-    suffix_num = 2
-    while suffix_num < 1000:
-        suffix = f" ({suffix_num})"
-        max_base = 60 - len(suffix)
-        candidate = base[:max_base] + suffix
-        if not Org.objects.using("accounting").filter(
-            orgdiscriminator="CUST",
-            orgname=candidate,
-            org_name_extension="",
-        ).exists():
-            return candidate
-        suffix_num += 1
-
-    return base[:50] + f" #{suffix_num}"[:10]
-
-
-@require_http_methods(["POST"])
-@csrf_protect
-def accounting_customers_create(request):
-    if not _accounting_is_configured():
-        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
-
-    try:
-        data = json.loads(request.body.decode("utf-8") or "{}") if request.content_type == "application/json" else request.POST
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON payload."}, status=400)
-
-    payload = _classic_customer_payload(data)
-    if not payload["name"]:
-        return JsonResponse({"error": "Customer name is required."}, status=400)
-    
-    # Normalize and validate state
-    try:
-        payload["state"] = _normalize_state_code(payload["state"])
-    except ValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    allow_duplicate_raw = data.get("allow_duplicate") if isinstance(data, dict) else None
-    if allow_duplicate_raw is None and hasattr(data, "get"):
-        allow_duplicate_raw = data.get("allow_duplicate")
-    allow_duplicate = False
-    if isinstance(allow_duplicate_raw, bool):
-        allow_duplicate = allow_duplicate_raw
-    elif allow_duplicate_raw is not None:
-        allow_duplicate = str(allow_duplicate_raw).strip().lower() in {"1", "true", "yes", "on"}
-
-    if not allow_duplicate:
-        duplicates = _find_possible_customer_duplicates(payload)
-        if duplicates:
-            return JsonResponse(
-                {
-                    "error": "Possible duplicate customers found.",
-                    "duplicates": duplicates,
-                },
-                status=409,
-            )
-
-    from accounting_integration.models import Org, OrgAddress
-
-    with transaction.atomic(using="accounting"):
-        now = timezone.now()
-
-        org = Org(
-            orgdiscriminator="CUST",
-            orgname=_create_unique_classic_orgname(payload["name"]),
-            org_name_extension="",
-            active=True,
-            autoactive=False,
-            balance=Decimal("0.00"),
-            createdate=now,
-            phone1=payload["phone"][:45],
-            contact1=payload["contact"][:45],
-            email=payload["email"][:300],
-            fax1="",
-            is_cash_customer=False,
-            taxable=True,
-            is_no_charge_sales=False,
-            notes=None,
-            alertnotes=None,
-            exported=None,
-            fiscalmonth=None,
-            taxmonth=None,
-            logo=None,
-            companyname="",
-            creditlimit=Decimal("0.0000"),
-            tax_exempt_expiration_date=None,
-            tax_exempt_number="",
-            eligible1099=False,
-            taxidno=None,
-            lastfcdate=None,
-        )
-        org.save(using="accounting")
-
-        # Create BILLTO address
-        OrgAddress.objects.using("accounting").create(
-            addresstype="BILLTO",
-            active=True,
-            addrname=None,
-            streetone=payload["address_line1"][:60],
-            streettwo=payload["address_line2"][:60],
-            txtcity=payload["city"][:60],
-            txtstate=payload["state"][:25],
-            txtzip=payload["zip"][:45],
-            txtcountry=None,
-            createdate=now,
-            moddate=None,
-            is_default=True,
-            orgid=org,
-        )
-
-    return JsonResponse({"org_id": org.org_id})
-
-
-@require_http_methods(["POST"])
-@csrf_protect
-def accounting_customers_update(request, orgid: int):
-    if not _accounting_is_configured():
-        return JsonResponse({"error": "Classic Accounting is not configured."}, status=503)
-
-    try:
-        data = json.loads(request.body.decode("utf-8") or "{}") if request.content_type == "application/json" else request.POST
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON payload."}, status=400)
-
-    payload = _classic_customer_payload(data)
-    if not payload["name"]:
-        return JsonResponse({"error": "Customer name is required."}, status=400)
-    
-    # Normalize and validate state
-    try:
-        payload["state"] = _normalize_state_code(payload["state"])
-    except ValidationError as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-    from accounting_integration.models import Org, OrgAddress
-
-    with transaction.atomic(using="accounting"):
-        org = get_object_or_404(Org.objects.using("accounting"), org_id=orgid)
-
-        # Name may need uniquing if changed
-        desired_name = _create_unique_classic_orgname(payload["name"])
-        org.orgname = desired_name
-        org.phone1 = payload["phone"][:45]
-        org.contact1 = payload["contact"][:45]
-        org.email = payload["email"][:300]
-        org.moddate = timezone.now()
-        org.save(using="accounting")
-
-        address = (
-            OrgAddress.objects.using("accounting")
-            .filter(orgid=org, addresstype="BILLTO")
-            .order_by("-is_default", "-gen_addr_id")
-            .first()
-        )
-        if address:
-            address.streetone = payload["address_line1"][:60]
-            address.streettwo = payload["address_line2"][:60]
-            address.txtcity = payload["city"][:60]
-            address.txtstate = payload["state"][:25]
-            address.txtzip = payload["zip"][:45]
-            address.moddate = timezone.now()
-            address.save(using="accounting")
-        else:
-            OrgAddress.objects.using("accounting").create(
-                addresstype="BILLTO",
-                active=True,
-                addrname=None,
-                streetone=payload["address_line1"][:60],
-                streettwo=payload["address_line2"][:60],
-                txtcity=payload["city"][:60],
-                txtstate=payload["state"][:25],
-                txtzip=payload["zip"][:45],
-                txtcountry=None,
-                createdate=timezone.now(),
-                moddate=None,
-                is_default=True,
-                orgid=org,
-            )
-
-    return JsonResponse({"org_id": org.org_id})
-
-
-def _workorder_pdf_context(request, pk: int):
-    wo = get_object_or_404(
-        WorkOrderV2.objects.select_related("job").prefetch_related("lines"),
-        pk=pk,
-    )
-
-    customer_name = ""
-    customer_phone = ""
-    customer_contact = ""
-    customer_email = ""
-    customer_address = ""
-    customer_city = ""
-    customer_state = ""
-    customer_zip = ""
-
-    if wo.customer_org_id and _accounting_is_configured():
-        from accounting_integration.models import Org, OrgAddress
-
-        org = Org.objects.using("accounting").filter(org_id=wo.customer_org_id).first()
-        if org:
-            customer_name = org.orgname or ""
-            customer_phone = org.phone1 or ""
-            customer_contact = org.contact1 or ""
-            customer_email = org.email or ""
-
-            addr = (
-                OrgAddress.objects.using("accounting")
-                .filter(orgid=org, addresstype="BILLTO")
-                .order_by("-is_default", "-gen_addr_id")
-                .first()
-            )
-            if addr:
-                customer_address = addr.streetone or ""
-                customer_city = addr.txtcity or ""
-                customer_state = addr.txtstate or ""
-                customer_zip = addr.txtzip or ""
-
-    return {
-        "work_order": wo,
-        "lines": list(wo.lines.all()),
-        "customer_name": customer_name,
-        "customer_phone": customer_phone,
-        "customer_contact": customer_contact,
-        "customer_email": customer_email,
-        "customer_address": customer_address,
-        "customer_city": customer_city,
-        "customer_state": customer_state,
-        "customer_zip": customer_zip,
-    }
-
-
-def workorder_pdf(request, pk: int):
-    from django.template.loader import render_to_string
-    from django.utils.text import slugify
-    from weasyprint import HTML
-
-    context = _workorder_pdf_context(request, pk)
-    html = render_to_string("rental_scheduler/workorders_v2/workorder_pdf.html", context)
-
-    base_url = request.build_absolute_uri("/")
-    pdf = HTML(string=html, base_url=base_url).write_pdf()
-
-    wo = context["work_order"]
-    filename = f"work-order-{slugify(str(wo.number))}.pdf"
-    response = HttpResponse(pdf, content_type="application/pdf")
-    response["Content-Disposition"] = f'inline; filename="{filename}"'
-    return response
-
-
-def workorder_pdf_preview(request, pk: int):
-    from django.conf import settings
-    from django.template.loader import render_to_string
-
-    if not settings.DEBUG:
-        raise Http404
-
-    context = _workorder_pdf_context(request, pk)
-    html = render_to_string("rental_scheduler/workorders_v2/workorder_pdf.html", context)
-    return HttpResponse(html, content_type="text/html")
+from .forms import CalendarImportForm, JobForm, WorkOrderForm, WorkOrderLineForm
+from .models import Calendar, Invoice, Job, WorkOrder
 
 logger = logging.getLogger(__name__)
 
@@ -1541,6 +152,69 @@ def _build_normalized_search_annotation():
     
     return normalized
 
+
+def _build_workorder_normalized_search_annotation():
+    """
+    Build a Django annotation for WorkOrder search that concatenates and normalizes 
+    searchable fields from both WorkOrder and related Job.
+    
+    Similar to _build_normalized_search_annotation but for WorkOrder model.
+    """
+    from django.db.models.functions import Coalesce, Concat, Lower, Replace
+    
+    # Helper to wrap field with Coalesce to handle nulls and cast to TextField
+    def field_expr(field_name):
+        return Coalesce(
+            models.F(field_name),
+            models.Value(''),
+            output_field=models.TextField()
+        )
+    
+    # Concatenate WorkOrder and related Job fields with a separator
+    concat_expr = Concat(
+        models.Value('|', output_field=models.TextField()),
+        field_expr('wo_number'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('notes'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__business_name'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__contact_name'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__phone'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__address_line1'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__city'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__trailer_color'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__trailer_serial'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__trailer_details'),
+        models.Value('|', output_field=models.TextField()),
+        field_expr('job__repair_notes'),
+        models.Value('|', output_field=models.TextField()),
+        output_field=models.TextField(),
+    )
+    
+    # Lowercase
+    lower_expr = Lower(concat_expr, output_field=models.TextField())
+    
+    # Remove common punctuation and spaces for normalized comparison
+    normalized = Replace(lower_expr, models.Value('.'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(','), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('-'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('('), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(')'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value("'"), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('"'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('/'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('\\'), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value(' '), models.Value(''), output_field=models.TextField())
+    normalized = Replace(normalized, models.Value('+'), models.Value(''), output_field=models.TextField())
+    
+    return normalized
 
 
 def _build_series_collapsed_rows(jobs, now, *, date_filter='all', include_match_counts=False):
@@ -1792,7 +466,7 @@ class JobListView(ListView):
     template_name = 'rental_scheduler/jobs/job_list.html'
     context_object_name = 'jobs'
     paginate_by = 25
-
+    
     def get_queryset(self):
         """Filter and sort jobs based on query parameters"""
         queryset = Job.objects.select_related('calendar').filter(is_deleted=False)
@@ -2231,6 +905,46 @@ class JobDeleteView(DeleteView):
         job = self.get_object()
         messages.success(request, f'Job for {job.get_display_name()} deleted successfully.')
         return super().delete(request, *args, **kwargs)
+
+
+# Print Views
+@method_decorator(xframe_options_exempt, name='dispatch')
+class JobPrintWOView(DetailView):
+    """Print work order view"""
+    model = Job
+    template_name = 'rental_scheduler/jobs/job_print_wo.html'
+    context_object_name = 'job'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Work Order'
+        return context
+
+
+@method_decorator(xframe_options_exempt, name='dispatch')
+class JobPrintWOCustomerView(DetailView):
+    """Print customer copy work order view"""
+    model = Job
+    template_name = 'rental_scheduler/jobs/job_print_wo_customer.html'
+    context_object_name = 'job'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Customer Work Order'
+        return context
+
+
+@method_decorator(xframe_options_exempt, name='dispatch')
+class JobPrintInvoiceView(DetailView):
+    """Print invoice view"""
+    model = Job
+    template_name = 'rental_scheduler/jobs/job_print_invoice.html'
+    context_object_name = 'job'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Invoice'
+        return context
 
 
 # Calendar API Views
@@ -3502,6 +2216,249 @@ def delete_job_api(request, job_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+# Work Order Views
+class WorkOrderListView(ListView):
+    """List all work orders with filtering, search, and sorting capabilities"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_list.html'
+    context_object_name = 'work_orders'
+    paginate_by = 25
+    
+    def get_queryset(self):
+        """Filter and sort work orders based on query parameters"""
+        queryset = WorkOrder.objects.select_related('job__calendar').filter(job__is_deleted=False)
+        
+        # Filter by job status
+        status = self.request.GET.get('status')
+        if status:
+            queryset = queryset.filter(job__status=status)
+        
+        # Filter by calendar
+        calendar_id = self.request.GET.get('calendar')
+        if calendar_id:
+            queryset = queryset.filter(job__calendar_id=calendar_id)
+        
+        # Unified search across multiple fields with punctuation-insensitive matching
+        # and smart fallback (strict AND first, then broaden to OR if no results)
+        search = self.request.GET.get('search', '').strip()
+        self._search_widened = False  # Track if we had to broaden the search
+        
+        if search:
+            # Tokenize search query (punctuation-insensitive)
+            tokens = _tokenize_search_query(search)
+            
+            if tokens:
+                # Annotate with normalized search blob for punctuation-insensitive comparison
+                queryset = queryset.annotate(
+                    _search_blob=_build_workorder_normalized_search_annotation()
+                )
+                
+                # Build strict AND filter (all tokens must be present)
+                strict_filter = models.Q()
+                for token in tokens:
+                    strict_filter &= models.Q(_search_blob__icontains=token)
+                
+                # Try strict AND filter first
+                strict_queryset = queryset.filter(strict_filter)
+                
+                # Check if strict filter returns any results
+                if strict_queryset.exists():
+                    queryset = strict_queryset
+                elif len(tokens) > 1:
+                    # Fall back to OR filter (any token matches)
+                    broad_filter = models.Q()
+                    for token in tokens:
+                        broad_filter |= models.Q(_search_blob__icontains=token)
+                    
+                    queryset = queryset.filter(broad_filter)
+                    self._search_widened = True
+                else:
+                    # Single token with no matches - keep the strict (empty) result
+                    queryset = strict_queryset
+        
+        # Sorting
+        sort_by = self.request.GET.get('sort', '-wo_date')
+        sort_direction = self.request.GET.get('direction', 'desc')
+        
+        # Validate sort field
+        allowed_sort_fields = {
+            'wo_number': 'wo_number',
+            'wo_date': 'wo_date',
+            'job__business_name': 'job__business_name',
+            'job__contact_name': 'job__contact_name',
+            'job__status': 'job__status',
+            'job__calendar__name': 'job__calendar__name',
+            'created_at': 'created_at',
+        }
+        
+        if sort_by in allowed_sort_fields:
+            sort_field = allowed_sort_fields[sort_by]
+            if sort_direction == 'desc':
+                sort_field = f'-{sort_field}'
+            queryset = queryset.order_by(sort_field)
+        else:
+            # Default sorting
+            queryset = queryset.order_by('-wo_date')
+        
+        return queryset
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Work Orders'
+        context['calendars'] = Calendar.objects.filter(is_active=True)
+        context['status_choices'] = Job.STATUS_CHOICES
+        
+        # Add sorting context
+        context['current_sort'] = self.request.GET.get('sort', 'wo_date')
+        context['current_direction'] = self.request.GET.get('direction', 'desc')
+        
+        # Add filter context for maintaining state
+        context['current_filters'] = {
+            'search': self.request.GET.get('search', ''),
+            'status': self.request.GET.get('status', ''),
+            'calendar': self.request.GET.get('calendar', ''),
+        }
+        
+        # Add search widened flag (True if fallback to OR matching was used)
+        context['search_widened'] = getattr(self, '_search_widened', False)
+        
+        return context
+
+
+class WorkOrderDetailView(DetailView):
+    """View work order details"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_detail.html'
+    context_object_name = 'work_order'
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Work Order: {self.object.wo_number}'
+        return context
+
+
+class WorkOrderCreateView(CreateView):
+    """Create a new work order"""
+    model = WorkOrder
+    form_class = WorkOrderForm
+    template_name = 'rental_scheduler/workorders/workorder_form.html'
+    success_url = reverse_lazy('rental_scheduler:workorder_list')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Create Work Order'
+        return context
+    
+    def form_valid(self, form):
+        messages.success(self.request, f'Work Order "{form.instance.wo_number}" created successfully.')
+        return super().form_valid(form)
+
+
+class WorkOrderUpdateView(UpdateView):
+    """Update an existing work order"""
+    model = WorkOrder
+    form_class = WorkOrderForm
+    template_name = 'rental_scheduler/workorders/workorder_form.html'
+    success_url = reverse_lazy('rental_scheduler:workorder_list')
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Update Work Order: {self.object.wo_number}'
+        return context
+    
+    def form_valid(self, form):
+        messages.success(self.request, f'Work Order "{form.instance.wo_number}" updated successfully.')
+        return super().form_valid(form)
+
+
+class WorkOrderDeleteView(DeleteView):
+    """Delete a work order"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_confirm_delete.html'
+    success_url = reverse_lazy('rental_scheduler:workorder_list')
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Delete Work Order: {self.object.wo_number}'
+        return context
+    
+    def delete(self, request, *args, **kwargs):
+        work_order = self.get_object()
+        messages.success(request, f'Work Order "{work_order.wo_number}" deleted successfully.')
+        return super().delete(request, *args, **kwargs)
+
+
+class WorkOrderPrintView(DetailView):
+    """Print work order view"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_print.html'
+    context_object_name = 'work_order'
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Work Order'
+        return context
+
+
+class WorkOrderCustomerPrintView(DetailView):
+    """Print customer copy work order view"""
+    model = WorkOrder
+    template_name = 'rental_scheduler/workorders/workorder_customer_print.html'
+    context_object_name = 'work_order'
+    
+    def get_queryset(self):
+        return WorkOrder.objects.select_related('job__calendar').prefetch_related('lines')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Customer Work Order'
+        return context
+
+
+# Invoice Views  
+class InvoiceListView(ListView):
+    """List all invoices"""
+    model = Invoice
+    template_name = 'rental_scheduler/invoices/invoice_list.html'
+    context_object_name = 'invoices'
+    paginate_by = 25
+    
+    def get_queryset(self):
+        return Invoice.objects.select_related('job__calendar', 'work_order').filter(is_deleted=False)
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Invoices'
+        return context
+
+
+class InvoiceDetailView(DetailView):
+    """View invoice details"""
+    model = Invoice
+    template_name = 'rental_scheduler/invoices/invoice_detail.html'
+    context_object_name = 'invoice'
+    
+    def get_queryset(self):
+        return Invoice.objects.select_related('job__calendar', 'work_order').prefetch_related('lines')
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Invoice: {self.object.invoice_number}'
+        return context
+
+
 # Job Modal Views
 def job_create_partial(request):
     """Return job creation form partial for panel"""
@@ -3510,15 +2467,12 @@ def job_create_partial(request):
     call_reminder_notes = ''
     recurrence_meta = None
     
-    work_order_v2 = None
-
     # Check if editing existing job
     if 'edit' in request.GET:
         try:
             job_id = int(request.GET['edit'])
             job = get_object_or_404(Job, pk=job_id)
             form = JobForm(instance=job)
-            work_order_v2 = WorkOrderV2.objects.filter(job=job).first()
             
             # Compute recurrence metadata for display
             recurrence_meta = get_recurrence_meta(job)
@@ -3574,7 +2528,6 @@ def job_create_partial(request):
         'form': form,
         'call_reminder_notes': call_reminder_notes,
         'recurrence_meta': recurrence_meta,
-        'work_order_v2': work_order_v2,
     })
 
 
@@ -4030,6 +2983,48 @@ def job_detail_api(request, pk):
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_protect
+@require_http_methods(["POST"])
+def workorder_add_line_api(request, pk):
+    """API endpoint to add a line item to a work order"""
+    try:
+        # Get the work order
+        work_order = get_object_or_404(WorkOrder, pk=pk)
+        
+        # Create form with the submitted data
+        form = WorkOrderLineForm(request.POST)
+        
+        if form.is_valid():
+            # Save the line item with the work order
+            line_item = form.save(commit=False)
+            line_item.work_order = work_order
+            line_item.save()
+            
+            # Render the new line item HTML
+            from django.template.loader import render_to_string
+            line_html = render_to_string('rental_scheduler/partials/workorder_line_row.html', {
+                'line': line_item
+            })
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Line item added successfully',
+                'line_html': line_html,
+                'total_amount': str(work_order.total_amount)
+            })
+        else:
+            return JsonResponse({
+                'status': 'error',
+                'error': 'Validation failed: ' + ', '.join([f"{field}: {', '.join(errors)}" for field, errors in form.errors.items()])
+            }, status=400)
+            
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'error': f'Failed to add line item: {str(e)}'
+        }, status=500)
 
 
 def extract_phone_from_text(text):

@@ -1,4 +1,4 @@
-from django.db import models, transaction
+from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from datetime import datetime, date
@@ -10,7 +10,6 @@ from django.utils import timezone
 import time
 from decimal import Decimal
 from rental_scheduler.utils.datetime import format_local
-from rental_scheduler.utils.work_orders import compute_work_order_totals, quantize_money
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
 
@@ -668,322 +667,517 @@ class CallReminder(models.Model):
         return f"Call Reminder on {self.reminder_date}"
 
 
-
-class WorkOrderNumberSequence(models.Model):
+class WorkOrder(models.Model):
     """
-    Concurrency-safe Work Order number allocator.
-
-    Singleton-style (pk=1). Allocation must happen inside a transaction and use
-    select_for_update to avoid duplicates under concurrent requests.
+    Work Order model for tracking detailed repair work and line items.
+    Each work order is associated with exactly one job and contains multiple line items.
     """
-
-    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
-
-    start_number = models.PositiveIntegerField(default=1)
-    next_number = models.PositiveIntegerField(default=1)
-
+    job = models.OneToOneField(
+        Job,
+        on_delete=models.CASCADE,
+        related_name='work_order',
+        help_text="Associated job for this work order"
+    )
+    wo_number = models.CharField(
+        max_length=20,
+        unique=True,
+        help_text="Unique work order number (e.g., WO-2024-001)"
+    )
+    wo_date = models.DateField(
+        default=timezone.now,
+        help_text="Date the work order was created"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Additional notes about the work order"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    
     class Meta:
-        verbose_name = "Work Order Number Sequence"
-        verbose_name_plural = "Work Order Number Sequence"
-
+        verbose_name = "Work Order"
+        verbose_name_plural = "Work Orders"
+        ordering = ['-wo_date', '-created_at']
+        indexes = [
+            models.Index(fields=['wo_number']),
+            models.Index(fields=['wo_date']),
+            models.Index(fields=['job']),
+        ]
+    
     def __str__(self):
-        return f"Next WO#: {self.next_number}"
-
-    @classmethod
-    def get_solo(cls, *, start_number=None):
-        defaults = None
-        if start_number is not None:
-            defaults = {"start_number": start_number, "next_number": start_number}
-        obj, _created = cls.objects.get_or_create(
-            pk=1,
-            defaults=defaults or {"start_number": 1, "next_number": 1},
-        )
-        return obj
-
-    @classmethod
-    def allocate_work_order_number(cls):
-        with transaction.atomic():
-            seq, _created = cls.objects.select_for_update().get_or_create(
-                pk=1,
-                defaults={"start_number": 1, "next_number": 1},
-            )
-            number = seq.next_number
-            seq.next_number = number + 1
-            seq.save(update_fields=["next_number"])
-            return number
-
-    @classmethod
-    def advance_past(cls, number):
-        with transaction.atomic():
-            seq, _ = cls.objects.select_for_update().get_or_create(
-                pk=1,
-                defaults={"start_number": 1, "next_number": 1},
-            )
-            if seq.next_number <= number:
-                seq.next_number = number + 1
-                seq.save(update_fields=["next_number"])
-
+        """String representation of the work order"""
+        return f"{self.wo_number} - {self.job.display_name}"
+    
+    @property
+    def total_amount(self):
+        """Calculate the total amount from all line items"""
+        return sum(line.total for line in self.lines.all())
+    
+    @property
+    def line_count(self):
+        """Get the number of line items"""
+        return self.lines.count()
+    
+    def clean(self):
+        """Validate the work order data"""
+        super().clean()
+        
+        # Validate work order number format (basic validation)
+        if self.wo_number and not self.wo_number.strip():
+            raise ValidationError({
+                'wo_number': 'Work order number cannot be empty'
+            })
+    
     def save(self, *args, **kwargs):
-        self.pk = 1
-
-        if self.next_number < self.start_number:
-            self.next_number = self.start_number
-
+        """Save the work order with validation"""
         self.full_clean()
-        return super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
 
 
-class WorkOrderV2(models.Model):
+class WorkOrderLine(models.Model):
     """
-    New Work Order domain model (v2) for the Work Order revamp.
-
-    This is intentionally parallel to the legacy WorkOrder/WorkOrderLine models
-    so we can migrate the UI safely before deleting the old codepaths.
+    Work Order Line model for individual line items in a work order.
+    Each line represents a specific repair task, part, or service.
     """
-
-    DISCOUNT_TYPE_AMOUNT = "amount"
-    DISCOUNT_TYPE_PERCENT = "percent"
-    DISCOUNT_TYPE_CHOICES = (
-        (DISCOUNT_TYPE_AMOUNT, "Amount ($)"),
-        (DISCOUNT_TYPE_PERCENT, "Percent (%)"),
-    )
-
-    job = models.OneToOneField(
-        "Job",
+    work_order = models.ForeignKey(
+        WorkOrder,
         on_delete=models.CASCADE,
-        related_name="work_order_v2",
-        help_text="Associated job for this work order (v2)",
+        related_name='lines',
+        help_text="Work order this line belongs to"
     )
-
-    number = models.PositiveIntegerField(
-        unique=True,
-        help_text="Auto-incrementing Work Order number (integer)",
+    item_code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Item code or part number"
     )
+    description = models.CharField(
+        max_length=200,
+        help_text="Description of the work or item"
+    )
+    qty = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=1.00,
+        help_text="Quantity of the item or hours of work"
+    )
+    rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        help_text="Rate per unit (price per item or hourly rate)"
+    )
+    total = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Total amount for this line (qty * rate)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Work Order Line"
+        verbose_name_plural = "Work Order Lines"
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['work_order']),
+            models.Index(fields=['item_code']),
+            models.Index(fields=['description']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(qty__gte=0),
+                name='work_order_line_qty_non_negative'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(rate__gte=0),
+                name='work_order_line_rate_non_negative'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total__gte=0),
+                name='work_order_line_total_non_negative'
+            ),
+        ]
+    
+    def __str__(self):
+        """String representation of the work order line"""
+        return f"{self.description} - Qty: {self.qty} @ ${self.rate}"
+    
+    def clean(self):
+        """Validate the work order line data"""
+        super().clean()
+        
+        # Validate quantity is positive
+        if self.qty and self.qty <= 0:
+            raise ValidationError({
+                'qty': 'Quantity must be greater than zero'
+            })
+        
+        # Validate rate is non-negative
+        if self.rate and self.rate < 0:
+            raise ValidationError({
+                'rate': 'Rate cannot be negative'
+            })
+        
+        # Validate description is not empty
+        if not self.description or not self.description.strip():
+            raise ValidationError({
+                'description': 'Description is required'
+            })
+    
+    def save(self, *args, **kwargs):
+        """Save the work order line with validation and total calculation"""
+        self.full_clean()
+        
+        # Calculate total if not explicitly set
+        if self.qty and self.rate:
+            self.total = self.qty * self.rate
+        
+        super().save(*args, **kwargs)
 
-    # Classic Accounting linkage (Org.org_id)
-    customer_org_id = models.PositiveIntegerField(
+
+class Invoice(models.Model):
+    """
+    Invoice model for billing customers for completed work.
+    Can be linked to a job and/or work order, with proper billing information.
+    """
+    # Relationships
+    job = models.ForeignKey(
+        Job,
+        on_delete=models.CASCADE,
+        related_name='invoices',
+        help_text="Job this invoice is for"
+    )
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        help_text="Classic Accounting customer org_id (nullable until selected)",
+        related_name='invoices',
+        help_text="Work order this invoice is based on (optional)"
     )
-
-    job_by_rep_id = models.CharField(
-        max_length=36, blank=True, default="",
-        help_text="Classic Accounting Sales Rep UUID (from acct_sales_rep)",
+    
+    # Invoice details
+    invoice_number = models.CharField(
+        max_length=50,
+        unique=True,
+        help_text="Unique invoice number (e.g., INV-2024-001)"
     )
-    job_by_name = models.CharField(
-        max_length=60, blank=True, default="",
-        help_text="Snapshot of the sales rep name at save time",
+    invoice_date = models.DateField(
+        default=timezone.now,
+        help_text="Date the invoice was created"
     )
-
-    date = models.DateField(null=True, blank=True)
-
-    notes = models.TextField(blank=True, default="")
-
-    trailer_make_model = models.TextField(blank=True, default="")
-    trailer_color = models.CharField(max_length=100, blank=True, default="")
-    trailer_serial = models.CharField(max_length=100, blank=True, default="")
-
-    discount_type = models.CharField(
+    
+    # Billing information (can override job customer info)
+    bill_to_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Name to bill (overrides job customer if provided)"
+    )
+    bill_to_address_line1 = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Billing address line 1 (overrides job address if provided)"
+    )
+    bill_to_address_line2 = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Billing address line 2 (overrides job address if provided)"
+    )
+    bill_to_city = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Billing city (overrides job city if provided)"
+    )
+    bill_to_state = models.CharField(
+        max_length=2,
+        blank=True,
+        help_text="Billing state (overrides job state if provided)"
+    )
+    bill_to_postal_code = models.CharField(
         max_length=10,
-        choices=DISCOUNT_TYPE_CHOICES,
-        default=DISCOUNT_TYPE_AMOUNT,
+        blank=True,
+        help_text="Billing postal code (overrides job postal code if provided)"
     )
-    discount_value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-
-    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-    tax_rate_snapshot = models.DecimalField(max_digits=7, decimal_places=4, default=Decimal("0.0000"))
-    tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-    total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    accounting_invoice_id = models.BigIntegerField(
-        null=True, blank=True, db_index=True,
-        help_text="Link to AcctTrans.transid (Invoice) in Classic Accounting database",
+    bill_to_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Billing phone (overrides job phone if provided)"
     )
-
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Work Order (v2)"
-        verbose_name_plural = "Work Orders (v2)"
-        ordering = ["-created_at"]
-
-    def __str__(self):
-        return f"WO #{self.number} - {self.job.display_name}"
-
-    def clean(self):
-        super().clean()
-
-        # Percent discount contract: 0–100
-        if self.discount_type == self.DISCOUNT_TYPE_PERCENT:
-            if self.discount_value is None:
-                return
-            if self.discount_value < 0 or self.discount_value > Decimal("100.00"):
-                raise ValidationError({"discount_value": "Percent discount must be between 0 and 100."})
-
-        # Amount discount contract: non-negative (upper bound validated when totals recomputed)
-        if self.discount_type == self.DISCOUNT_TYPE_AMOUNT:
-            if self.discount_value is not None and self.discount_value < 0:
-                raise ValidationError({"discount_value": "Discount cannot be negative."})
-
-        # Classic Accounting validation (only when configured for the real external DB)
-        if self.customer_org_id:
-            from django.conf import settings
-
-            accounting_db = (settings.DATABASES or {}).get("accounting") or {}
-            if accounting_db.get("ENGINE") == "django.db.backends.postgresql":
-                from accounting_integration.models import Org
-
-                try:
-                    exists = Org.objects.using("accounting").filter(org_id=self.customer_org_id).exists()
-                except Exception as e:
-                    raise ValidationError({"customer_org_id": f"Unable to validate Classic customer: {e}"})
-
-                if not exists:
-                    raise ValidationError({"customer_org_id": "Customer does not exist in Classic Accounting."})
-
-    def recalculate_totals(self, *, save: bool = False, tax_rate=None):
-        line_items = (
-            WorkOrderLineV2.objects.filter(work_order_id=self.pk).only("qty", "price")
-            if self.pk
-            else []
-        )
-        effective_rate = tax_rate if tax_rate is not None else self.tax_rate_snapshot
-        subtotal, discount_amount, tax_amount, total = compute_work_order_totals(
-            line_items=line_items,
-            discount_type=self.discount_type,
-            discount_value=self.discount_value,
-            tax_rate=effective_rate,
-        )
-
-        if tax_rate is not None:
-            self.tax_rate_snapshot = tax_rate
-        self.subtotal = subtotal
-        self.discount_amount = discount_amount
-        self.tax_amount = tax_amount
-        self.total = total
-
-        if save and self.pk:
-            WorkOrderV2.objects.filter(pk=self.pk).update(
-                subtotal=subtotal,
-                discount_amount=discount_amount,
-                tax_rate_snapshot=self.tax_rate_snapshot,
-                tax_amount=tax_amount,
-                total=total,
-            )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._original_number = self.number
-
-    def save(self, *args, **kwargs):
-        creating = self._state.adding
-
-        if creating and not self.number:
-            self.number = WorkOrderNumberSequence.allocate_work_order_number()
-
-        if self.number and WorkOrderV2.objects.filter(number=self.number).exclude(pk=self.pk).exists():
-            raise ValidationError({"number": f"Work order number {self.number} is already in use."})
-
-        self.discount_value = quantize_money(self.discount_value)
-
-        self.full_clean()
-        result = super().save(*args, **kwargs)
-
-        if creating or self.number != self._original_number:
-            WorkOrderNumberSequence.advance_past(self.number)
-        self._original_number = self.number
-
-        return result
-
-
-class WorkOrderLineV2(models.Model):
-    """Work Order line item (v2), linked to Classic Accounting items."""
-
-    work_order = models.ForeignKey(
-        WorkOrderV2,
-        on_delete=models.CASCADE,
-        related_name="lines",
+    
+    # Notes
+    notes_public = models.TextField(
+        blank=True,
+        help_text="Notes visible to customer on invoice"
     )
-
-    # Classic Accounting linkage (ItmItems.itemid)
-    itemid = models.PositiveIntegerField()
-    itemnumber_snapshot = models.CharField(max_length=60, blank=True, default="")
-    description_snapshot = models.CharField(max_length=3000, blank=True, default="")
-
-    qty = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("1.00"))
-    price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-    amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
-
+    notes_private = models.TextField(
+        blank=True,
+        help_text="Internal notes not visible to customer"
+    )
+    
+    # Totals (calculated from line items)
+    subtotal = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Subtotal before tax"
+    )
+    tax_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=4,
+        default=Decimal('0.0000'),
+        help_text="Tax rate as decimal (e.g., 0.0825 for 8.25%)"
+    )
+    tax_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Tax amount"
+    )
+    total_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Total amount including tax"
+    )
+    
+    # System fields
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text="Soft delete flag"
+    )
+    created_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_invoices',
+        help_text="User who created this invoice"
+    )
+    updated_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='updated_invoices',
+        help_text="User who last updated this invoice"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Work Order Line (v2)"
-        verbose_name_plural = "Work Order Lines (v2)"
-        ordering = ["created_at"]
-        constraints = [
-            models.CheckConstraint(condition=models.Q(qty__gt=0), name="workorderlinev2_qty_gt_0"),
-            models.CheckConstraint(condition=models.Q(price__gte=0), name="workorderlinev2_price_gte_0"),
-            models.CheckConstraint(condition=models.Q(amount__gte=0), name="workorderlinev2_amount_gte_0"),
+        verbose_name = "Invoice"
+        verbose_name_plural = "Invoices"
+        ordering = ['-invoice_date', '-created_at']
+        indexes = [
+            models.Index(fields=['invoice_number']),
+            models.Index(fields=['invoice_date']),
+            models.Index(fields=['job']),
+            models.Index(fields=['work_order']),
+            models.Index(fields=['is_deleted']),
+            models.Index(fields=['created_at']),
         ]
 
     def __str__(self):
-        return f"Item {self.itemid} - Qty {self.qty} @ {self.price}"
+        return f"{self.invoice_number} - {self.bill_to_name or self.job.display_name}"
 
     def clean(self):
+        """Validate the invoice data"""
         super().clean()
-        if self.qty is not None and self.qty <= 0:
-            raise ValidationError({"qty": "Quantity must be greater than zero."})
-        if self.price is not None and self.price < 0:
-            raise ValidationError({"price": "Price cannot be negative."})
-
-        # Classic Accounting item existence validation (only when configured)
-        if self.itemid:
-            from django.conf import settings
-
-            accounting_db = (settings.DATABASES or {}).get("accounting") or {}
-            if accounting_db.get("ENGINE") == "django.db.backends.postgresql":
-                from accounting_integration.models import ItmItems
-
-                try:
-                    exists = ItmItems.objects.using("accounting").filter(itemid=self.itemid).exists()
-                except Exception as e:
-                    raise ValidationError({"itemid": f"Unable to validate Classic item: {e}"})
-
-                if not exists:
-                    raise ValidationError({"itemid": "Item does not exist in Classic Accounting."})
+        
+        # Validate invoice number is not empty
+        if not self.invoice_number or not self.invoice_number.strip():
+            raise ValidationError({
+                'invoice_number': 'Invoice number is required.'
+            })
+        
+        # Validate tax rate is non-negative
+        if self.tax_rate < 0:
+            raise ValidationError({
+                'tax_rate': 'Tax rate cannot be negative.'
+            })
+        
+        # Validate totals are non-negative
+        if self.subtotal < 0:
+            raise ValidationError({
+                'subtotal': 'Subtotal cannot be negative.'
+            })
+        
+        if self.tax_amount < 0:
+            raise ValidationError({
+                'tax_amount': 'Tax amount cannot be negative.'
+            })
+        
+        if self.total_amount < 0:
+            raise ValidationError({
+                'total_amount': 'Total amount cannot be negative.'
+            })
 
     def save(self, *args, **kwargs):
-        # Compute server-side amount (ignore client)
-        if self.qty is not None and self.price is not None:
-            self.amount = quantize_money(self.qty * self.price)
-
         self.full_clean()
-        result = super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
 
-        # Keep parent totals in sync
-        if self.work_order_id:
-            self.work_order.recalculate_totals(save=True)
+    @property
+    def bill_to_display_name(self):
+        """Get the billing name to display"""
+        return self.bill_to_name or self.job.display_name
 
-        return result
+    @property
+    def bill_to_address_info(self):
+        """Get the billing address information"""
+        if self.bill_to_address_line1:
+            address_parts = [self.bill_to_address_line1]
+            if self.bill_to_address_line2:
+                address_parts.append(self.bill_to_address_line2)
+            if self.bill_to_city and self.bill_to_state:
+                address_parts.append(f"{self.bill_to_city}, {self.bill_to_state}")
+            elif self.bill_to_city:
+                address_parts.append(self.bill_to_city)
+            elif self.bill_to_state:
+                address_parts.append(self.bill_to_state)
+            if self.bill_to_postal_code:
+                address_parts.append(self.bill_to_postal_code)
+            return " ".join(address_parts)
+        return self.job.address_info
 
-    def delete(self, *args, **kwargs):
-        work_order_id = self.work_order_id
-        result = super().delete(*args, **kwargs)
+    @property
+    def bill_to_full_address(self):
+        """Get the complete billing address"""
+        if self.bill_to_address_line1:
+            address_parts = []
+            if self.bill_to_name:
+                address_parts.append(self.bill_to_name)
+            address_parts.append(self.bill_to_address_line1)
+            if self.bill_to_address_line2:
+                address_parts.append(self.bill_to_address_line2)
+            if self.bill_to_city and self.bill_to_state:
+                address_parts.append(f"{self.bill_to_city}, {self.bill_to_state}")
+            elif self.bill_to_city:
+                address_parts.append(self.bill_to_city)
+            elif self.bill_to_state:
+                address_parts.append(self.bill_to_state)
+            if self.bill_to_postal_code:
+                address_parts.append(self.bill_to_postal_code)
+            if self.bill_to_phone:
+                address_parts.append(self.bill_to_phone)
+            return "\n".join(address_parts)
+        return self.job.full_address
 
-        # Keep parent totals in sync after deletion
-        if work_order_id:
-            wo = WorkOrderV2.objects.filter(pk=work_order_id).first()
-            if wo:
-                wo.recalculate_totals(save=True)
+    @property
+    def line_count(self):
+        """Get the number of line items"""
+        return self.lines.count()
 
-        return result
+    def calculate_totals(self):
+        """Calculate subtotal, tax, and total from line items"""
+        subtotal = sum(line.total for line in self.lines.all())
+        tax_amount = subtotal * self.tax_rate
+        total_amount = subtotal + tax_amount
+        
+        self.subtotal = subtotal
+        self.tax_amount = tax_amount
+        self.total_amount = total_amount
+
+
+class InvoiceLine(models.Model):
+    """
+    InvoiceLine model for individual line items on an invoice.
+    Each line represents a specific item or service being billed.
+    """
+    # Relationship
+    invoice = models.ForeignKey(
+        Invoice,
+        on_delete=models.CASCADE,
+        related_name='lines',
+        help_text="Invoice this line belongs to"
+    )
+    
+    # Line item details
+    item_code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Item code or SKU"
+    )
+    description = models.CharField(
+        max_length=255,
+        help_text="Description of the item or service"
+    )
+    qty = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        help_text="Quantity"
+    )
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Unit price"
+    )
+    total = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Line total (qty * price)"
+    )
+    
+    # System fields
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Invoice Line"
+        verbose_name_plural = "Invoice Lines"
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['invoice']),
+            models.Index(fields=['item_code']),
+            models.Index(fields=['created_at']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(qty__gt=0),
+                name='invoice_line_positive_qty'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(price__gte=0),
+                name='invoice_line_non_negative_price'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total__gte=0),
+                name='invoice_line_non_negative_total'
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.description} - Qty: {self.qty} @ ${self.price}"
+
+    def clean(self):
+        """Validate the invoice line data"""
+        super().clean()
+        
+        # Validate description is not empty
+        if not self.description or not self.description.strip():
+            raise ValidationError({
+                'description': 'Description is required.'
+            })
+        
+        # Validate quantity is positive
+        if self.qty <= 0:
+            raise ValidationError({
+                'qty': 'Quantity must be greater than zero.'
+            })
+        
+        # Validate price is non-negative
+        if self.price < 0:
+            raise ValidationError({
+                'price': 'Price cannot be negative.'
+            })
+
+    def save(self, *args, **kwargs):
+        # Calculate total before saving
+        self.total = self.qty * self.price
+        self.full_clean()
+        super().save(*args, **kwargs)
+        
+        # Update invoice totals after saving
+        self.invoice.calculate_totals()
+        self.invoice.save(update_fields=['subtotal', 'tax_amount', 'total_amount'])
 
 
 class StatusChange(models.Model):

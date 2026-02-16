@@ -65,47 +65,6 @@ class TestJobCreatePartial:
         # Verify job data is in the form
         assert job.business_name in content
         assert 'name="start_dt"' in content
-
-    def test_edit_job_without_workorder_shows_create_buttons(self, api_client, job):
-        """Edit job without WO should show Create + Save & Create buttons."""
-        url = reverse('rental_scheduler:job_create_partial')
-        response = api_client.get(url, {'edit': job.id})
-
-        assert response.status_code == 200
-        content = response.content.decode('utf-8')
-
-        assert 'data-wo-action="save-create"' in content
-        assert 'data-wo-action="edit"' not in content
-        assert 'data-wo-action="print"' not in content
-
-    def test_edit_job_with_workorder_shows_edit_print_buttons(self, api_client, job):
-        """Edit job with WO should show Edit + Print buttons."""
-        from rental_scheduler.models import WorkOrderV2
-
-        WorkOrderV2.objects.create(job=job)
-
-        url = reverse('rental_scheduler:job_create_partial')
-        response = api_client.get(url, {'edit': job.id})
-
-        assert response.status_code == 200
-        content = response.content.decode('utf-8')
-
-        assert 'data-wo-action="edit"' in content
-        assert 'data-wo-action="print"' in content
-        assert 'data-wo-action="create"' not in content
-        assert 'data-wo-action="save-create"' not in content
-
-    def test_all_legacy_print_buttons_removed(self, api_client, job):
-        """All legacy print buttons (WO and invoice) should be removed."""
-        url = reverse('rental_scheduler:job_create_partial')
-        response = api_client.get(url, {'edit': job.id})
-
-        assert response.status_code == 200
-        content = response.content.decode('utf-8')
-
-        assert 'data-print-type="wo"' not in content
-        assert 'data-print-type="wo-customer"' not in content
-        assert 'data-print-type="invoice"' not in content
     
     def test_edit_job_with_call_reminder(self, api_client, calendar):
         """GET /jobs/new/partial/?edit=<id> for job with call reminder should render."""

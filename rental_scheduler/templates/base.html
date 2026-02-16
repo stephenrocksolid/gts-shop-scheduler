@@ -50,6 +50,9 @@
               href="{% static 'rental_scheduler/css/flatpickr.min.css' %}">
 
 
+        <link href="{% static 'rental_scheduler/css/components.css' %}"
+              rel="stylesheet">
+
         {% block extra_css %}
         {% endblock extra_css %}
     </head>
@@ -158,7 +161,6 @@
             GTS.urls.jobListTablePartial = "{% url 'rental_scheduler:job_list_table_partial' %}";
             GTS.urls.calendarList = "{% url 'rental_scheduler:calendar_list' %}";
             GTS.urls.calendar = "{% url 'rental_scheduler:calendar' %}";
-            GTS.urls.workOrderNewBase = "{% url 'rental_scheduler:workorder_new' %}";
 
             // Job partial routes
             GTS.urls.jobCreatePartialBase = "{% url 'rental_scheduler:job_create_partial' %}";
@@ -181,18 +183,10 @@
             GTS.urls.jobCallReminderUpdateTemplate = "{% url 'rental_scheduler:job_call_reminder_update' job_id=0 %}".replace('/0/', '/{job_id}/');
             GTS.urls.markCallReminderCompleteTemplate = "{% url 'rental_scheduler:mark_call_reminder_complete' job_id=0 %}".replace('/0/', '/{job_id}/');
 
-            // Work Order (v2) routes (templates with {pk} placeholder)
-            GTS.urls.workOrderEditTemplate = "{% url 'rental_scheduler:workorder_edit' pk=0 %}".replace('/0/', '/{pk}/');
-            GTS.urls.workOrderPdfTemplate = "{% url 'rental_scheduler:workorder_pdf' pk=0 %}".replace('/0/', '/{pk}/');
-
-            // Accounting-backed API routes
-            GTS.urls.accountingCustomerSearch = "{% url 'rental_scheduler:accounting_customers_search' %}";
-            GTS.urls.accountingCustomerCreate = "{% url 'rental_scheduler:accounting_customers_create' %}";
-            GTS.urls.accountingCustomerUpdateTemplate = "{% url 'rental_scheduler:accounting_customers_update' orgid=0 %}".replace('/0/', '/{orgid}/');
-            GTS.urls.accountingItemSearch = "{% url 'rental_scheduler:accounting_items_search' %}";
-            GTS.urls.workOrderCustomerTaxRate = "{% url 'rental_scheduler:work_order_customer_tax_rate' %}";
-            GTS.urls.workOrderComputeTotals = "{% url 'rental_scheduler:work_order_compute_totals' %}";
-            GTS.urls.salesReps = "{% url 'rental_scheduler:api_sales_reps' %}";
+            // Print URLs (templates with {job_id} placeholder)
+            GTS.urls.jobPrintWoTemplate = "{% url 'rental_scheduler:job_print_wo' pk=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.jobPrintWoCustomerTemplate = "{% url 'rental_scheduler:job_print_wo_customer' pk=0 %}".replace('/0/', '/{job_id}/');
+            GTS.urls.jobPrintInvoiceTemplate = "{% url 'rental_scheduler:job_print_invoice' pk=0 %}".replace('/0/', '/{job_id}/');
 
             // Calendar data API
             GTS.urls.calendarEvents = "{% url 'rental_scheduler:job_calendar_data' %}";
@@ -310,11 +304,6 @@
         });
         </script>
 
-        {% comment %}
-        Job Panel + Workspace Bar are excluded on Work Order v2 pages to prevent
-        the floating panel and bottom bar from appearing on those dedicated pages.
-        {% endcomment %}
-        {% if request.resolver_match.url_name != 'workorder_new' and request.resolver_match.url_name != 'workorder_edit' %}
         <!-- Job Panel -->
 {% include "rental_scheduler/includes/panel.html" %}
         <script src="{% static 'rental_scheduler/js/panel.js' %}"></script>
@@ -325,7 +314,6 @@
         <!-- Job Workspace Bar -->
 {% include "rental_scheduler/includes/workspace_bar.html" %}
         <script src="{% static 'rental_scheduler/js/workspace.js' %}"></script>
-        {% endif %}
 
         <!-- Custom JS -->
         {% block extra_js %}
